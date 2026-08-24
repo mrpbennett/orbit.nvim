@@ -479,12 +479,33 @@ local function configure_sidebar(state)
   end, { buffer = state.sidebar, silent = true, nowait = true, desc = "Close Orbit workspace" })
 end
 
-function M.open(config)
+local function toggle_sidebar(state)
+  if vim.api.nvim_win_is_valid(state.sidebar_window) then
+    vim.api.nvim_win_close(state.sidebar_window, false)
+    return
+  end
+
+  vim.api.nvim_set_current_win(ensure_query_window(state))
+  vim.cmd("topleft vsplit")
+  state.sidebar_window = vim.api.nvim_get_current_win()
+  vim.api.nvim_win_set_buf(state.sidebar_window, state.sidebar)
+  vim.api.nvim_win_set_width(state.sidebar_window, state.config.workspace_sidebar_width or 32)
+end
+
+local function existing_workspace()
   for tabpage, state in pairs(workspaces) do
     if vim.api.nvim_tabpage_is_valid(tabpage) then
       vim.api.nvim_set_current_tabpage(tabpage)
       return state
     end
+  end
+end
+
+function M.open(config)
+  local state = existing_workspace()
+  if state then
+    toggle_sidebar(state)
+    return state
   end
 
   vim.cmd("tabnew")
@@ -577,7 +598,7 @@ function M.focus_filter()
 end
 
 function M.select_profile(config, buffer, on_select)
-  local state = M.open(config)
+  local state = existing_workspace() or M.open(config)
   local document = reload_profiles(state)
   if document then
     render(state)

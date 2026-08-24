@@ -108,7 +108,7 @@ Orbit passes profile values to the CLI as literal arguments. It does **not** exp
 
 ## Workspace Workflow
 
-`:OrbitWorkspace` opens a dedicated Orbit tabpage with a profile/schema sidebar and a normal SQL editing window. Run it again to focus the existing workspace. `:OrbitWorkspaceClose` closes only that tabpage.
+`:OrbitWorkspace` opens a dedicated Orbit tabpage with a profile/schema browser and a normal SQL editing window. Run it again to toggle that browser. `:OrbitWorkspaceClose` closes only that tabpage.
 
 1. Press `<CR>` on a profile to select it and bind it to the active query buffer.
 2. Optionally press `l` to load its schema for browsing and completion.
@@ -131,7 +131,7 @@ From a workspace query buffer, `/` focuses the workspace filter. Elsewhere, `/` 
 | `:OrbitCancel` | Cancel the statement running in the current buffer. |
 | `:OrbitBrowse [profile]` | Open the standalone schema browser for a profile or the buffer's profile. |
 | `:OrbitBrowse! [profile]` | Open the schema browser and focus its filter. In a workspace, focus the workspace filter. |
-| `:OrbitWorkspace` | Open or focus the Orbit workspace. |
+| `:OrbitWorkspace` | Open the workspace or toggle its profile/schema browser. |
 | `:OrbitWorkspaceClose` | Close the Orbit workspace tabpage. |
 
 Whole-buffer execution rejects ambiguous multi-statement content. Select the exact statement in Visual mode, then run `:OrbitExecute` or `<leader>E`.
@@ -144,7 +144,7 @@ Orbit installs the following defaults:
 
 | Mode and scope | Mapping | Action |
 | --- | --- | --- |
-| Normal, global | `<leader>D` | Open the workspace. |
+| Normal, global | `<leader>D` | Open the workspace or toggle its profile/schema browser. |
 | Normal, SQL buffer | `<leader>E` | Execute the buffer statement. |
 | Visual, SQL buffer | `<leader>E` | Execute the visual selection. |
 | Normal, SQL buffer | `<leader>P` | Select a connection profile. |

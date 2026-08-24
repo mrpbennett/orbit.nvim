@@ -11,7 +11,7 @@ local function line_number(buffer, text)
 end
 
 return {
-  ["workspace.open creates and reuses a dedicated tabpage"] = function()
+  ["workspace.open creates a dedicated tabpage"] = function()
     local original = vim.api.nvim_get_current_tabpage()
     local state = workspace.open({ profile_path = vim.fn.tempname() })
 
@@ -25,8 +25,21 @@ return {
       assert(vim.fn.maparg("/", "n") ~= "")
     end)
 
-    local reused = workspace.open({ profile_path = vim.fn.tempname() })
-    assert(reused.tabpage == state.tabpage)
+    workspace.close()
+    vim.api.nvim_set_current_tabpage(original)
+  end,
+
+  ["workspace.open toggles the profile and schema browser"] = function()
+    local original = vim.api.nvim_get_current_tabpage()
+    local state = workspace.open({ profile_path = vim.fn.tempname() })
+
+    workspace.open({ profile_path = vim.fn.tempname() })
+    assert(not vim.api.nvim_win_is_valid(state.sidebar_window))
+    assert(vim.api.nvim_win_is_valid(state.query_window))
+
+    workspace.open({ profile_path = vim.fn.tempname() })
+    assert(vim.api.nvim_win_is_valid(state.sidebar_window))
+    assert(vim.api.nvim_win_get_buf(state.sidebar_window) == state.sidebar)
 
     workspace.close()
     vim.api.nvim_set_current_tabpage(original)
