@@ -1,5 +1,5 @@
-local adapters = require("quarry.adapters")
-local runner = require("quarry.runner")
+local adapters = require("orbit.adapters")
+local runner = require("orbit.runner")
 
 local M = {}
 local profiles = {}

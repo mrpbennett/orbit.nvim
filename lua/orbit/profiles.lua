@@ -1,6 +1,6 @@
 local uv = vim.uv
 local bit = bit
-local adapters = require("quarry.adapters")
+local adapters = require("orbit.adapters")
 
 local M = {}
 
@@ -98,7 +98,7 @@ local function validate_document(document)
 end
 
 function M.default_path()
-  return vim.fn.expand("~/.local/share/quarry.nvim/profiles.json")
+  return vim.fn.expand("~/.local/share/orbit.nvim/profiles.json")
 end
 
 function M.load(path)

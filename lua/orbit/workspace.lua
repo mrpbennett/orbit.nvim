@@ -1,8 +1,8 @@
-local profiles = require("quarry.profiles")
-local schema = require("quarry.schema")
-local cache = require("quarry.schema_cache")
-local feedback = require("quarry.feedback")
-local results = require("quarry.results")
+local profiles = require("orbit.profiles")
+local schema = require("orbit.schema")
+local cache = require("orbit.schema_cache")
+local feedback = require("orbit.feedback")
+local results = require("orbit.results")
 
 local M = {}
 local workspaces = {}
@@ -95,11 +95,11 @@ local function render(state)
   local lines = {
     "press ? to toggle help",
     "Filter: " .. state.filter,
-    icons.workspace .. " Quarry Workspace",
+    icons.workspace .. " Orbit Workspace",
     "",
     "Profiles:",
   }
-  local highlights = { { group = "QuarryHeader", line = 2 } }
+  local highlights = { { group = "OrbitHeader", line = 2 } }
   state.nodes = {}
   for _, profile in ipairs(state.profiles) do
     local expanded = state.schema_profile == profile.name
@@ -108,7 +108,7 @@ local function render(state)
     if profile_matches or (expanded and #groups > 0) then
       table.insert(lines, string.format("  %s %s %s (%s)", expanded and icons.expanded or icons.collapsed, icons.profile, profile.name, profile.kind))
       state.nodes[#lines] = { kind = "profile", profile = profile }
-      table.insert(highlights, { group = "QuarryProfile", line = #lines })
+      table.insert(highlights, { group = "OrbitProfile", line = #lines })
     end
     if expanded and (profile_matches or #groups > 0) then
       if state.loading then
@@ -133,11 +133,11 @@ local function render(state)
                 local object_kind = row.type == "view" and "view" or "table"
                 table.insert(lines, string.format("          %s %s %s", columns and icons.expanded or icons.collapsed, icons[object_kind], row.name))
                 state.nodes[#lines] = { kind = "table", row = row }
-                table.insert(highlights, { group = object_kind == "view" and "QuarryView" or "QuarryTable", line = #lines })
+                table.insert(highlights, { group = object_kind == "view" and "OrbitView" or "OrbitTable", line = #lines })
                 if columns then
                   for _, column in ipairs(columns) do
                     table.insert(lines, string.format("              %s %s  %s", icons.column, column.name, column.type or ""))
-                    table.insert(highlights, { group = "QuarryColumn", line = #lines })
+                    table.insert(highlights, { group = "OrbitColumn", line = #lines })
                   end
                 end
               end
@@ -193,7 +193,7 @@ local function ensure_query_window(state)
   end
   for _, window in ipairs(vim.api.nvim_tabpage_list_wins(state.tabpage)) do
     local buffer = vim.api.nvim_win_get_buf(window)
-    if window ~= state.sidebar_window and vim.bo[buffer].filetype ~= "quarry-results" then
+    if window ~= state.sidebar_window and vim.bo[buffer].filetype ~= "orbit-results" then
       state.query_window = window
       return window
     end
@@ -290,30 +290,30 @@ end
 
 local function new_query(state)
   if not state.selected then
-    vim.notify("Expand a Quarry profile before creating a query", vim.log.levels.WARN)
+    vim.notify("Expand an Orbit profile before creating a query", vim.log.levels.WARN)
     return
   end
   vim.api.nvim_set_current_win(ensure_query_window(state))
   vim.cmd("new")
   vim.bo.filetype = "sql"
-  require("quarry.query").bind_profile(0, state.selected)
-  vim.b.quarry_workspace_tab = state.tabpage
+  require("orbit.query").bind_profile(0, state.selected)
+  vim.b.orbit_workspace_tab = state.tabpage
   vim.keymap.set("n", "/", function()
     M.focus_filter()
-  end, { buffer = 0, silent = true, nowait = true, desc = "Filter Quarry workspace" })
+  end, { buffer = 0, silent = true, nowait = true, desc = "Filter Orbit workspace" })
 end
 
 local function configure_query_buffer(state, buffer)
-  vim.b[buffer].quarry_workspace_tab = state.tabpage
-  require("quarry.completion").attach(buffer)
+  vim.b[buffer].orbit_workspace_tab = state.tabpage
+  require("orbit.completion").attach(buffer)
   vim.keymap.set("n", "/", function()
     M.focus_filter()
-  end, { buffer = buffer, silent = true, nowait = true, desc = "Filter Quarry workspace" })
+  end, { buffer = buffer, silent = true, nowait = true, desc = "Filter Orbit workspace" })
 end
 
 local function open_saved_query(state, node)
   if not state.selected then
-    vim.notify("Expand a Quarry profile before opening a saved query", vim.log.levels.WARN)
+    vim.notify("Expand an Orbit profile before opening a saved query", vim.log.levels.WARN)
     return
   end
   vim.api.nvim_set_current_win(ensure_query_window(state))
@@ -321,7 +321,7 @@ local function open_saved_query(state, node)
   local buffer = vim.api.nvim_get_current_buf()
   vim.bo[buffer].filetype = "sql"
   configure_query_buffer(state, buffer)
-  require("quarry.query").bind_profile(buffer, state.selected)
+  require("orbit.query").bind_profile(buffer, state.selected)
 end
 
 local function focus_filter(state)
@@ -335,7 +335,7 @@ end
 local function show_help(state)
   local buffer = vim.api.nvim_create_buf(false, true)
   vim.api.nvim_buf_set_lines(buffer, 0, -1, false, {
-    "Quarry Workspace",
+    "Orbit Workspace",
     "",
     "Sidebar: <CR> bind/open, l expand, h collapse, n new query, r refresh, / filter, q close",
     "Results: h/j/k/l cells, y copy, <CR> inspect, <C-d>/<C-u> page",
@@ -349,14 +349,14 @@ local function show_help(state)
     relative = "editor",
     row = math.floor((vim.o.lines - 7) / 2),
     style = "minimal",
-    title = " Quarry Help ",
+    title = " Orbit Help ",
     title_pos = "center",
     width = 72,
   })
   for _, key in ipairs({ "q", "?", "<Esc>" }) do
     vim.keymap.set("n", key, function()
       vim.api.nvim_win_close(window, true)
-    end, { buffer = buffer, silent = true, nowait = true, desc = "Close Quarry help" })
+    end, { buffer = buffer, silent = true, nowait = true, desc = "Close Orbit help" })
   end
 end
 
@@ -375,14 +375,17 @@ local function configure_sidebar(state)
   })
   vim.keymap.set("n", "/", function()
     focus_filter(state)
-  end, { buffer = state.sidebar, silent = true, nowait = true, desc = "Filter Quarry workspace" })
+  end, { buffer = state.sidebar, silent = true, nowait = true, desc = "Filter Orbit workspace" })
   vim.keymap.set("i", "<Esc>", function()
     state.filtering = false
     vim.bo[state.sidebar].modifiable = false
     return "<Esc>"
-  end, { buffer = state.sidebar, expr = true, silent = true, desc = "Finish Quarry filter" })
-  vim.keymap.set("n", "h", function()
-    local node = state.nodes[vim.api.nvim_win_get_cursor(state.sidebar_window)[1]]
+  end, { buffer = state.sidebar, expr = true, silent = true, desc = "Finish Orbit filter" })
+  local function current_node()
+    return state.nodes[vim.api.nvim_win_get_cursor(state.sidebar_window)[1]]
+  end
+  local function collapse_current()
+    local node = current_node()
     if node and node.kind == "profile" and state.schema_profile == node.profile.name then
       state.schema_profile = nil
       state.tables = {}
@@ -403,10 +406,10 @@ local function configure_sidebar(state)
       state.expanded_saved_dirs[node.path] = nil
       render(state)
     end
-  end, { buffer = state.sidebar, silent = true, nowait = true, desc = "Collapse Quarry node" })
-  local function expand()
-    local node = state.nodes[vim.api.nvim_win_get_cursor(state.sidebar_window)[1]]
-    if node and node.kind == "profile" and (not state.selected or state.selected.name ~= node.profile.name) then
+  end
+  local function expand_current()
+    local node = current_node()
+    if node and node.kind == "profile" and state.schema_profile ~= node.profile.name then
       load_schema(state, node.profile)
     elseif node and node.kind == "schema" and not state.expanded_schemas[node.name] then
       state.expanded_schemas[node.name] = true
@@ -421,13 +424,12 @@ local function configure_sidebar(state)
       render(state)
     end
   end
-  vim.keymap.set("n", "l", expand, { buffer = state.sidebar, silent = true, nowait = true, desc = "Expand Quarry node" })
-  vim.keymap.set("n", "<CR>", function()
-    local node = state.nodes[vim.api.nvim_win_get_cursor(state.sidebar_window)[1]]
+  local function activate_current()
+    local node = current_node()
     if node and node.kind == "profile" then
       state.selected = node.profile
       local target = state.binding_target or vim.api.nvim_win_get_buf(ensure_query_window(state))
-      require("quarry.query").bind_profile(target, node.profile)
+      require("orbit.query").bind_profile(target, node.profile)
       local callback = state.binding_callback
       state.binding_target = nil
       state.binding_callback = nil
@@ -437,9 +439,22 @@ local function configure_sidebar(state)
     elseif node and node.kind == "saved_query" then
       open_saved_query(state, node)
     end
-  end, { buffer = state.sidebar, silent = true, nowait = true, desc = "Bind Quarry profile" })
+  end
+  vim.keymap.set("n", "h", collapse_current, { buffer = state.sidebar, silent = true, nowait = true, desc = "Collapse Orbit node" })
+  vim.keymap.set("n", "l", expand_current, { buffer = state.sidebar, silent = true, nowait = true, desc = "Expand Orbit node" })
+  vim.keymap.set("n", "<CR>", activate_current, { buffer = state.sidebar, silent = true, nowait = true, desc = "Bind Orbit profile" })
+  vim.keymap.set("n", "<2-LeftMouse>", function()
+    local position = vim.fn.getmousepos()
+    if position.winid == state.sidebar_window and position.line > 0 then
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { position.line, 0 })
+      activate_current()
+      if current_node() and current_node().kind == "profile" then
+        expand_current()
+      end
+    end
+  end, { buffer = state.sidebar, silent = true, nowait = true, desc = "Activate Orbit node" })
   vim.keymap.set("n", "r", function()
-    local node = state.nodes[vim.api.nvim_win_get_cursor(state.sidebar_window)[1]]
+    local node = current_node()
     if node and node.kind == "profile" then
       local document = reload_profiles(state)
       local profile = document and profiles.find(document, node.profile.name)
@@ -452,16 +467,16 @@ local function configure_sidebar(state)
       state.saved_queries = discover_saved_queries(state.saved_query_dir)
       render(state)
     end
-  end, { buffer = state.sidebar, silent = true, nowait = true, desc = "Refresh Quarry profile" })
+  end, { buffer = state.sidebar, silent = true, nowait = true, desc = "Refresh Orbit profile" })
   vim.keymap.set("n", "n", function()
     new_query(state)
-  end, { buffer = state.sidebar, silent = true, nowait = true, desc = "New Quarry query" })
+  end, { buffer = state.sidebar, silent = true, nowait = true, desc = "New Orbit query" })
   vim.keymap.set("n", "?", function()
     show_help(state)
-  end, { buffer = state.sidebar, silent = true, nowait = true, desc = "Show Quarry help" })
+  end, { buffer = state.sidebar, silent = true, nowait = true, desc = "Show Orbit help" })
   vim.keymap.set("n", "q", function()
     M.close(state.tabpage)
-  end, { buffer = state.sidebar, silent = true, nowait = true, desc = "Close Quarry workspace" })
+  end, { buffer = state.sidebar, silent = true, nowait = true, desc = "Close Orbit workspace" })
 end
 
 function M.open(config)
@@ -481,7 +496,7 @@ function M.open(config)
   local sidebar_window = vim.api.nvim_get_current_win()
   vim.api.nvim_win_set_buf(sidebar_window, sidebar)
   vim.api.nvim_win_set_width(sidebar_window, config.workspace_sidebar_width or 32)
-  vim.bo[sidebar].filetype = "quarry-workspace"
+  vim.bo[sidebar].filetype = "orbit-workspace"
   vim.api.nvim_set_current_win(query_window)
 
   local document = profiles.load(config.profile_path)
@@ -519,7 +534,7 @@ function M.open(config)
   configure_sidebar(state)
   render(state)
   if not document then
-    vim.notify("Quarry workspace opened without profiles", vim.log.levels.WARN)
+    vim.notify("Orbit workspace opened without profiles", vim.log.levels.WARN)
   end
   return state
 end

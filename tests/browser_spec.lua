@@ -1,6 +1,6 @@
-local browser = require("quarry.browser")
-local profiles = require("quarry.profiles")
-local runner = require("quarry.runner")
+local browser = require("orbit.browser")
+local profiles = require("orbit.profiles")
+local runner = require("orbit.runner")
 
 return {
   ["schema browser expands the table under the cursor"] = function()
@@ -8,7 +8,7 @@ return {
     local path = vim.fn.tempname()
     assert(profiles.write(path, {
       version = 1,
-      profiles = { { name = "local", kind = "sqlite", options = { path = "/tmp/quarry-browser.db" } } },
+      profiles = { { name = "local", kind = "sqlite", options = { path = "/tmp/orbit-browser.db" } } },
     }))
     runner.run = function(_, statement, callback)
       if statement:match("sqlite_master") then

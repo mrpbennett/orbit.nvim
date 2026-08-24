@@ -1,4 +1,4 @@
-local feedback = require("quarry.feedback")
+local feedback = require("orbit.feedback")
 
 return {
   ["feedback keeps progress out of notifications"] = function()

@@ -1,5 +1,5 @@
-local cache = require("quarry.schema_cache")
-local completion = require("quarry.completion")
+local cache = require("orbit.schema_cache")
+local completion = require("orbit.completion")
 
 local function words(items)
   local result = {}

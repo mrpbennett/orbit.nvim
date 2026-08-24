@@ -1,6 +1,6 @@
-local results = require("quarry.results")
-local workspace = require("quarry.workspace")
-local grid = require("quarry.grid")
+local results = require("orbit.results")
+local workspace = require("orbit.workspace")
+local grid = require("orbit.grid")
 
 local function assert_equal(actual, expected)
   assert(vim.deep_equal(actual, expected), vim.inspect(actual) .. " ~= " .. vim.inspect(expected))
@@ -29,11 +29,11 @@ return {
   end,
 
   ["result grid geometry maps and moves logical cells"] = function()
-    local model = grid.render({ { id = 1, name = "Quarry" }, { id = 22, name = "Q" } })
+    local model = grid.render({ { id = 1, name = "Orbit" }, { id = 22, name = "Q" } })
     local lines, widths = grid.layout(model, "local")
 
-    assert(lines[2] == "| id | name   |")
-    assert(vim.deep_equal(widths, { 2, 6 }))
+    assert(lines[2] == "| id | name  |")
+    assert(vim.deep_equal(widths, { 2, 5 }))
     assert(vim.deep_equal(grid.cell_at(model, widths, 4, 2), { row = 1, column = 1 }))
     assert(vim.deep_equal(grid.move(model, widths, { row = 1, column = 1 }, 1, 1), { row = 2, column = 2 }))
     assert(vim.deep_equal(grid.cursor_for(widths, { row = 2, column = 2 }), { 5, 7 }))
@@ -49,7 +49,7 @@ return {
   end,
 
   ["results.open keeps column headers in the result grid"] = function()
-    local opened = results.open({ { account_id = 1, account_name = "Quarry" } }, { height = 3 })
+    local opened = results.open({ { account_id = 1, account_name = "Orbit" } }, { height = 3 })
 
     assert(vim.wo[opened.window].winbar == "")
     assert(vim.api.nvim_buf_get_lines(opened.buffer, 1, 2, false)[1]:match("account_id"))

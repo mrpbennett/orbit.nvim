@@ -1,10 +1,10 @@
-local quarry = require("quarry")
+local orbit = require("orbit")
 
 return {
-  ["quarry.status identifies the active query profile"] = function()
+  ["orbit.status identifies the active query profile"] = function()
     local buffer = vim.api.nvim_create_buf(false, true)
-    vim.b[buffer].quarry_profile = "analytics"
+    vim.b[buffer].orbit_profile = "analytics"
 
-    assert(quarry.status(buffer) == "Quarry: analytics")
+    assert(orbit.status(buffer) == "Orbit: analytics")
   end,
 }

@@ -66,7 +66,7 @@ end
 
 function M.layout(grid, source)
   if #grid.columns == 0 then
-    return { "Quarry Results: " .. source, "No rows returned.", "q close  y copy  <CR> inspect" }, {}
+    return { "Orbit Results: " .. source, "No rows returned.", "q close  y copy  <CR> inspect" }, {}
   end
 
   local widths = {}
@@ -92,7 +92,7 @@ function M.layout(grid, source)
     separator[index] = string.rep("-", width)
   end
   local lines = {
-    "Quarry Results: " .. source,
+    "Orbit Results: " .. source,
     row_line(grid.columns),
     "|-" .. table.concat(separator, "-|-") .. "-|",
   }

@@ -1,7 +1,7 @@
-local profiles = require("quarry.profiles")
-local schema = require("quarry.schema")
-local cache = require("quarry.schema_cache")
-local feedback = require("quarry.feedback")
+local profiles = require("orbit.profiles")
+local schema = require("orbit.schema")
+local cache = require("orbit.schema_cache")
+local feedback = require("orbit.feedback")
 
 local M = {}
 local tab_browsers = {}
@@ -54,7 +54,7 @@ local function render(state)
     end
   end
   set_lines(state, vim.list_slice(lines, 2, #lines))
-  vim.api.nvim_buf_add_highlight(state.buffer, -1, "QuarryHeader", 1, 0, -1)
+  vim.api.nvim_buf_add_highlight(state.buffer, -1, "OrbitHeader", 1, 0, -1)
 end
 
 local function refresh(state, force)
@@ -89,7 +89,7 @@ local function refresh_profile(state)
   end
   local profile = profiles.find(document, state.profile.name)
   if not profile then
-    vim.notify("Unknown Quarry profile: " .. state.profile.name, vim.log.levels.ERROR)
+    vim.notify("Unknown Orbit profile: " .. state.profile.name, vim.log.levels.ERROR)
     return
   end
   state.profile = profile
@@ -131,8 +131,8 @@ local function sample_statement(state, row)
   end
   vim.cmd("new")
   vim.bo.filetype = "sql"
-  vim.b.quarry_profile = state.profile.name
-  require("quarry.completion").attach(0)
+  vim.b.orbit_profile = state.profile.name
+  require("orbit.completion").attach(0)
   vim.api.nvim_buf_set_lines(0, 0, -1, false, {
     "SELECT *",
     "FROM " .. quoted,
@@ -146,7 +146,7 @@ local function copy_name(state, row)
     name = table.concat({ state.profile.options.catalog, row.schema or state.profile.options.schema, row.name }, ".")
   end
   vim.fn.setreg('"', name)
-  vim.notify("Quarry name copied")
+  vim.notify("Orbit name copied")
 end
 
 local function focus_filter(state)
@@ -160,7 +160,7 @@ end
 local function show_help()
   local buffer = vim.api.nvim_create_buf(false, true)
   vim.api.nvim_buf_set_lines(buffer, 0, -1, false, {
-    "Quarry Schema Browser",
+    "Orbit Schema Browser",
     "",
     "h/l collapse/expand  <CR> expand  s sample statement  y copy name",
     "r refresh  / filter  q close",
@@ -173,20 +173,20 @@ local function show_help()
     relative = "editor",
     row = math.floor((vim.o.lines - 6) / 2),
     style = "minimal",
-    title = " Quarry Help ",
+    title = " Orbit Help ",
     title_pos = "center",
     width = 72,
   })
   for _, key in ipairs({ "q", "?", "<Esc>" }) do
     vim.keymap.set("n", key, function()
       vim.api.nvim_win_close(window, true)
-    end, { buffer = buffer, silent = true, nowait = true, desc = "Close Quarry help" })
+    end, { buffer = buffer, silent = true, nowait = true, desc = "Close Orbit help" })
   end
 end
 
 local function create_browser(profile, config)
   local buffer = vim.api.nvim_create_buf(false, true)
-  vim.bo[buffer].filetype = "quarry-schema"
+  vim.bo[buffer].filetype = "orbit-schema"
   vim.cmd("topleft vsplit")
   local window = vim.api.nvim_get_current_win()
   vim.api.nvim_win_set_buf(window, buffer)
@@ -222,46 +222,46 @@ local function create_browser(profile, config)
   })
   vim.keymap.set("n", "/", function()
     focus_filter(state)
-  end, { buffer = buffer, silent = true, nowait = true, desc = "Filter Quarry schema" })
+  end, { buffer = buffer, silent = true, nowait = true, desc = "Filter Orbit schema" })
   vim.keymap.set("i", "<Esc>", function()
     state.filtering = false
     vim.bo[buffer].modifiable = false
     return "<Esc>"
-  end, { buffer = buffer, expr = true, silent = true, desc = "Finish Quarry filter" })
+  end, { buffer = buffer, expr = true, silent = true, desc = "Finish Orbit filter" })
   vim.keymap.set("n", "r", function()
     refresh_profile(state)
-  end, { buffer = buffer, silent = true, nowait = true, desc = "Refresh Quarry schema" })
+  end, { buffer = buffer, silent = true, nowait = true, desc = "Refresh Orbit schema" })
   vim.keymap.set("n", "h", function()
     local row = state.rows_by_line[vim.api.nvim_win_get_cursor(window)[1]]
     if row and state.expanded[object_name(row)] then
       toggle_columns(state, row)
     end
-  end, { buffer = buffer, silent = true, nowait = true, desc = "Collapse Quarry columns" })
+  end, { buffer = buffer, silent = true, nowait = true, desc = "Collapse Orbit columns" })
   local function expand_current_row()
     local row = state.rows_by_line[vim.api.nvim_win_get_cursor(window)[1]]
     if row and not state.expanded[object_name(row)] then
       toggle_columns(state, row)
     end
   end
-  vim.keymap.set("n", "l", expand_current_row, { buffer = buffer, silent = true, nowait = true, desc = "Expand Quarry columns" })
-  vim.keymap.set("n", "<CR>", expand_current_row, { buffer = buffer, silent = true, nowait = true, desc = "Expand Quarry columns" })
+  vim.keymap.set("n", "l", expand_current_row, { buffer = buffer, silent = true, nowait = true, desc = "Expand Orbit columns" })
+  vim.keymap.set("n", "<CR>", expand_current_row, { buffer = buffer, silent = true, nowait = true, desc = "Expand Orbit columns" })
   vim.keymap.set("n", "s", function()
     local row = state.rows_by_line[vim.api.nvim_win_get_cursor(window)[1]]
     if row then
       sample_statement(state, row)
     end
-  end, { buffer = buffer, silent = true, nowait = true, desc = "Open Quarry sample statement" })
+  end, { buffer = buffer, silent = true, nowait = true, desc = "Open Orbit sample statement" })
   vim.keymap.set("n", "y", function()
     local row = state.rows_by_line[vim.api.nvim_win_get_cursor(window)[1]]
     if row then
       copy_name(state, row)
     end
-  end, { buffer = buffer, silent = true, nowait = true, desc = "Copy Quarry object name" })
+  end, { buffer = buffer, silent = true, nowait = true, desc = "Copy Orbit object name" })
   vim.keymap.set("n", "q", function()
     vim.api.nvim_win_close(window, true)
     tab_browsers[tabpage] = nil
-  end, { buffer = buffer, silent = true, nowait = true, desc = "Close Quarry schema" })
-  vim.keymap.set("n", "?", show_help, { buffer = buffer, silent = true, nowait = true, desc = "Show Quarry help" })
+  end, { buffer = buffer, silent = true, nowait = true, desc = "Close Orbit schema" })
+  vim.keymap.set("n", "?", show_help, { buffer = buffer, silent = true, nowait = true, desc = "Show Orbit help" })
   state.rendering = true
   vim.bo[buffer].modifiable = true
   vim.api.nvim_buf_set_lines(buffer, 0, -1, false, { "Filter: " })
@@ -276,10 +276,10 @@ function M.open(config, name, buffer, search)
     vim.notify(load_err, vim.log.levels.ERROR)
     return
   end
-  name = name or vim.b[buffer or vim.api.nvim_get_current_buf()].quarry_profile or config.default_profile
+  name = name or vim.b[buffer or vim.api.nvim_get_current_buf()].orbit_profile or config.default_profile
   if not name then
     vim.ui.select(document.profiles, {
-      prompt = "Browse Quarry profile",
+      prompt = "Browse Orbit profile",
       format_item = function(profile)
         return profile.name .. " (" .. profile.kind .. ")"
       end,
@@ -293,7 +293,7 @@ function M.open(config, name, buffer, search)
 
   local profile = profiles.find(document, name)
   if not profile then
-    vim.notify("Unknown Quarry profile: " .. name, vim.log.levels.ERROR)
+    vim.notify("Unknown Orbit profile: " .. name, vim.log.levels.ERROR)
     return
   end
   local tabpage = vim.api.nvim_get_current_tabpage()

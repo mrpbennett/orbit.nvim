@@ -1,4 +1,4 @@
-local grid_model = require("quarry.grid")
+local grid_model = require("orbit.grid")
 
 local M = {}
 local tab_results = {}
@@ -42,17 +42,17 @@ local function inspect(value)
     relative = "editor",
     row = math.floor((vim.o.lines - height) / 2),
     style = "minimal",
-    title = " Quarry Value ",
+    title = " Orbit Value ",
     title_pos = "center",
     width = width,
   })
   vim.keymap.set("n", "q", function()
     vim.api.nvim_win_close(window, true)
-  end, { buffer = buffer, silent = true, nowait = true, desc = "Close Quarry value" })
+  end, { buffer = buffer, silent = true, nowait = true, desc = "Close Orbit value" })
   vim.keymap.set("n", "y", function()
     vim.fn.setreg('"', contents)
-    vim.notify("Quarry value copied")
-  end, { buffer = buffer, silent = true, nowait = true, desc = "Copy Quarry value" })
+    vim.notify("Orbit value copied")
+  end, { buffer = buffer, silent = true, nowait = true, desc = "Copy Orbit value" })
 end
 
 function M.open(rows, options)
@@ -92,7 +92,7 @@ function M.open(rows, options)
   vim.bo[buffer].modifiable = true
   vim.api.nvim_buf_set_lines(buffer, 0, -1, false, lines)
   vim.bo[buffer].modifiable = false
-  vim.bo[buffer].filetype = "quarry-results"
+  vim.bo[buffer].filetype = "orbit-results"
   vim.api.nvim_win_set_buf(window, buffer)
   if placeholder and vim.api.nvim_buf_is_valid(placeholder) and vim.bo[placeholder].buflisted then
     vim.api.nvim_buf_delete(placeholder, { force = true })
@@ -103,9 +103,9 @@ function M.open(rows, options)
     vim.api.nvim_win_set_cursor(window, { 4, 2 })
   end
   vim.api.nvim_buf_clear_namespace(buffer, -1, 0, -1)
-  vim.api.nvim_buf_add_highlight(buffer, -1, "QuarryHeader", 0, 0, -1)
-  vim.api.nvim_buf_add_highlight(buffer, -1, "QuarryHeader", 1, 0, -1)
-  vim.api.nvim_buf_add_highlight(buffer, -1, "QuarryHint", #lines - 1, 0, -1)
+  vim.api.nvim_buf_add_highlight(buffer, -1, "OrbitHeader", 0, 0, -1)
+  vim.api.nvim_buf_add_highlight(buffer, -1, "OrbitHeader", 1, 0, -1)
+  vim.api.nvim_buf_add_highlight(buffer, -1, "OrbitHint", #lines - 1, 0, -1)
 
   vim.keymap.set("n", "q", function()
     if options.on_quit then
@@ -116,31 +116,31 @@ function M.open(rows, options)
     if tab_results[tabpage] and tab_results[tabpage].window == window then
       tab_results[tabpage] = nil
     end
-  end, { buffer = buffer, silent = true, nowait = true, desc = "Close Quarry results" })
+  end, { buffer = buffer, silent = true, nowait = true, desc = "Close Orbit results" })
   vim.keymap.set("n", "<CR>", function()
     local cell = selected_cell(window, grid, widths)
     inspect(cell and grid.raw_rows[cell.row][cell.column])
-  end, { buffer = buffer, silent = true, nowait = true, desc = "Inspect Quarry value" })
+  end, { buffer = buffer, silent = true, nowait = true, desc = "Inspect Orbit value" })
   vim.keymap.set("n", "y", function()
     local cell = selected_cell(window, grid, widths)
     local value = cell and grid.raw_rows[cell.row][cell.column]
     if value ~= nil then
       vim.fn.setreg('"', grid_model.serialize(value))
-      vim.notify("Quarry value copied")
+      vim.notify("Orbit value copied")
     end
-  end, { buffer = buffer, silent = true, nowait = true, desc = "Copy Quarry value" })
+  end, { buffer = buffer, silent = true, nowait = true, desc = "Copy Orbit value" })
   vim.keymap.set("n", "h", function()
     move_cell(window, grid, widths, 0, -1)
-  end, { buffer = buffer, silent = true, nowait = true, desc = "Move Quarry cell left" })
+  end, { buffer = buffer, silent = true, nowait = true, desc = "Move Orbit cell left" })
   vim.keymap.set("n", "j", function()
     move_cell(window, grid, widths, 1, 0)
-  end, { buffer = buffer, silent = true, nowait = true, desc = "Move Quarry cell down" })
+  end, { buffer = buffer, silent = true, nowait = true, desc = "Move Orbit cell down" })
   vim.keymap.set("n", "k", function()
     move_cell(window, grid, widths, -1, 0)
-  end, { buffer = buffer, silent = true, nowait = true, desc = "Move Quarry cell up" })
+  end, { buffer = buffer, silent = true, nowait = true, desc = "Move Orbit cell up" })
   vim.keymap.set("n", "l", function()
     move_cell(window, grid, widths, 0, 1)
-  end, { buffer = buffer, silent = true, nowait = true, desc = "Move Quarry cell right" })
+  end, { buffer = buffer, silent = true, nowait = true, desc = "Move Orbit cell right" })
 
   if options.focus then
     vim.api.nvim_set_current_win(window)

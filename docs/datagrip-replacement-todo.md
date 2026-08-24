@@ -6,10 +6,10 @@ This backlog prioritizes a fast, native Neovim database workspace over exhaustiv
 
 - [ ] Choose the next connection profile kind based on the database used most often.
 - [ ] Replace the fixed connector map with a connector registry and explicit capabilities.
-- [ ] Add a connection-profile health check and `:QuarryTestProfile` command.
+- [ ] Add a connection-profile health check and `:OrbitTestProfile` command.
 - [ ] Introduce a runner session abstraction while retaining one-shot CLI execution where appropriate.
 - [ ] Add per-query-buffer persistent sessions for supported connection profile kinds.
-- [ ] Add `:QuarryBegin`, `:QuarryCommit`, and `:QuarryRollback`.
+- [ ] Add `:OrbitBegin`, `:OrbitCommit`, and `:OrbitRollback`.
 - [ ] Show transaction state, running state, elapsed time, and active profile in status output.
 
 ## Statement Execution

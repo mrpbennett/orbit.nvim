@@ -1,4 +1,4 @@
-local statements = require("quarry.statements")
+local statements = require("orbit.statements")
 
 return {
   ["statements.target prefers an explicit selection"] = function()

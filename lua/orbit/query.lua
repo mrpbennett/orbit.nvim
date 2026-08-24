@@ -1,9 +1,9 @@
-local profiles = require("quarry.profiles")
-local diagnostics = require("quarry.diagnostics")
-local feedback = require("quarry.feedback")
-local results = require("quarry.results")
-local runner = require("quarry.runner")
-local statements = require("quarry.statements")
+local profiles = require("orbit.profiles")
+local diagnostics = require("orbit.diagnostics")
+local feedback = require("orbit.feedback")
+local results = require("orbit.results")
+local runner = require("orbit.runner")
+local statements = require("orbit.statements")
 
 local M = {}
 local running = {}
@@ -49,7 +49,7 @@ function M.profile_for_buffer(buffer, config)
   if not document then
     return nil, load_err
   end
-  local name = vim.b[buffer].quarry_profile
+  local name = vim.b[buffer].orbit_profile
   if not name then
     return nil, "select a connection profile first"
   end
@@ -61,14 +61,14 @@ function M.profile_for_buffer(buffer, config)
 end
 
 function M.select_profile(buffer, config, on_select)
-  require("quarry.workspace").select_profile(config, buffer, on_select)
+  require("orbit.workspace").select_profile(config, buffer, on_select)
 end
 
 function M.bind_profile(buffer, profile)
-  vim.b[buffer].quarry_profile = profile.name
-  require("quarry.completion").attach(buffer)
-  require("quarry.completion").prewarm(profile)
-  vim.notify("Quarry profile: " .. profile.name)
+  vim.b[buffer].orbit_profile = profile.name
+  require("orbit.completion").attach(buffer)
+  require("orbit.completion").prewarm(profile)
+  vim.notify("Orbit profile: " .. profile.name)
 end
 
 function M.execute(buffer, config, selection)
@@ -98,7 +98,7 @@ function M.execute(buffer, config, selection)
   end
 
   if running[buffer] then
-    vim.notify("A Quarry statement is already running in this buffer", vim.log.levels.WARN)
+    vim.notify("An Orbit statement is already running in this buffer", vim.log.levels.WARN)
     return
   end
 
@@ -145,7 +145,7 @@ function M.execute(buffer, config, selection)
       tabpage = state.tabpage,
       elapsed = math.floor((vim.uv.hrtime() - state.started_at) / 1000000000),
     }
-    local workspace = require("quarry.workspace")
+    local workspace = require("orbit.workspace")
     if workspace.is_workspace(state.tabpage) then
       workspace.open_results(rows, result_options)
     else
@@ -157,7 +157,7 @@ end
 
 function M.cancel(buffer)
   if not running[buffer] then
-    vim.notify("No Quarry statement is running in this buffer", vim.log.levels.INFO)
+    vim.notify("No Orbit statement is running in this buffer", vim.log.levels.INFO)
     return
   end
   running[buffer].cancelled = true
@@ -167,15 +167,15 @@ end
 
 function M.status(buffer, config)
   local state = running[buffer]
-  local profile_name = state and state.profile_name or vim.b[buffer].quarry_profile
+  local profile_name = state and state.profile_name or vim.b[buffer].orbit_profile
   if not profile_name then
-    return "Quarry: no profile"
+    return "Orbit: no profile"
   end
   if state then
     local elapsed = math.floor((vim.uv.hrtime() - state.started_at) / 1000000000)
-    return string.format("Quarry: %s [%ds]", profile_name, elapsed)
+    return string.format("Orbit: %s [%ds]", profile_name, elapsed)
   end
-  return "Quarry: " .. profile_name
+  return "Orbit: " .. profile_name
 end
 
 return M

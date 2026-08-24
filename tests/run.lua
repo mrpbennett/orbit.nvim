@@ -6,20 +6,20 @@ package.path = table.concat({
 }, ";")
 
 local modules = {
-  "quarry",
-  "quarry.adapters",
-  "quarry.browser",
-  "quarry.completion",
-  "quarry.diagnostics",
-  "quarry.feedback",
-  "quarry.profiles",
-  "quarry.query",
-  "quarry.results",
-  "quarry.runner",
-  "quarry.schema",
-  "quarry.schema_cache",
-  "quarry.statements",
-  "quarry.workspace",
+  "orbit",
+  "orbit.adapters",
+  "orbit.browser",
+  "orbit.completion",
+  "orbit.diagnostics",
+  "orbit.feedback",
+  "orbit.profiles",
+  "orbit.query",
+  "orbit.results",
+  "orbit.runner",
+  "orbit.schema",
+  "orbit.schema_cache",
+  "orbit.statements",
+  "orbit.workspace",
 }
 
 for _, module in ipairs(modules) do

@@ -1,4 +1,17 @@
-# Quarry.nvim v0.1 Plan
+# Orbit.nvim v0.1 Plan
+
+## Orbit Rebrand Plan
+
+- [x] Rename the repository, plugin loader, Lua module namespace, internal Neovim state, highlights, filetypes, and completion entry point to Orbit.
+- [x] Rename every public user command and update the documented package, setup module, profile path, UI labels, and project/domain documentation.
+- [x] Add the approved Orbit slogan to the README and update tests to exercise the renamed public surface.
+- [x] Run the complete headless test suite and check the working tree for remaining legacy-name references.
+
+## Orbit Rebrand Review
+
+- [x] Renamed the workspace to `orbit.nvim` and moved the plugin and Lua module namespaces to `plugin/orbit.lua` and `lua/orbit/`.
+- [x] Replaced all legacy-name references, including commands, state, highlights, filetypes, documentation, and test fixtures.
+- [x] Verification: `nvim --headless -u NONE -l tests/run.lua` passed. `git diff --check` passed. No legacy-name references remain.
 
 ## Implementation
 
@@ -201,7 +214,7 @@
 - [ ] Replace the LuaRocks HTTP transport with a bundled dependency-free persistent transport.
 - [ ] Verify persistent Trino connections from a fresh lazy.nvim installation.
 
-- Rejected LuaRocks packaging: lazy.nvim first resolved an unrelated `quarry.nvim` rock, and the unique-name fallback failed because the current `http` rock cannot resolve its `basexx` dependency for Lua 5.1.
+- Rejected LuaRocks packaging: lazy.nvim first resolved an unrelated `orbit.nvim` rock, and the unique-name fallback failed because the current `http` rock cannot resolve its `basexx` dependency for Lua 5.1.
 
 ## Persistent Trino CLI Session Redesign
 
@@ -220,7 +233,7 @@
 ## Default Keymaps
 
 - [x] Add regression coverage for default, overridden, and disabled action mappings.
-- [x] Apply default keymaps when Quarry is configured and preserve user overrides through `opts.keymaps`.
+- [x] Apply default keymaps when Orbit is configured and preserve user overrides through `opts.keymaps`.
 - [ ] Run the complete test suite after the unrelated Trino adapter/profile-test mismatch is resolved.
 
 ## Review
@@ -230,3 +243,28 @@
 - Default mappings are `<leader>D` (workspace), `<leader>E` (execute), `<leader>X` (cancel), `<leader>P` (select profile), and `<leader>B` (browse).
 - `opts.keymaps` overrides individual defaults; set an action to `false` to disable it.
 - Verification: focused keymap coverage and `git diff --check` passed. The full suite is blocked by `tests/profile_spec.lua:155`, which expects `--execute interactive` while the current Trino adapter emits `--execute "SELECT 1"`. `stylua` is not installed.
+
+## Clickable Workspace Sidebar Plan
+
+- [x] Extract current-node expansion, collapse, and activation actions from sidebar keymaps.
+- [x] Bind `<2-LeftMouse>` locally in the Workspace sidebar and activate the clicked node.
+- [x] Add regression coverage for the mapping and profile activation.
+- [x] Run focused and complete test suites, then record verification results.
+
+### Review
+
+- `<2-LeftMouse>` is buffer-local to the Workspace sidebar, verifies the clicked window and line, then moves the sidebar cursor before activating the node.
+- Existing keyboard behavior remains unchanged: `h` collapses, `l` expands, and `<CR>` binds a profile or opens a saved query.
+- Verification: `nvim --headless -u NONE -l tests/run.lua` passed. `git diff --check` passed.
+
+## Clickable Workspace Sidebar Regression Plan
+
+- [x] Reproduce double-click activation with an input-level Workspace test.
+- [x] Correct the failing mouse-dispatch path without changing keyboard actions.
+- [x] Run the complete test suite and record the verified behavior.
+
+### Review
+
+- Root cause: profile expansion tested `state.selected`, which tracks query binding, rather than `state.schema_profile`, which tracks the visible schema tree. A selected profile could therefore never be expanded with `l`.
+- `<2-LeftMouse>` now binds and expands a profile. `<CR>` remains bind-only, and `h`/`l` retain their existing tree behavior.
+- Verification: `nvim --headless -u NONE -l tests/run.lua` passed.

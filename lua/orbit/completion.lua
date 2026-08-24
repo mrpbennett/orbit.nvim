@@ -1,5 +1,5 @@
-local cache = require("quarry.schema_cache")
-local profiles = require("quarry.profiles")
+local cache = require("orbit.schema_cache")
+local profiles = require("orbit.profiles")
 
 local M = {}
 
@@ -64,12 +64,12 @@ function M.items(profile, line, cursor)
 end
 
 local function profile_for_buffer(buffer)
-  local quarry = require("quarry")
-  local document = profiles.load(quarry.config.profile_path)
+  local orbit = require("orbit")
+  local document = profiles.load(orbit.config.profile_path)
   if not document then
     return nil
   end
-  local name = vim.b[buffer].quarry_profile
+  local name = vim.b[buffer].orbit_profile
   return profiles.find(document, name)
 end
 
@@ -98,7 +98,7 @@ function M.omnifunc(findstart, base)
 end
 
 function M.attach(buffer)
-  vim.bo[buffer].omnifunc = "v:lua.QuarryComplete"
+  vim.bo[buffer].omnifunc = "v:lua.OrbitComplete"
 end
 
 function M.prewarm(profile)

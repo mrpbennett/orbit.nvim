@@ -1,6 +1,6 @@
-local schema = require("quarry.schema")
-local cache = require("quarry.schema_cache")
-local runner = require("quarry.runner")
+local schema = require("orbit.schema")
+local cache = require("orbit.schema_cache")
+local runner = require("orbit.runner")
 
 return {
   ["schema.filter matches table and view names case-insensitively"] = function()

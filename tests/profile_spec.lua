@@ -1,6 +1,6 @@
-local adapters = require("quarry.adapters")
-local profiles = require("quarry.profiles")
-local query = require("quarry.query")
+local adapters = require("orbit.adapters")
+local profiles = require("orbit.profiles")
+local query = require("orbit.query")
 
 local function write_profiles(document)
   local path = vim.fn.tempname()
@@ -23,7 +23,7 @@ return {
           kind = "trino",
           options = {
             server = "https://trino.example.test:8443",
-            user = "quarry",
+            user = "orbit",
             catalog = "hive",
             schema = "default",
           },
@@ -52,7 +52,7 @@ return {
             kind = "trino",
             options = vim.tbl_extend("force", {
               server = "https://trino.example.test:8443",
-              user = "quarry",
+              user = "orbit",
               catalog = "hive",
             }, { [name] = value }),
           },
@@ -121,7 +121,7 @@ return {
       profiles = { { name = "local", kind = "sqlite", options = { path = "/tmp/local.db" } } },
     })
     local buffer = vim.api.nvim_create_buf(false, true)
-    vim.b[buffer].quarry_profile = "local"
+    vim.b[buffer].orbit_profile = "local"
 
     local profile = assert(query.profile_for_buffer(buffer, { profile_path = path }))
 
@@ -145,7 +145,7 @@ return {
       kind = "trino",
       options = {
         server = "https://trino.example.test:8443",
-        user = "quarry",
+        user = "orbit",
         catalog = "hive",
         schema = "default",
       },
@@ -154,7 +154,7 @@ return {
     assert_equal(command, {
       "trino",
       "--server", "https://trino.example.test:8443",
-      "--user", "quarry",
+      "--user", "orbit",
       "--catalog", "hive",
       "--schema", "default",
       "--no-progress",
@@ -199,7 +199,7 @@ return {
           kind = "trino",
           options = {
             server = "https://trino.example.test:8443",
-            user = "quarry",
+            user = "orbit",
             catalog = "gridhive",
           },
         },
@@ -229,7 +229,7 @@ return {
             kind = "trino",
             options = vim.tbl_extend("force", {
               server = "https://trino.example.test:8443",
-              user = "quarry",
+              user = "orbit",
               catalog = "hive",
             }, options),
           },

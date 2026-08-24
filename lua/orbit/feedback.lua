@@ -1,7 +1,7 @@
 local M = {}
 
 local function notify(message, level, options)
-  return vim.notify(message, level, vim.tbl_extend("force", { title = "Quarry" }, options or {}))
+  return vim.notify(message, level, vim.tbl_extend("force", { title = "Orbit" }, options or {}))
 end
 
 local function progress(state)

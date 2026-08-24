@@ -1,6 +1,6 @@
-local workspace = require("quarry.workspace")
-local profiles = require("quarry.profiles")
-local runner = require("quarry.runner")
+local workspace = require("orbit.workspace")
+local profiles = require("orbit.profiles")
+local runner = require("orbit.runner")
 
 local function line_number(buffer, text)
   for index, line in ipairs(vim.api.nvim_buf_get_lines(buffer, 0, -1, false)) do
@@ -19,7 +19,7 @@ return {
     assert(vim.api.nvim_tabpage_is_valid(state.tabpage))
     assert(state.tabpage ~= original)
     for _, window in ipairs(vim.api.nvim_tabpage_list_wins(state.tabpage)) do
-      assert(vim.bo[vim.api.nvim_win_get_buf(window)].filetype ~= "quarry-results")
+      assert(vim.bo[vim.api.nvim_win_get_buf(window)].filetype ~= "orbit-results")
     end
     vim.api.nvim_buf_call(vim.api.nvim_win_get_buf(state.query_window), function()
       assert(vim.fn.maparg("/", "n") ~= "")
@@ -37,7 +37,7 @@ return {
     local path = vim.fn.tempname()
     assert(profiles.write(path, {
       version = 1,
-      profiles = { { name = "local", kind = "sqlite", options = { path = "/tmp/quarry-test.db" } } },
+      profiles = { { name = "profile-binding", kind = "sqlite", options = { path = "/tmp/orbit-test.db" } } },
     }))
     local state = workspace.open({ profile_path = path, workspace_result_ratio = 0.30, workspace_sidebar_width = 32 })
 
@@ -45,9 +45,81 @@ return {
     vim.api.nvim_win_set_cursor(state.sidebar_window, { 6, 0 })
     vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<CR>", true, false, true), "mx", false)
 
-    assert(vim.b[vim.api.nvim_win_get_buf(state.query_window)].quarry_profile == "local")
+    assert(vim.b[vim.api.nvim_win_get_buf(state.query_window)].orbit_profile == "profile-binding")
     workspace.close()
     vim.api.nvim_set_current_tabpage(original)
+  end,
+
+  ["workspace expands a profile after it is selected"] = function()
+    local original_tabpage = vim.api.nvim_get_current_tabpage()
+    local original_run = runner.run
+    local path = vim.fn.tempname()
+    assert(profiles.write(path, {
+      version = 1,
+      profiles = { { name = "selected-then-expanded", kind = "sqlite", options = { path = "/tmp/orbit-test.db" } } },
+    }))
+    runner.run = function(_, _, callback)
+      callback({ { schema = "main", name = "sessions", type = "table" } })
+    end
+
+    local state
+    local ok, err = xpcall(function()
+      state = workspace.open({ profile_path = path, workspace_result_ratio = 0.30, workspace_sidebar_width = 32 })
+      vim.api.nvim_set_current_win(state.sidebar_window)
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { 6, 0 })
+      vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<CR>", true, false, true), "mx", false)
+      vim.api.nvim_feedkeys("l", "mx", false)
+
+      assert(vim.wait(100, function()
+        return (vim.api.nvim_buf_get_lines(state.sidebar, 6, 7, false)[1] or ""):match("main")
+      end))
+    end, debug.traceback)
+    if state and vim.api.nvim_tabpage_is_valid(state.tabpage) then
+      workspace.close(state.tabpage)
+    end
+    if vim.api.nvim_tabpage_is_valid(original_tabpage) then
+      vim.api.nvim_set_current_tabpage(original_tabpage)
+    end
+    runner.run = original_run
+    assert(ok, err)
+  end,
+
+  ["workspace double click activates the clicked sidebar profile"] = function()
+    local original = vim.api.nvim_get_current_tabpage()
+    local original_run = runner.run
+    local path = vim.fn.tempname()
+    assert(profiles.write(path, {
+      version = 1,
+      profiles = { { name = "double-click", kind = "sqlite", options = { path = "/tmp/orbit-test.db" } } },
+    }))
+    runner.run = function(_, _, callback)
+      callback({ { schema = "main", name = "sessions", type = "table" } })
+    end
+    local state
+    local getmousepos = vim.fn.getmousepos
+    vim.fn.getmousepos = function()
+      return { winid = state and state.sidebar_window or 0, line = 6 }
+    end
+
+    local ok, err = xpcall(function()
+      state = workspace.open({ profile_path = path, workspace_result_ratio = 0.30, workspace_sidebar_width = 32 })
+      vim.api.nvim_set_current_win(state.sidebar_window)
+      vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<2-LeftMouse>", true, false, true), "mx", false)
+
+    assert(vim.b[vim.api.nvim_win_get_buf(state.query_window)].orbit_profile == "double-click")
+      assert(vim.wait(100, function()
+        return (vim.api.nvim_buf_get_lines(state.sidebar, 6, 7, false)[1] or ""):match("main")
+      end))
+    end, debug.traceback)
+    vim.fn.getmousepos = getmousepos
+    runner.run = original_run
+    if state and vim.api.nvim_tabpage_is_valid(state.tabpage) then
+      workspace.close(state.tabpage)
+    end
+    if vim.api.nvim_tabpage_is_valid(original) then
+      vim.api.nvim_set_current_tabpage(original)
+    end
+    assert(ok, err)
   end,
 
   ["workspace renders schemas before object groups"] = function()
@@ -56,7 +128,7 @@ return {
     local path = vim.fn.tempname()
     assert(profiles.write(path, {
       version = 1,
-      profiles = { { name = "tree-structure", kind = "sqlite", options = { path = "/tmp/quarry-tree.db" } } },
+      profiles = { { name = "tree-structure", kind = "sqlite", options = { path = "/tmp/orbit-tree.db" } } },
     }))
     runner.run = function(_, _, callback)
       callback({
@@ -91,13 +163,13 @@ return {
     local path = vim.fn.tempname()
     assert(profiles.write(path, {
       version = 1,
-      profiles = { { name = "local", kind = "sqlite", options = { path = "/tmp/quarry-test.db" } } },
+      profiles = { { name = "local", kind = "sqlite", options = { path = "/tmp/orbit-test.db" } } },
     }))
     local config = { profile_path = path, workspace_result_ratio = 0.30, workspace_sidebar_width = 32 }
     local state = workspace.open(config)
     assert(profiles.write(path, {
       version = 1,
-      profiles = { { name = "staging", kind = "sqlite", options = { path = "/tmp/quarry-staging.db" } } },
+      profiles = { { name = "staging", kind = "sqlite", options = { path = "/tmp/orbit-staging.db" } } },
     }))
 
     workspace.select_profile(config, state.query_window)
@@ -165,7 +237,7 @@ return {
     vim.fn.writefile({ "not a query" }, nested .. "/notes.txt")
     assert(profiles.write(profile_path, {
       version = 1,
-      profiles = { { name = "local", kind = "sqlite", options = { path = "/tmp/quarry-saved.db" } } },
+      profiles = { { name = "local", kind = "sqlite", options = { path = "/tmp/orbit-saved.db" } } },
     }))
     local state
     local ok, err = xpcall(function()
@@ -189,8 +261,8 @@ return {
       local buffer = vim.api.nvim_get_current_buf()
       assert(vim.api.nvim_buf_get_name(buffer) == nested .. "/weekly.sql")
       assert(vim.bo[buffer].filetype == "sql")
-      assert(vim.b[buffer].quarry_profile == "local")
-      assert(vim.b[buffer].quarry_workspace_tab == state.tabpage)
+      assert(vim.b[buffer].orbit_profile == "local")
+      assert(vim.b[buffer].orbit_workspace_tab == state.tabpage)
       assert(vim.api.nvim_buf_get_lines(buffer, 0, 1, false)[1] == "SELECT 'weekly';")
     end, debug.traceback)
     if state and vim.api.nvim_tabpage_is_valid(state.tabpage) then

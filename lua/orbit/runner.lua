@@ -1,4 +1,4 @@
-local adapters = require("quarry.adapters")
+local adapters = require("orbit.adapters")
 
 local M = {}
 

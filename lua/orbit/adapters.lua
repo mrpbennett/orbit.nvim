@@ -1,8 +1,8 @@
 local M = {}
 
 local connectors = {
-	sqlite = require("quarry.connectors.sqlite"),
-	trino = require("quarry.connectors.trino"),
+	sqlite = require("orbit.connectors.sqlite"),
+	trino = require("orbit.connectors.trino"),
 }
 
 function M.validate_options(profile)
