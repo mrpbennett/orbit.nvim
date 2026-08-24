@@ -1,4 +1,4 @@
-# Orbit.nvim
+# :rocket: Orbit.nvim
 
 ## Orbit - A database IDE for Neovim
 
