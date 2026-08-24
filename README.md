@@ -22,7 +22,7 @@ A native-feeling database workspace for Neovim. Quarry runs statements through y
 
 | Profile kind | CLI | Notes |
 | --- | --- | --- |
-| `trino` | [`trino`](https://trino.io/docs/current/client/cli.html) | Quarry requests JSON output. |
+| `trino` | [`trino`](https://trino.io/docs/current/client/cli.html) | Quarry requests JSON output and retains one interactive CLI session per profile. |
 | `sqlite` | `sqlite3` | Requires a build that supports `-json`. |
 
 ## Installation
@@ -69,7 +69,8 @@ Profiles are JSON, versioned at `1`, and names must be unique:
         "server": "https://trino.example.com:8443",
         "user": "alice",
         "catalog": "hive",
-        "schema": "analytics"
+        "schema": "analytics",
+        "arguments": ["--password"]
       }
     },
     {
@@ -92,7 +93,22 @@ Profiles are JSON, versioned at `1`, and names must be unique:
 
 `executable` replaces the CLI binary and `arguments` adds an array of string arguments before Quarry's generated arguments. This is useful for wrappers or CLI-specific authentication flags.
 
-Quarry passes profile values to the CLI as literal arguments. It does **not** expand `$VAR` or `${VAR}` inside JSON. The CLI still inherits Neovim's environment, so use your CLI's normal authentication configuration. For example, a Trino CLI that reads `TRINO_PASSWORD` can be configured with `"arguments": ["--password"]` while `TRINO_PASSWORD` is already present in Neovim's environment.
+### Persistent Trino Sessions
+
+Quarry retains one interactive `trino` CLI process per profile. Statements, schema browsing, and completion share that process, so the CLI retains its Trino session and authentication state between statements. Quarry sends statements through stdin and reads JSON output until an internal marker result arrives; only one statement runs at a time for a profile.
+
+`:QuarryCancel` terminates that profile's CLI session and cancels its active statement. The next statement starts a fresh session.
+
+### Trino Authentication
+
+Quarry never stores a password in the profile file. For Trino CLI password authentication, set `TRINO_PASSWORD` before starting Neovim and add `"arguments": ["--password"]` to the profile. Quarry supplies that value to the CLI's password prompt when it starts the persistent session:
+
+```sh
+export TRINO_PASSWORD='<password>'
+nvim
+```
+
+Quarry passes profile values to the CLI as literal arguments. It does **not** expand `$VAR` or `${VAR}` inside JSON. Other Trino CLI authentication mechanisms, such as tokens or external credential providers, continue to work through their normal CLI configuration.
 
 > [!NOTE]
 > Connection profiles can contain sensitive settings. Keep the profile file private and prefer external CLI authentication or environment-based secrets over storing credentials in JSON.
@@ -101,12 +117,12 @@ Quarry passes profile values to the CLI as literal arguments. It does **not** ex
 
 `:QuarryWorkspace` opens a dedicated Quarry tabpage with a profile/schema sidebar and a normal SQL editing window. Run it again to focus the existing workspace. `:QuarryWorkspaceClose` closes only that tabpage.
 
-1. Select a profile in the sidebar and press `l` to load its schema.
-2. Press `<CR>` to bind that profile to the active query buffer.
-3. Press `n` to open a new SQL buffer already bound to the expanded profile.
+1. Press `<CR>` on a profile to select it and bind it to the active query buffer.
+2. Optionally press `l` to load its schema for browsing and completion.
+3. Press `n` to open a new SQL buffer already bound to the selected profile.
 4. Execute a statement. Results appear in the reusable bottom result grid.
 
-Set `saved_query_dir` to add a recursive tree of `.sql` files to the sidebar. Press `<CR>` on a saved query to open it in the Workspace query window; it is bound to the currently expanded profile. Press `r` on the saved-query directory to rescan it.
+Set `saved_query_dir` to add a recursive tree of `.sql` files to the sidebar. Select a profile, then press `<CR>` on a saved query to open it in the Workspace query window bound to that profile; loading the schema is not required. Press `r` on the saved-query directory to rescan it.
 
 From a workspace query buffer, `/` focuses the workspace filter. Elsewhere, `/` retains normal Neovim search behavior.
 
