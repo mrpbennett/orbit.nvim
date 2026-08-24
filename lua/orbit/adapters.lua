@@ -76,7 +76,15 @@ function M.schema_statement(profile, node)
 	if connector then
 		return connector.schema_statement(profile.options, node)
 	end
-	return nil, "unsupported profile kind: " .. tostring(profile.kind)
+  return nil, "unsupported profile kind: " .. tostring(profile.kind)
+end
+
+function M.object_actions(profile, row, limit)
+  local connector = connectors[profile.kind]
+  if connector and connector.object_actions then
+    return connector.object_actions(profile.options, row, limit)
+  end
+  return nil, "schema object actions are not supported for profile kind: " .. tostring(profile.kind)
 end
 
 return M

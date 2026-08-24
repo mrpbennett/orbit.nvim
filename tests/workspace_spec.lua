@@ -284,4 +284,202 @@ return {
     vim.api.nvim_set_current_tabpage(original_tabpage)
     assert(ok, err)
   end,
+
+  ["workspace collapses the open schema tree with Z"] = function()
+    local original_tabpage = vim.api.nvim_get_current_tabpage()
+    local original_run = runner.run
+    local path = vim.fn.tempname()
+    assert(profiles.write(path, {
+      version = 1,
+      profiles = { { name = "collapse-tree", kind = "sqlite", options = { path = "/tmp/orbit-tree.db" } } },
+    }))
+    runner.run = function(_, _, callback)
+      callback({ { schema = "main", name = "sessions", type = "table" } })
+    end
+    local state
+    local ok, err = xpcall(function()
+      state = workspace.open({ profile_path = path, result_limit = 25 })
+      vim.api.nvim_set_current_win(state.sidebar_window)
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { 6, 0 })
+      vim.api.nvim_feedkeys("l", "mx", false)
+      assert(vim.wait(100, function()
+        return state.schema_profile == "collapse-tree"
+      end))
+      vim.api.nvim_feedkeys("Z", "mx", false)
+      assert(state.schema_profile == nil)
+      assert(state.selected.name == "collapse-tree")
+    end, debug.traceback)
+    runner.run = original_run
+    if state and vim.api.nvim_tabpage_is_valid(state.tabpage) then
+      workspace.close(state.tabpage)
+    end
+    vim.api.nvim_set_current_tabpage(original_tabpage)
+    assert(ok, err)
+  end,
+
+  ["workspace table mappings use connector actions"] = function()
+    local original_tabpage = vim.api.nvim_get_current_tabpage()
+    local original_run = runner.run
+    local original_select = vim.ui.select
+    local path = vim.fn.tempname()
+    assert(profiles.write(path, {
+      version = 1,
+      profiles = {
+        { name = "table-actions", kind = "sqlite", options = { path = "/tmp/orbit-actions.db" } },
+        { name = "other-profile", kind = "sqlite", options = { path = "/tmp/orbit-other.db" } },
+      },
+    }))
+    local column_profile
+    runner.run = function(profile, statement, callback)
+      if statement:match("PRAGMA table_info") then
+        column_profile = profile.name
+        callback({ { name = "id", type = "INTEGER" } })
+        return
+      end
+      if statement:match("WHERE name =") then
+        callback({ { sql = "CREATE TABLE sessions (id INTEGER)" } })
+      else
+        callback({ { schema = "main", name = "sessions", type = "table" } })
+      end
+    end
+    vim.ui.select = function(items, _, callback)
+      for _, action in ipairs(items) do
+        if action.id == "definition" then
+          callback(action)
+          return
+        end
+      end
+    end
+    local state
+    local ok, err = xpcall(function()
+      state = workspace.open({ profile_path = path, result_limit = 25 })
+      vim.api.nvim_set_current_win(state.sidebar_window)
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { 6, 0 })
+      vim.api.nvim_feedkeys("l", "mx", false)
+      assert(vim.wait(100, function()
+        return line_number(state.sidebar, "main") ~= nil
+      end))
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "main")), 0 })
+      vim.api.nvim_feedkeys("l", "mx", false)
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "tables 1")), 0 })
+      vim.api.nvim_feedkeys("l", "mx", false)
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "other-profile")), 0 })
+      vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<CR>", true, false, true), "mx", false)
+      assert(state.selected.name == "other-profile")
+      vim.api.nvim_set_current_win(state.sidebar_window)
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "sessions")), 0 })
+      vim.api.nvim_feedkeys("l", "mx", false)
+      assert(vim.wait(100, function()
+        return column_profile ~= nil
+      end))
+      assert(column_profile == "table-actions")
+      vim.api.nvim_feedkeys("y", "mx", false)
+      assert(vim.fn.getreg('"') == "sessions")
+
+      vim.api.nvim_feedkeys("s", "mx", false)
+      local buffer = vim.api.nvim_get_current_buf()
+      assert(vim.b[buffer].orbit_profile == "table-actions")
+      assert(vim.api.nvim_buf_get_lines(buffer, 0, 2, false)[1] == "SELECT *")
+      assert(vim.api.nvim_buf_get_lines(buffer, 1, 2, false)[1]:match("FROM"))
+
+      vim.api.nvim_set_current_win(state.sidebar_window)
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "sessions")), 0 })
+      vim.api.nvim_feedkeys("a", "mx", false)
+      assert(vim.wait(100, function()
+        for _, window in ipairs(vim.api.nvim_tabpage_list_wins(state.tabpage)) do
+          if vim.bo[vim.api.nvim_win_get_buf(window)].filetype == "orbit-results" then
+            return true
+          end
+        end
+        return false
+      end))
+    end, debug.traceback)
+    runner.run = original_run
+    vim.ui.select = original_select
+    if state and vim.api.nvim_tabpage_is_valid(state.tabpage) then
+      workspace.close(state.tabpage)
+    end
+    vim.api.nvim_set_current_tabpage(original_tabpage)
+    assert(ok, err)
+  end,
+
+  ["workspace previews saved queries without binding a query buffer"] = function()
+    local original = vim.api.nvim_get_current_tabpage()
+    local directory = vim.fn.tempname()
+    assert(vim.uv.fs_mkdir(directory, 448))
+    vim.fn.writefile({ "SELECT 'preview';" }, directory .. "/preview.sql")
+    local state
+    local ok, err = xpcall(function()
+      state = workspace.open({ profile_path = vim.fn.tempname(), saved_query_dir = directory })
+      vim.api.nvim_set_current_win(state.sidebar_window)
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "preview.sql")), 0 })
+      vim.api.nvim_feedkeys("P", "mx", false)
+      local buffer = vim.api.nvim_get_current_buf()
+      assert(vim.bo[buffer].filetype == "sql")
+      assert(vim.b[buffer].orbit_profile == nil)
+      assert(vim.api.nvim_buf_get_lines(buffer, 0, 1, false)[1] == "SELECT 'preview';")
+      vim.api.nvim_feedkeys("q", "mx", false)
+    end, debug.traceback)
+    if state and vim.api.nvim_tabpage_is_valid(state.tabpage) then
+      workspace.close(state.tabpage)
+    end
+    vim.api.nvim_set_current_tabpage(original)
+    assert(ok, err)
+  end,
+
+  ["workspace discards a completed action after it closes"] = function()
+    local original_tabpage = vim.api.nvim_get_current_tabpage()
+    local original_run = runner.run
+    local original_select = vim.ui.select
+    local path = vim.fn.tempname()
+    assert(profiles.write(path, {
+      version = 1,
+      profiles = { { name = "discard-action", kind = "sqlite", options = { path = "/tmp/orbit-discard.db" } } },
+    }))
+    local action_callback
+    runner.run = function(_, statement, callback)
+      if statement:match("WHERE name =") then
+        action_callback = callback
+      else
+        callback({ { schema = "main", name = "sessions", type = "table" } })
+      end
+    end
+    vim.ui.select = function(items, _, callback)
+      for _, action in ipairs(items) do
+        if action.id == "definition" then
+          callback(action)
+          return
+        end
+      end
+    end
+    local state
+    local ok, err = xpcall(function()
+      state = workspace.open({ profile_path = path, result_limit = 25 })
+      vim.api.nvim_set_current_win(state.sidebar_window)
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { 6, 0 })
+      vim.api.nvim_feedkeys("l", "mx", false)
+      assert(vim.wait(100, function()
+        return line_number(state.sidebar, "main") ~= nil
+      end))
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "main")), 0 })
+      vim.api.nvim_feedkeys("l", "mx", false)
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "tables 1")), 0 })
+      vim.api.nvim_feedkeys("l", "mx", false)
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "sessions")), 0 })
+      vim.api.nvim_feedkeys("a", "mx", false)
+      assert(action_callback)
+      workspace.close(state.tabpage)
+      action_callback({ { sql = "CREATE TABLE sessions (id INTEGER)" } })
+      for _, window in ipairs(vim.api.nvim_tabpage_list_wins(original_tabpage)) do
+        assert(vim.bo[vim.api.nvim_win_get_buf(window)].filetype ~= "orbit-results")
+      end
+    end, debug.traceback)
+    runner.run = original_run
+    vim.ui.select = original_select
+    if state and vim.api.nvim_tabpage_is_valid(state.tabpage) then
+      workspace.close(state.tabpage)
+    end
+    vim.api.nvim_set_current_tabpage(original_tabpage)
+    assert(ok, err)
+  end,
 }

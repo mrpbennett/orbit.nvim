@@ -3,6 +3,8 @@ local schema = require("orbit.schema")
 local cache = require("orbit.schema_cache")
 local feedback = require("orbit.feedback")
 local results = require("orbit.results")
+local adapters = require("orbit.adapters")
+local runner = require("orbit.runner")
 
 local M = {}
 local workspaces = {}
@@ -132,7 +134,7 @@ local function render(state)
                 local columns = state.columns[name]
                 local object_kind = row.type == "view" and "view" or "table"
                 table.insert(lines, string.format("          %s %s %s", columns and icons.expanded or icons.collapsed, icons[object_kind], row.name))
-                state.nodes[#lines] = { kind = "table", row = row }
+                state.nodes[#lines] = { kind = "table", profile = profile, row = row }
                 table.insert(highlights, { group = object_kind == "view" and "OrbitView" or "OrbitTable", line = #lines })
                 if columns then
                   for _, column in ipairs(columns) do
@@ -244,6 +246,18 @@ local function load_schema(state, profile, force)
   end)
 end
 
+local function collapse_schema_tree(state)
+  if not state.schema_profile then
+    return
+  end
+  state.schema_profile = nil
+  state.tables = {}
+  state.columns = {}
+  state.expanded_schemas = {}
+  state.expanded_groups = {}
+  render(state)
+end
+
 local function reload_profiles(state)
   local document, load_err = profiles.load(state.config.profile_path)
   if not document then
@@ -264,7 +278,7 @@ local function reload_profiles(state)
   return document
 end
 
-local function expand_table(state, row)
+local function expand_table(state, profile, row)
   local name = object_name(row)
   if state.columns[name] then
     state.columns[name] = nil
@@ -275,7 +289,7 @@ local function expand_table(state, row)
   state.columns[name] = {}
   render(state)
   local notice = feedback.start("Loading columns for " .. name .. "...")
-  cache.load_columns(state.selected, row, {}, function(columns, err)
+  cache.load_columns(profile, row, {}, function(columns, err)
     if state.generation ~= generation or not vim.api.nvim_buf_is_valid(state.sidebar) or not state.columns[name] then
       return
     end
@@ -311,6 +325,71 @@ local function configure_query_buffer(state, buffer)
   end, { buffer = buffer, silent = true, nowait = true, desc = "Filter Orbit workspace" })
 end
 
+local function open_generated_query(state, profile, statement)
+  vim.api.nvim_set_current_win(ensure_query_window(state))
+  vim.cmd("new")
+  local buffer = vim.api.nvim_get_current_buf()
+  vim.bo[buffer].filetype = "sql"
+  configure_query_buffer(state, buffer)
+  require("orbit.query").bind_profile(buffer, profile)
+  vim.api.nvim_buf_set_lines(buffer, 0, -1, false, vim.split(statement, "\n", { plain = true }))
+end
+
+local function run_object_action(state, profile, row, action)
+  if action.kind == "query_buffer" then
+    open_generated_query(state, profile, action.statement)
+    return
+  end
+  local notice = feedback.start("Loading " .. action.label:lower() .. " for " .. object_name(row) .. "...")
+  runner.run(profile, action.statement, function(rows, err)
+    if workspaces[state.tabpage] ~= state or not vim.api.nvim_tabpage_is_valid(state.tabpage) then
+      feedback.finish(notice, "Schema action discarded", vim.log.levels.DEBUG)
+      return
+    end
+    if err then
+      feedback.finish(notice, "Schema action failed: " .. action.label, vim.log.levels.ERROR)
+      vim.notify(err, vim.log.levels.ERROR)
+      return
+    end
+    feedback.finish(notice, string.format("Loaded %s: %d rows", action.label:lower(), #rows))
+    M.open_results(rows, {
+      limit = state.config.result_limit,
+      max_cell_width = state.config.max_cell_width,
+      profile_name = profile.name,
+      source_name = action.label .. " / " .. object_name(row),
+      source_window = state.query_window,
+      tabpage = state.tabpage,
+    })
+  end)
+end
+
+local function select_object_action(state, profile, row)
+  local actions, err = adapters.object_actions(profile, row, state.config.result_limit)
+  if not actions then
+    vim.notify(err, vim.log.levels.ERROR)
+    return
+  end
+  vim.ui.select(actions, {
+    prompt = "Orbit action for " .. object_name(row),
+    format_item = function(action)
+      return action.label
+    end,
+  }, function(action)
+    if action then
+      run_object_action(state, profile, row, action)
+    end
+  end)
+end
+
+local function copy_object_name(profile, row)
+  local name = row.name
+  if profile.kind == "trino" then
+    name = table.concat({ profile.options.catalog, row.schema or profile.options.schema, row.name }, ".")
+  end
+  vim.fn.setreg('"', name)
+  vim.notify("Orbit name copied")
+end
+
 local function open_saved_query(state, node)
   if not state.selected then
     vim.notify("Expand an Orbit profile before opening a saved query", vim.log.levels.WARN)
@@ -322,6 +401,32 @@ local function open_saved_query(state, node)
   vim.bo[buffer].filetype = "sql"
   configure_query_buffer(state, buffer)
   require("orbit.query").bind_profile(buffer, state.selected)
+end
+
+local function preview_saved_query(node)
+  local lines = vim.fn.readfile(node.path)
+  local buffer = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(buffer, 0, -1, false, lines)
+  vim.bo[buffer].filetype = "sql"
+  vim.bo[buffer].modifiable = false
+  local width = math.min(math.max(40, vim.o.columns - 8), 100)
+  local height = math.min(math.max(3, #lines), math.max(3, vim.o.lines - 6))
+  local window = vim.api.nvim_open_win(buffer, true, {
+    border = "rounded",
+    col = math.floor((vim.o.columns - width) / 2),
+    height = height,
+    relative = "editor",
+    row = math.floor((vim.o.lines - height) / 2),
+    style = "minimal",
+    title = " " .. node.name .. " ",
+    title_pos = "center",
+    width = width,
+  })
+  for _, key in ipairs({ "q", "<Esc>" }) do
+    vim.keymap.set("n", key, function()
+      vim.api.nvim_win_close(window, true)
+    end, { buffer = buffer, silent = true, nowait = true, desc = "Close Orbit saved query preview" })
+  end
 end
 
 local function focus_filter(state)
@@ -337,7 +442,8 @@ local function show_help(state)
   vim.api.nvim_buf_set_lines(buffer, 0, -1, false, {
     "Orbit Workspace",
     "",
-    "Sidebar: <CR> bind/open, l expand, h collapse, n new query, r refresh, / filter, q close",
+    "Sidebar: <CR> bind/open, h/l collapse/expand, Z collapse schema, n new query, r refresh",
+    "Table: s sample, a actions, y copy name. Saved query: P preview. / filter, q close",
     "Results: h/j/k/l cells, y copy, <CR> inspect, <C-d>/<C-u> page",
     "Use your normal Neovim window mappings to move between panels.",
   })
@@ -418,7 +524,7 @@ local function configure_sidebar(state)
       state.expanded_groups[group_name(node.schema, node.group)] = true
       render(state)
     elseif node and node.kind == "table" and not state.columns[object_name(node.row)] then
-      expand_table(state, node.row)
+      expand_table(state, node.profile, node.row)
     elseif node and node.kind == "saved_directory" and not state.expanded_saved_dirs[node.path] then
       state.expanded_saved_dirs[node.path] = true
       render(state)
@@ -471,6 +577,43 @@ local function configure_sidebar(state)
   vim.keymap.set("n", "n", function()
     new_query(state)
   end, { buffer = state.sidebar, silent = true, nowait = true, desc = "New Orbit query" })
+  vim.keymap.set("n", "Z", function()
+    collapse_schema_tree(state)
+  end, { buffer = state.sidebar, silent = true, nowait = true, desc = "Collapse Orbit schema tree" })
+  vim.keymap.set("n", "s", function()
+    local node = current_node()
+    if node and node.kind == "table" then
+      local actions, err = adapters.object_actions(node.profile, node.row, state.config.result_limit)
+      if not actions then
+        vim.notify(err, vim.log.levels.ERROR)
+        return
+      end
+      for _, action in ipairs(actions) do
+        if action.id == "sample" then
+          run_object_action(state, node.profile, node.row, action)
+          return
+        end
+      end
+    end
+  end, { buffer = state.sidebar, silent = true, nowait = true, desc = "Open Orbit sample statement" })
+  vim.keymap.set("n", "a", function()
+    local node = current_node()
+    if node and node.kind == "table" then
+      select_object_action(state, node.profile, node.row)
+    end
+  end, { buffer = state.sidebar, silent = true, nowait = true, desc = "Select Orbit schema object action" })
+  vim.keymap.set("n", "y", function()
+    local node = current_node()
+    if node and node.kind == "table" then
+      copy_object_name(node.profile, node.row)
+    end
+  end, { buffer = state.sidebar, silent = true, nowait = true, desc = "Copy Orbit object name" })
+  vim.keymap.set("n", "P", function()
+    local node = current_node()
+    if node and node.kind == "saved_query" then
+      preview_saved_query(node)
+    end
+  end, { buffer = state.sidebar, silent = true, nowait = true, desc = "Preview Orbit saved query" })
   vim.keymap.set("n", "?", function()
     show_help(state)
   end, { buffer = state.sidebar, silent = true, nowait = true, desc = "Show Orbit help" })

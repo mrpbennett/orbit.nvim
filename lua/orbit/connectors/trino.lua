@@ -10,6 +10,10 @@ local function literal(value)
   return "'" .. tostring(value):gsub("'", "''") .. "'"
 end
 
+local function identifier(value)
+  return '"' .. tostring(value):gsub('"', '""') .. '"'
+end
+
 function M.validate_options(profile_name, options)
   local allowed = {
     arguments = true,
@@ -79,6 +83,33 @@ function M.schema_statement(options, node)
     }, " ")
   end
   return nil, "unsupported schema node"
+end
+
+function M.object_actions(options, row, limit)
+  local schema = row.schema or options.schema
+  if not schema or schema == "" then
+    return nil, "schema is required for Trino schema object actions"
+  end
+  local qualified = table.concat({ identifier(schema), identifier(row.name) }, ".")
+  local columns = assert(M.schema_statement(options, {
+    type = "columns",
+    name = row.name,
+    schema = schema,
+  }))
+  return {
+    {
+      id = "sample",
+      kind = "query_buffer",
+      label = "Open sample statement",
+      statement = string.format("SELECT *\nFROM %s\nLIMIT %d;", qualified, limit),
+    },
+    {
+      id = "columns",
+      kind = "statement",
+      label = "Columns",
+      statement = columns,
+    },
+  }
 end
 
 return M

@@ -190,6 +190,35 @@ return {
     assert(statement:match("table_name = 'events'"))
   end,
 
+  ["adapters expose connector-specific schema object actions"] = function()
+    local sqlite_actions = assert(adapters.object_actions({
+      kind = "sqlite",
+      options = { path = "/tmp/local.db" },
+    }, { schema = "main", name = "sessions", type = "table" }, 25))
+    local action_ids = {}
+    for _, action in ipairs(sqlite_actions) do
+      action_ids[action.id] = action
+    end
+
+    assert(action_ids.sample.kind == "query_buffer")
+    assert(action_ids.sample.statement:match('FROM "sessions"'))
+    assert(action_ids.columns.statement:match("PRAGMA table_info"))
+    assert(action_ids.primary_keys.statement:match("pragma_table_info"))
+    assert(action_ids.indexes.statement:match("PRAGMA index_list"))
+    assert(action_ids.foreign_keys.statement:match("PRAGMA foreign_key_list"))
+    assert(action_ids.definition.statement:match("sqlite_master"))
+
+    local trino_actions = assert(adapters.object_actions({
+      kind = "trino",
+      options = { catalog = "hive", schema = "analytics" },
+    }, { schema = "analytics", name = "events", type = "table" }, 25))
+
+    assert(#trino_actions == 2)
+    assert(trino_actions[1].id == "sample")
+    assert(trino_actions[2].id == "columns")
+    assert(trino_actions[2].statement:match("information_schema%.columns"))
+  end,
+
   ["profiles.load accepts a catalog-level Trino profile"] = function()
     local path = write_profiles({
       version = 1,

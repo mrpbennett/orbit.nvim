@@ -13,7 +13,7 @@ Orbit runs statements through your existing database CLI, keeps profiles per que
 - Open one dedicated workspace tab with a searchable profile and schema browser.
 - Run a whole statement or a visual selection asynchronously without leaving Neovim.
 - Bind each query buffer to its own connection profile.
-- Browse tables, views, and columns; create a bound sample statement; copy qualified object names.
+- Browse tables, views, and columns; run connector-specific object actions; create a bound sample statement; copy qualified object names.
 - Inspect and copy raw result values, including structured JSON values.
 - Confirm potentially mutating statements before they run.
 - Complete cached tables, views, and columns with Neovim's built-in omnifunc.
@@ -173,8 +173,13 @@ require("orbit").setup({
 | `h` | Collapse the selected node. |
 | `<CR>` | Select and bind a profile to the current query buffer, or open a saved query bound to the selected profile. |
 | `n` | Create a query buffer bound to the selected profile. |
+| `s` | Open a bound sample statement for the selected table or view. |
+| `a` | Select a connector-supported action for the selected table or view. |
+| `y` | Copy the qualified selected table or view name. |
+| `P` | Preview the selected saved query without opening or binding it. |
 | `/` | Filter profiles, schema objects, and saved queries. |
 | `r` | Reload the profile file and refresh the selected profile schema, or rescan saved queries. |
+| `Z` | Collapse the open profile schema tree. |
 | `?` | Show help. |
 | `q` | Close the workspace. |
 
@@ -185,6 +190,7 @@ require("orbit").setup({
 | `l` or `<CR>` | Expand an object's columns. |
 | `h` | Collapse an object's columns. |
 | `s` | Open a bound `SELECT * ... LIMIT ...` sample statement. |
+| `a` | Select a connector-supported action for the object, such as columns, indexes, foreign keys, or definition. |
 | `y` | Copy the object name. Trino names include catalog and schema. |
 | `/` | Filter objects. |
 | `r` | Reload the profile and schema. |
@@ -201,6 +207,15 @@ require("orbit").setup({
 | `q` | Close the standalone grid, or return to the query editor in a workspace. |
 
 Normal Neovim scrolling remains available, including `<C-d>`, `<C-u>`, `zh`, and `zl`.
+
+### Schema Object Actions
+
+Press `a` on a table or view in the standalone Schema browser to select an action supplied by its connection profile kind. Actions that inspect metadata open in the Result grid; sample actions create a bound query buffer instead.
+
+- SQLite: sample statement, columns, primary keys, indexes, foreign keys, and object definition.
+- Trino: sample statement and columns.
+
+Available actions are intentionally connector-specific. Orbit does not present metadata actions that the selected CLI or database cannot support reliably.
 
 ## Completion
 

@@ -2,6 +2,9 @@ local profiles = require("orbit.profiles")
 local schema = require("orbit.schema")
 local cache = require("orbit.schema_cache")
 local feedback = require("orbit.feedback")
+local adapters = require("orbit.adapters")
+local results = require("orbit.results")
+local runner = require("orbit.runner")
 
 local M = {}
 local tab_browsers = {}
@@ -124,20 +127,57 @@ local function toggle_columns(state, row)
   end)
 end
 
-local function sample_statement(state, row)
-  local quoted = '"' .. row.name:gsub('"', '""') .. '"'
-  if row.schema then
-    quoted = '"' .. row.schema:gsub('"', '""') .. '".' .. quoted
-  end
+local function open_statement(state, statement)
   vim.cmd("new")
   vim.bo.filetype = "sql"
   vim.b.orbit_profile = state.profile.name
   require("orbit.completion").attach(0)
-  vim.api.nvim_buf_set_lines(0, 0, -1, false, {
-    "SELECT *",
-    "FROM " .. quoted,
-    "LIMIT " .. tostring(state.config.result_limit) .. ";",
-  })
+  vim.api.nvim_buf_set_lines(0, 0, -1, false, vim.split(statement, "\n", { plain = true }))
+end
+
+local function run_action(state, row, action)
+  if action.kind == "query_buffer" then
+    open_statement(state, action.statement)
+    return
+  end
+  local source_window = state.window
+  local tabpage = vim.api.nvim_get_current_tabpage()
+  local notice = feedback.start("Loading " .. action.label:lower() .. " for " .. object_name(row) .. "...")
+  runner.run(state.profile, action.statement, function(rows, run_err)
+    if run_err then
+      feedback.finish(notice, "Schema action failed: " .. action.label, vim.log.levels.ERROR)
+      vim.notify(run_err, vim.log.levels.ERROR)
+      return
+    end
+    feedback.finish(notice, string.format("Loaded %s: %d rows", action.label:lower(), #rows))
+    results.open(rows, {
+      height = state.config.result_height,
+      limit = state.config.result_limit,
+      max_cell_width = state.config.max_cell_width,
+      profile_name = state.profile.name,
+      source_name = action.label .. " / " .. object_name(row),
+      source_window = source_window,
+      tabpage = tabpage,
+    })
+  end)
+end
+
+local function select_action(state, row)
+  local actions, action_err = adapters.object_actions(state.profile, row, state.config.result_limit)
+  if not actions then
+    vim.notify(action_err, vim.log.levels.ERROR)
+    return
+  end
+  vim.ui.select(actions, {
+    prompt = "Orbit action for " .. object_name(row),
+    format_item = function(action)
+      return action.label
+    end,
+  }, function(action)
+    if action then
+      run_action(state, row, action)
+    end
+  end)
 end
 
 local function copy_name(state, row)
@@ -162,7 +202,7 @@ local function show_help()
   vim.api.nvim_buf_set_lines(buffer, 0, -1, false, {
     "Orbit Schema Browser",
     "",
-    "h/l collapse/expand  <CR> expand  s sample statement  y copy name",
+    "h/l collapse/expand  <CR> expand  a actions  s sample statement  y copy name",
     "r refresh  / filter  q close",
   })
   vim.bo[buffer].modifiable = false
@@ -248,9 +288,25 @@ local function create_browser(profile, config)
   vim.keymap.set("n", "s", function()
     local row = state.rows_by_line[vim.api.nvim_win_get_cursor(window)[1]]
     if row then
-      sample_statement(state, row)
+      local actions, action_err = adapters.object_actions(state.profile, row, state.config.result_limit)
+      if not actions then
+        vim.notify(action_err, vim.log.levels.ERROR)
+        return
+      end
+      for _, action in ipairs(actions) do
+        if action.id == "sample" then
+          run_action(state, row, action)
+          return
+        end
+      end
     end
   end, { buffer = buffer, silent = true, nowait = true, desc = "Open Orbit sample statement" })
+  vim.keymap.set("n", "a", function()
+    local row = state.rows_by_line[vim.api.nvim_win_get_cursor(window)[1]]
+    if row then
+      select_action(state, row)
+    end
+  end, { buffer = buffer, silent = true, nowait = true, desc = "Select Orbit schema object action" })
   vim.keymap.set("n", "y", function()
     local row = state.rows_by_line[vim.api.nvim_win_get_cursor(window)[1]]
     if row then

@@ -268,3 +268,41 @@
 - Root cause: profile expansion tested `state.selected`, which tracks query binding, rather than `state.schema_profile`, which tracks the visible schema tree. A selected profile could therefore never be expanded with `l`.
 - `<2-LeftMouse>` now binds and expands a profile. `<CR>` remains bind-only, and `h`/`l` retain their existing tree behavior.
 - Verification: `nvim --headless -u NONE -l tests/run.lua` passed.
+
+## Schema Object Actions Plan
+
+- [x] Define connector-level schema object-action capabilities and action contracts, retaining the shared Schema browser UI.
+- [x] Add a Schema browser action picker that runs connector-provided metadata actions or opens a bound sample statement.
+- [x] Provide SQLite and Trino object-action capabilities without regressing their existing Schema acquisition.
+- [x] Add focused adapter, profile, Schema acquisition, and browser interaction tests.
+- [x] Update README connector/profile/action documentation and run the complete headless suite plus the configured formatter when available.
+
+### Design
+
+- `adapters` remains the only dispatch layer. Each connector declares the object actions it supports and produces the statement or sample-statement text for the selected object.
+- The Schema browser owns selecting and running an action; it does not encode backend-specific SQL or object-kind conditionals.
+- PostgreSQL support is deferred until this capability contract has been proven with the existing connectors.
+
+### Review
+
+- [x] Record verification results, live-CLI coverage gaps, and any deferred metadata actions.
+
+- SQLite provides sample statements, columns, primary keys, indexes, foreign keys, and object definitions. Trino provides sample statements and columns. Unsupported actions are not shown.
+- The standalone Schema browser action picker opens sample statements in a profile-bound query buffer and metadata in the Result grid. Result grids retain the originating tabpage if the user switches tabs while an action runs.
+- PostgreSQL support, inbound references, and actions in the Workspace sidebar remain deferred.
+- Verification: `nvim --headless -u NONE -l tests/run.lua` and `git diff --check` passed. `stylua --check lua tests` could not run because `stylua` is not installed in this environment.
+
+## Workspace Explorer QoL
+
+- [x] Add `Z` to collapse the open profile schema tree without changing the selected profile.
+- [x] Expose the existing connector-provided table actions in the Workspace sidebar, including sample statements, action selection, and qualified-name copying.
+- [x] Add read-only `P` previews for saved SQL queries without opening or binding an editable query buffer.
+- [x] Document the new Workspace mappings and add focused regression coverage.
+- [x] Run the complete headless suite, formatter when available, and review the completed change.
+
+### Review
+
+- Table nodes retain their schema-owning profile, so actions and column loading remain correct after a different profile is bound to the query buffer.
+- Metadata action callbacks discard results after the workspace closes, preventing an orphan result grid in another tab.
+- Independent review found no remaining actionable issues.
+- Verification: `nvim --headless -u NONE -l tests/run.lua` and `git diff --check` passed. `stylua` is not installed in this environment.
