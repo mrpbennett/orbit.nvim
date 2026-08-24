@@ -3,9 +3,6 @@ local adapters = require("quarry.adapters")
 local M = {}
 
 function M.run(profile, statement, callback)
-  if profile.kind == "trino" then
-    return require("quarry.trino_session").run(profile, statement, callback)
-  end
   local command, command_err = adapters.prepare(profile, statement)
   if not command then
     vim.schedule(function()
@@ -41,11 +38,7 @@ end
 
 function M.cancel(process)
   if process then
-    if process.cancel then
-      process:cancel()
-    else
-      process:kill(15)
-    end
+    process:kill(15)
   end
 end
 

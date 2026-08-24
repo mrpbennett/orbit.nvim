@@ -216,3 +216,17 @@
 - An internal marker statement delimits JSON results across arbitrary stdout chunks; cancellation terminates the session before the next statement starts a fresh CLI.
 - Verification: `nvim --headless -u NONE -l tests/run.lua` passed (43 tests).
 - Remaining verification gap: no live Trino CLI/profile is available in this environment.
+
+## Default Keymaps
+
+- [x] Add regression coverage for default, overridden, and disabled action mappings.
+- [x] Apply default keymaps when Quarry is configured and preserve user overrides through `opts.keymaps`.
+- [ ] Run the complete test suite after the unrelated Trino adapter/profile-test mismatch is resolved.
+
+## Review
+
+- [ ] Record final full-suite verification after the unrelated Trino adapter/profile-test mismatch is resolved.
+
+- Default mappings are `<leader>D` (workspace), `<leader>E` (execute), `<leader>X` (cancel), `<leader>P` (select profile), and `<leader>B` (browse).
+- `opts.keymaps` overrides individual defaults; set an action to `false` to disable it.
+- Verification: focused keymap coverage and `git diff --check` passed. The full suite is blocked by `tests/profile_spec.lua:155`, which expects `--execute interactive` while the current Trino adapter emits `--execute "SELECT 1"`. `stylua` is not installed.

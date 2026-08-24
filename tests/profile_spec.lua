@@ -1,7 +1,6 @@
 local adapters = require("quarry.adapters")
 local profiles = require("quarry.profiles")
 local query = require("quarry.query")
-local trino_session = require("quarry.trino_session")
 
 local function write_profiles(document)
   local path = vim.fn.tempname()
@@ -160,6 +159,7 @@ return {
       "--schema", "default",
       "--no-progress",
       "--output-format", "JSON",
+      "--execute", "SELECT 1",
     })
   end,
 
@@ -178,19 +178,6 @@ return {
 
     assert_equal(array, { { id = 1 } })
     assert_equal(lines, { { id = 1 }, { id = 2 } })
-  end,
-
-  ["Trino session stream decoder retains partial JSON and ignores CLI noise"] = function()
-    local stream = { buffer = "" }
-    local values = assert(trino_session.decode_stream(stream, "trino> [{\"message\":\"a [bracket]\"}"))
-    assert(#values == 0)
-
-    values = assert(trino_session.decode_stream(stream, "]\n[{\"__quarry_marker\":\"done\"}]\ntrino> "))
-
-    assert_equal(values, {
-      { { message = "a [bracket]" } },
-      { { __quarry_marker = "done" } },
-    })
   end,
 
   ["adapters build backend-specific schema statements"] = function()

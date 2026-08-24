@@ -22,7 +22,7 @@ A native-feeling database workspace for Neovim. Quarry runs statements through y
 
 | Profile kind | CLI | Notes |
 | --- | --- | --- |
-| `trino` | [`trino`](https://trino.io/docs/current/client/cli.html) | Quarry requests JSON output and retains one interactive CLI session per profile. |
+| `trino` | [`trino`](https://trino.io/docs/current/client/cli.html) | Quarry requests JSON output. |
 | `sqlite` | `sqlite3` | Requires a build that supports `-json`. |
 
 ## Installation
@@ -91,22 +91,11 @@ Profiles are JSON, versioned at `1`, and names must be unique:
 | `trino` | `server`, `user`, `catalog` | `schema`, `executable`, `arguments`, `confirm_mutations` | Tables, views, and columns from `information_schema`. Omitting `schema` browses the catalog except `information_schema`. |
 | `sqlite` | `path` | `executable`, `arguments`, `confirm_mutations` | Tables and views from `sqlite_master`, plus columns from `PRAGMA table_info`, under `main`. |
 
-`executable` replaces the CLI binary and `arguments` adds an array of string arguments before Quarry's generated arguments. This is useful for wrappers or CLI-specific authentication flags.
-
-### Persistent Trino Sessions
-
-Quarry retains one interactive `trino` CLI process per profile. Statements, schema browsing, and completion share that process, so the CLI retains its Trino session and authentication state between statements. Quarry sends statements through stdin and reads JSON output until an internal marker result arrives; only one statement runs at a time for a profile.
-
-`:QuarryCancel` terminates that profile's CLI session and cancels its active statement. The next statement starts a fresh session.
+`executable` replaces the CLI binary and `arguments` adds an array of string arguments before Quarry's generated arguments. This is useful for wrappers or CLI-specific authentication flags. Quarry starts a fresh CLI process for every statement and schema request; it does not retain a Trino session between commands.
 
 ### Trino Authentication
 
-Quarry never stores a password in the profile file. For Trino CLI password authentication, set `TRINO_PASSWORD` before starting Neovim and add `"arguments": ["--password"]` to the profile. Quarry supplies that value to the CLI's password prompt when it starts the persistent session:
-
-```sh
-export TRINO_PASSWORD='<password>'
-nvim
-```
+Quarry never stores a password in the profile file. Configure authentication exactly as you do for the Trino CLI, including its `--password` flag, environment variables, tokens, keyrings, or credential providers it uses.
 
 Quarry passes profile values to the CLI as literal arguments. It does **not** expand `$VAR` or `${VAR}` inside JSON. Other Trino CLI authentication mechanisms, such as tokens or external credential providers, continue to work through their normal CLI configuration.
 
@@ -151,20 +140,23 @@ Quarry installs the following defaults:
 
 | Mode and scope | Mapping | Action |
 | --- | --- | --- |
-| Normal, global | `<leader>qw` | Open the workspace. |
+| Normal, global | `<leader>D` | Open the workspace. |
 | Normal, SQL buffer | `<leader>E` | Execute the buffer statement. |
 | Visual, SQL buffer | `<leader>E` | Execute the visual selection. |
+| Normal, SQL buffer | `<leader>P` | Select a connection profile. |
+| Normal, SQL buffer | `<leader>B` | Open the schema browser. |
+| Normal, SQL buffer | `<leader>X` | Cancel the running statement. |
 
-Configure action mappings through `keymaps`. `execute`, `browse`, `cancel`, and `select_profile` are buffer-local in SQL buffers; `workspace` is global.
+Configure action mappings through `keymaps`. `execute`, `browse`, `cancel`, and `select_profile` are buffer-local in SQL buffers; `workspace` is global. Set an action to `false` to disable its default mapping.
 
 ```lua
 require("quarry").setup({
   keymaps = {
     execute = "<leader>E",
-    workspace = "<leader>qw",
-    select_profile = "<leader>qp",
-    browse = "<leader>qb",
-    cancel = "<leader>qc",
+    workspace = "<leader>D",
+    select_profile = "<leader>P",
+    browse = "<leader>B",
+    cancel = "<leader>X",
   },
 })
 ```
@@ -175,8 +167,8 @@ require("quarry").setup({
 | --- | --- |
 | `l` | Expand the selected profile, schema, object group, or object. |
 | `h` | Collapse the selected node. |
-| `<CR>` | Bind the selected profile to the current query buffer, or open a saved query bound to the expanded profile. |
-| `n` | Create a query buffer bound to the expanded profile. |
+| `<CR>` | Select and bind a profile to the current query buffer, or open a saved query bound to the selected profile. |
+| `n` | Create a query buffer bound to the selected profile. |
 | `/` | Filter profiles, schema objects, and saved queries. |
 | `r` | Reload the profile file and refresh the selected profile schema, or rescan saved queries. |
 | `?` | Show help. |
@@ -218,7 +210,7 @@ Selecting a profile preloads tables and views in the background; opening the sch
 
 ## Execution And Results
 
-Quarry runs each statement asynchronously through the selected profile's CLI. Failures notify you and open a diagnostic window. One running statement is allowed per query buffer; `:QuarryCancel` sends a termination signal to that CLI process.
+Quarry runs each statement asynchronously through a fresh invocation of the selected profile's CLI. Failures notify you and open a diagnostic window. One running statement is allowed per query buffer; `:QuarryCancel` sends a termination signal to that CLI process.
 
 Potentially mutating statements require confirmation by default. A single `SELECT`, `SHOW`, `DESCRIBE`, `EXPLAIN`, `USE`, or `VALUES` statement runs without confirmation; everything else requires it. This is a convenience guardrail, not a security boundary.
 

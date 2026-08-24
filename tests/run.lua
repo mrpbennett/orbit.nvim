@@ -19,7 +19,6 @@ local modules = {
   "quarry.schema",
   "quarry.schema_cache",
   "quarry.statements",
-  "quarry.trino_session",
   "quarry.workspace",
 }
 

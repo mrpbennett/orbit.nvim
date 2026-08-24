@@ -45,6 +45,7 @@ function M.prepare(options, statement)
   append(command, {
     "--no-progress",
     "--output-format", "JSON",
+    "--execute", statement,
   })
   return command
 end

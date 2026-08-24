@@ -5,7 +5,13 @@ M.config = {
   confirm_mutations = true,
   focus_results = false,
   max_cell_width = 48,
-  keymaps = { execute = "<leader>E", workspace = "<leader>qw" },
+  keymaps = {
+    browse = "<leader>B",
+    cancel = "<leader>X",
+    execute = "<leader>E",
+    select_profile = "<leader>P",
+    workspace = "<leader>D",
+  },
   icons = {
     collapsed = "",
     column = "󰘧",
@@ -184,6 +190,9 @@ local function apply_workspace_keymap()
       silent = true,
     })
     workspace_mapping = keymaps.workspace
+  elseif workspace_mapping then
+    pcall(vim.keymap.del, "n", workspace_mapping)
+    workspace_mapping = nil
   end
 end
 
