@@ -38,7 +38,7 @@ This backlog prioritizes a fast, native Neovim database workspace over exhaustiv
 - [ ] Show primary keys, foreign keys, indexes, constraints, triggers, sequences, routines, and views' definitions where supported.
 - [ ] Add actions to copy object DDL and open table data.
 - [ ] Add actions to generate bound select, count, insert, update, and delete statement templates.
-- [ ] Add searchable object discovery across schemas and object kinds.
+- [x] Add searchable object discovery across schemas and object kinds.
 - [ ] Navigate foreign-key targets and object dependencies.
 
 ## Query Productivity
@@ -63,4 +63,4 @@ This backlog prioritizes a fast, native Neovim database workspace over exhaustiv
 - [ ] Add integration coverage against disposable local databases for each supported connection profile kind.
 - [ ] Test transaction lifecycle, cancellation, session cleanup, and reconnect behavior.
 - [ ] Test schema metadata acquisition and result paging against real database responses.
-- [ ] Run the complete headless Neovim test suite after each completed slice.
+- [x] Run the complete headless Neovim test suite after each completed slice.

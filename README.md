@@ -1,6 +1,6 @@
 # :rocket: Orbit.nvim
 
-## Orbit - A database IDE for Neovim
+## A database IDE for Neovim
 
 Your database revolves around your editor, not the other way around.
 
