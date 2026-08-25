@@ -438,17 +438,37 @@ Files: `lua/orbit/workspace.lua:124-233` (render), `:252-338` (load/collapse/rel
 
 ### 2. Delete the standalone Schema browser — Strong
 
-Files: `lua/orbit/browser.lua` (391 lines, delete), `lua/orbit/workspace.lua`, `lua/orbit/init.lua:69-74`, `tests/browser_spec.lua`.
+Files: `lua/orbit/browser.lua` (401 lines, delete), `lua/orbit/workspace.lua`, `lua/orbit/init.lua:54,72-77`, `tests/browser_spec.lua` (delete), `tests/workspace_spec.lua`, `tests/run.lua`, `README.md`.
 
 - Problem: the Schema browser and the Workspace sidebar are the same module written twice — duplicated `object_name`, `postgres_name`, filter-line editing, `set_lines`/`render`, `focus_filter`, `show_help`, `select_action`/`run_action`, `copy_name`, generation counter — and they have already diverged (the browser has no metadata categories and no saved queries).
-- Solution: delete `browser.lua`; point `OrbitBrowse` at `workspace.open` with the filter focused, which `OrbitBrowse!` already does (`init.lua:70`).
+- Solution: delete `browser.lua` and the redundant `OrbitBrowse` command. The Workspace profile pane is the sole schema-browser workflow.
 - Wins: deletion test concentrates complexity; 391 lines gone with no behaviour lost; divergence stops at the source.
-- Decision needed first: `OrbitBrowse` opens a split in the current tabpage, the Workspace owns a tabpage. Either it moves to a tabpage, or the Workspace sidebar learns a split mount.
 
-- [ ] Decide split vs tabpage mounting for `OrbitBrowse`.
-- [ ] Repoint `OrbitBrowse` and delete `browser.lua`.
-- [ ] Fold `tests/browser_spec.lua` coverage into the Workspace tests.
-- [ ] Run the complete suite and record verification.
+- [x] Decide the sole Workspace mounting for schema browsing.
+- [x] Delete `OrbitBrowse` and `browser.lua`.
+- [x] Fold `tests/browser_spec.lua` coverage into the Workspace tests.
+- [x] Update command, keymap, result-grid, and configuration documentation; run the complete suite and record verification.
+
+#### Scoped Design
+
+- Decision: schema browsing exists only in the dedicated Workspace tabpage. Do not add a split-mounted Workspace mode or a command that duplicates profile-pane actions.
+- Use `<CR>` on a profile to bind it to the Workspace query buffer and `l`/`h` to load, expand, and collapse its schema tree. Double-click retains its bind-and-toggle behavior.
+- Keep `OrbitWorkspace` as the explicit toggle command. `workspace.open` retains that toggle behavior for this command only; the new browse operation must use a non-toggling internal ensure/open path. `OrbitWorkspaceClose` continues to close the dedicated tabpage.
+- Delete `schema_width`, the `browse` keymap, and their documentation. Retain `workspace_sidebar_width`.
+- Delete `lua/orbit/browser.lua`, `OrbitBrowse`, their eager module-load assertion, and `tests/browser_spec.lua`. Do not retain compatibility aliases or dead browser state.
+
+#### Acceptance Coverage
+
+- Retain Workspace coverage for profile binding, tree expansion, table metadata, and asynchronous action results returning to the Workspace tabpage after focus changes.
+- Update README commands, configurable mappings, the Workspace workflow, editable sample-statement wording, and configuration tables. Remove standalone-browser and browse-keymap documentation.
+- Verification: run `nvim --headless -u NONE -l tests/run.lua`, `git diff --check`, and `stylua --check lua tests` when `stylua` is installed. Record unavailable formatter or live-connector gaps in this review section.
+
+#### Review
+
+- The standalone browser module, its test file, its loader assertion, and `schema_width` were deleted.
+- Follow-up decision: remove the redundant `OrbitBrowse` command, mapping, and Workspace browse API. Use `:OrbitWorkspace`, then `<CR>` to bind a profile and `l`/`h` to expand or collapse its schema tree.
+- Workspace coverage retains schema navigation and asynchronous action-result placement after focus changes.
+- Verification: `nvim --headless -u NONE -l tests/run.lua` and `git diff --check` passed. `stylua` is not installed in this environment.
 
 ### 3. Push object naming behind the connector seam — Strong
 
@@ -458,10 +478,29 @@ Files: `lua/orbit/completion.lua:15-25, 34-51, 61-84`; `lua/orbit/workspace.lua:
 - Solution: add `qualified_name(options, row)`, `completion_word(options, row, prefix)`, and `schema_of(options, qualifier)` to the connector interface; delete the kind checks from the Workspace, the Schema browser, and completion.
 - Wins: three adapters make the seam real; a fourth connector kind needs no grep; naming becomes testable per adapter with no buffer. Also supplies the cache key for item 4 and the node labels for item 1.
 
-- [ ] Add the naming functions to all three connectors.
-- [ ] Remove `profile.kind` from `completion.lua`, `workspace.lua`, `browser.lua`.
-- [ ] Add per-connector naming and completion-qualification tests.
-- [ ] Run the complete suite and record verification.
+- [x] Add the naming functions to all three connectors.
+- [x] Remove naming `profile.kind` checks from `completion.lua` and `workspace.lua`.
+- [x] Add per-connector naming and completion-qualification tests.
+- [x] Run the complete suite and record verification.
+
+#### Settled Design
+
+- A qualified name is the canonical SQL-pasteable identifier for a schema object: SQLite quotes the object name, PostgreSQL quotes schema and object names, and Trino quotes catalog, schema, and object names.
+- Completion qualifier recognition belongs to the connector. PostgreSQL accepts both quoted and unquoted schema prefixes; completion output remains canonically quoted.
+- Retain `adapters.lua` as the normalized dispatch seam for this slice. Add the naming forwards there and defer item 5's broader connector-resolution decision.
+
+#### Implementation
+
+- [x] Add connector-owned qualified-name, completion-word, and qualifier-to-schema functions with adapter forwards.
+- [x] Replace Workspace and completion naming kind checks with the naming seam.
+- [x] Add focused per-connector naming and completion qualification coverage.
+- [x] Run the complete suite and record verification.
+
+#### Review
+
+- `qualified_name`, `completion_word`, and `schema_of` are connector capabilities forwarded by `adapters`. Completion and copied Workspace object names no longer duplicate connector-specific naming rules.
+- SQLite copied names are now canonical quoted identifiers; its completion words remain unquoted. PostgreSQL accepts quoted and unquoted schema prefixes while returning quoted completion words. Trino preserves existing unquoted completion words and uses quoted catalog/schema/object names for copied objects.
+- Verification: `nvim --headless -u NONE -l tests/run.lua` and `git diff --check` passed. `stylua --check lua tests` could not run because `stylua` is not installed.
 
 ### 4. One acquisition function in Schema acquisition — Worth exploring
 
@@ -479,14 +518,23 @@ Files: `lua/orbit/schema_cache.lua:45-154`.
 
 Files: `lua/orbit/adapters.lua` (148 lines, 13 functions).
 
-- Problem: Adapters is shallow — its interface mirrors the connector interface function for function. Eleven of thirteen functions are the same four lines (look up `connectors[profile.kind]`, forward, return a bespoke "unsupported" string), so growing a connector means editing Adapters too. The persistent-session work added 58 lines of exactly this.
-- Solution: `adapters.connector(profile) -> connector, err` resolves once; callers use the connector interface directly. Keep only the functions that add behaviour — `validate_options` and `parse`.
-- Wins: interface shrinks and the implementation absorbs the forwards; connectors grow without touching the seam; one "unsupported kind" error instead of eleven.
-- Caveat: the deletion test partly moves complexity rather than concentrating it — callers must handle a nil connector. Weigh against item 3, which removes most of the reason to reach for Adapters at all.
+- Problem: `adapters` is shallow: most of its interface mirrors connector functions solely to resolve `profile.kind`, forward backend options, and supply fallback errors. Growing a connector therefore requires editing both its module and `adapters`.
+- Decision: `adapters.connector(profile) -> connector, err` is the sole profile-kind resolver. It returns the canonical unsupported-kind error. Retain only shared `validate_options` and generic JSON `parse` behavior in `adapters`; remove its forwarding API without compatibility aliases.
+- Resolution scope: resolve a connector once per user operation and retain it through that operation. Schema acquisition passes its resolved connector through the execution path so statement construction and parsing do not resolve it again. Sessions retain the connector for their lifetime and replace it when their profile signature changes.
+- Connector contract: connector methods retain their current `options`-based signatures. A connector owns backend-specific behavior; operation modules own connection-profile selection, lifecycle, and user-facing errors.
+- Optional capabilities: an absent connector method means unsupported. The owning domain preserves current behavior: Result grids report read-only editing, session code reports unavailable persistent sessions, and Workspace/schema UI omits unavailable actions and metadata. Do not add no-op methods to every connector.
+- Tests: replace forwarding tests with resolver coverage for every supported kind and an unknown kind. Keep behavior tests with their connectors and add operation-level tests for capability fallbacks and errors.
 
-- [ ] Decide whether to do this before or after item 3.
-- [ ] Collapse the forwarding functions and update callers.
-- [ ] Run the complete suite and record verification.
+- [x] Decide whether to do this before or after item 3.
+- [x] Collapse the forwarding functions and update callers.
+- [x] Run the complete suite and record verification.
+
+#### Review
+
+- `adapters` now resolves connector kinds once and retains shared profile-option validation plus generic JSON parsing; connector-specific forwards were deleted.
+- Runner, persistent sessions, schema acquisition, completion, Workspace actions, and editable-result writes invoke resolved connector capabilities directly. Schema acquisition, Workspace metadata actions, and editable writes pass the same resolved connector into Runner.
+- Added resolver, unsupported-kind, schema handoff, and session profile-change regression coverage. The profile-change test also fixed the session exit path for CLI failures without stderr.
+- Verification: `nvim --headless -u NONE -l tests/run.lua` and `git diff --check` passed. `stylua` is not installed in this environment.
 
 ### Examined, not recommended
 

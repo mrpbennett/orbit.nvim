@@ -113,6 +113,7 @@ local function metadata_entry_icon(icons, category)
 end
 
 function M.lines(tree, profile, filter, options)
+	local connector = adapters.connector(profile)
   local icons = options.icons
   local lines = {}
   local nodes = {}
@@ -146,7 +147,7 @@ function M.lines(tree, profile, filter, options)
             nodes[#lines] = table_node
             table.insert(highlights, { group = object_kind == "view" and "OrbitView" or "OrbitTable", line = #lines })
             if table_expanded then
-              for _, category in ipairs(adapters.metadata_categories(profile, row)) do
+						for _, category in ipairs(connector and connector.metadata_categories and connector.metadata_categories(profile.options, row) or {}) do
                 local metadata_node = { category = category, kind = "metadata", profile = profile, row = row }
                 local metadata_expanded = M.is_expanded(tree, metadata_node)
                 local entries = tree.metadata[metadata_key(row, category.id)]

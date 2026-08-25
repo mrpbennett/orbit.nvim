@@ -15,8 +15,9 @@ return {
   ["schema cache shares acquisition until an explicit refresh"] = function()
     local original_run = runner.run
     local runs = 0
-    runner.run = function(_, _, callback)
+    runner.run = function(profile, _, callback, connector)
       runs = runs + 1
+			assert(connector == require("orbit.adapters").connector(profile))
       callback({ { name = "events", type = "table" } })
     end
 

@@ -133,7 +133,7 @@ function M.open(rows, options)
     local footer = model
         and "[Add Row] [Delete] [Save] [Rollback]  o/O add  dd delete  V select  :w save  :e! reload"
       or options.read_only_reason
-      or "Read-only: open a Schema browser table sample to edit.  q close  y copy  <CR> inspect"
+      or "Read-only: open a Workspace table sample to edit.  q close  y copy  <CR> inspect"
     local lines
     lines, widths = grid_model.layout(grid, source, footer)
     vim.bo[buffer].modifiable = true
@@ -349,7 +349,13 @@ function M.open(rows, options)
       if saving or not editable_result.changed(model) then
         return
       end
-      local statement, statement_err = adapters.mutation_statement(options.profile, options.editable, editable_result.changes(model))
+			local connector, connector_err = adapters.connector(options.profile)
+			local statement, statement_err
+			if connector and connector.mutation_statement then
+				statement, statement_err = connector.mutation_statement(options.profile.options, options.editable, editable_result.changes(model))
+			else
+				statement_err = connector_err or "Result is read-only: editing is not supported by this connection profile."
+			end
       if not statement then
         vim.notify(statement_err, vim.log.levels.ERROR)
         return
@@ -361,7 +367,7 @@ function M.open(rows, options)
       end
       saving = true
       local completed = false
-      runner.run(options.profile, statement, function(_, save_err)
+		runner.run(options.profile, statement, function(_, save_err)
         saving = false
         if save_err then
           vim.notify(save_err, vim.log.levels.ERROR)
@@ -370,7 +376,7 @@ function M.open(rows, options)
         end
         reload(function()
           completed = true
-        end)
+		end, connector)
       end)
       if not vim.wait(30000, function()
         return completed

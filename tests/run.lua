@@ -8,7 +8,6 @@ package.path = table.concat({
 local modules = {
   "orbit",
   "orbit.adapters",
-  "orbit.browser",
 	"orbit.completion",
 	"orbit.connectors.postgres",
    "orbit.diagnostics",
@@ -32,7 +31,6 @@ end
 
 local specs = {
   require("tests.profile_spec"),
-  require("tests.browser_spec"),
   require("tests.feedback_spec"),
   require("tests.keymaps_spec"),
   require("tests.statements_spec"),

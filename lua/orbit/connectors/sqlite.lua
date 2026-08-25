@@ -37,6 +37,18 @@ function M.prepare(options, statement)
   return command
 end
 
+function M.qualified_name(_, row)
+  return identifier(row.name)
+end
+
+function M.completion_word(_, row, prefix)
+  return prefix .. row.name
+end
+
+function M.schema_of()
+  return nil
+end
+
 function M.session_command(options)
   local command = { options.executable or "sqlite3" }
   append(command, options.arguments or {})

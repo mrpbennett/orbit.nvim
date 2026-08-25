@@ -1,6 +1,7 @@
 local adapters = require("orbit.adapters")
 local profiles = require("orbit.profiles")
 local query = require("orbit.query")
+local runner = require("orbit.runner")
 
 local function write_profiles(document)
   local path = vim.fn.tempname()
@@ -11,6 +12,10 @@ end
 
 local function assert_equal(actual, expected)
   assert(vim.deep_equal(actual, expected), vim.inspect(actual) .. " ~= " .. vim.inspect(expected))
+end
+
+local function connector(kind)
+  return assert(adapters.connector({ kind = kind }))
 end
 
 return {
@@ -42,6 +47,26 @@ return {
     assert_equal(loaded.profiles[1].name, "analytics")
     assert_equal(loaded.profiles[2].kind, "sqlite")
   end,
+
+  ["adapters resolve supported connector kinds and reject unknown kinds"] = function()
+    assert(adapters.connector({ kind = "sqlite" }) == connector("sqlite"))
+    assert(adapters.connector({ kind = "postgres" }) == connector("postgres"))
+    assert(adapters.connector({ kind = "trino" }) == connector("trino"))
+    local unknown, err = adapters.connector({ kind = "unknown" })
+    assert(unknown == nil)
+    assert(err == "unsupported profile kind: unknown")
+  end,
+
+	["runner reports an unsupported profile kind"] = function()
+		local run_err
+		runner.run({ kind = "unknown", options = {} }, "SELECT 1", function(_, err)
+			run_err = err
+		end)
+		assert(vim.wait(100, function()
+			return run_err ~= nil
+		end))
+		assert(run_err == "unsupported profile kind: unknown")
+	end,
 
   ["profiles.load rejects removed Trino HTTP transport options"] = function()
     for name, value in pairs({ transport = "http", password_env = "ANALYTICS_TRINO_PASSWORD" }) do
@@ -141,16 +166,13 @@ return {
     assert(profiles.load(path))
   end,
 
-  ["adapters.prepare builds an interactive Trino command"] = function()
-    local command = assert(adapters.prepare({
-      kind = "trino",
-      options = {
+  ["Trino connector builds an interactive command"] = function()
+    local command = assert(connector("trino").prepare({
         server = "https://trino.example.test:8443",
         user = "orbit",
         catalog = "hive",
         schema = "default",
-      },
-    }, "SELECT 1"))
+		}, "SELECT 1"))
 
     assert_equal(command, {
       "trino",
@@ -164,26 +186,41 @@ return {
     })
   end,
 
-	["adapters.prepare builds a JSON SQLite command"] = function()
-    local command = assert(adapters.prepare({
-      kind = "sqlite",
-      options = { path = "/tmp/local.db" },
-    }, "SELECT 1"))
+  ["connectors own object naming"] = function()
+    local sqlite = connector("sqlite")
+    local postgres = connector("postgres")
+    local trino = connector("trino")
+
+    assert(sqlite.qualified_name({}, { name = 'a"b' }) == '"a""b"')
+    assert(sqlite.completion_word({}, { name = "sessions" }, "") == "sessions")
+    assert(sqlite.schema_of({}, "main.") == nil)
+
+    assert(postgres.qualified_name({}, { schema = "Sales", name = 'Order"Item' }) == '"Sales"."Order""Item"')
+    assert(postgres.completion_word({}, { schema = "Sales", name = "Order" }, '"Sales".') == '"Sales"."Order"')
+    assert(postgres.schema_of({}, "Sales.") == "Sales")
+    assert(postgres.schema_of({}, '"Sales".') == "Sales")
+
+    assert(trino.qualified_name({}, { catalog = "iceberg", schema = "cleanroom", name = "events" }) == '"iceberg"."cleanroom"."events"')
+    assert(trino.completion_word({ catalog = "hive", schema = "default" }, { catalog = "hive", schema = "default", name = "events" }, "") == "default.events")
+    assert(trino.completion_word({ catalog = "hive" }, { catalog = "iceberg", schema = "cleanroom", name = "events" }, "") == "iceberg.cleanroom.events")
+    assert(trino.completion_word({}, { name = "events" }, "cleanroom.") == "cleanroom.events")
+    assert(trino.schema_of({}, "cleanroom.") == "cleanroom")
+  end,
+
+	["SQLite connector builds a JSON command"] = function()
+		local command = assert(connector("sqlite").prepare({ path = "/tmp/local.db" }, "SELECT 1"))
 
     assert_equal(command, { "sqlite3", "-json", "/tmp/local.db", "SELECT 1" })
 	end,
 
-	["adapters.prepare builds a CSV PostgreSQL command"] = function()
-		local command = assert(adapters.prepare({
-			kind = "postgres",
-			options = {
+	["PostgreSQL connector builds a CSV command"] = function()
+		local command = assert(connector("postgres").prepare({
 				database = "orbit",
 				host = "postgres.example.test",
 				port = 5432,
 				user = "alice",
 				sslmode = "require",
-			},
-		}, "SELECT 1"))
+			}, "SELECT 1"))
 
 		assert_equal(command, {
 			"psql",
@@ -200,19 +237,14 @@ return {
 	end,
 
 	["PostgreSQL profiles pass passwords only through the process environment"] = function()
-		local environment = adapters.environment({
-			kind = "postgres",
-			options = { database = "orbit", password = "secret" },
-		})
+		local postgres = connector("postgres")
+		local environment = postgres.environment({ database = "orbit", password = "secret" })
 		assert_equal(environment, { PGPASSWORD = "secret" })
-		assert(not vim.inspect(assert(adapters.prepare({
-			kind = "postgres",
-			options = { database = "orbit", password = "secret" },
-		}, "SELECT 1"))):match("secret"))
+		assert(not vim.inspect(assert(postgres.prepare({ database = "orbit", password = "secret" }, "SELECT 1"))):match("secret"))
 	end,
 
   ["PostgreSQL CSV output is normalized into rows"] = function()
-		local rows = assert(adapters.parse_profile({ kind = "postgres", options = {} }, 'id,name,note,missing,empty\n1,Alice,"hello, world",,""\n2,Bob,"two\nlines",,""\n'))
+		local rows = assert(connector("postgres").parse('id,name,note,missing,empty\n1,Alice,"hello, world",,""\n2,Bob,"two\nlines",,""\n'))
 		assert_equal(rows, {
 			{ id = "1", name = "Alice", note = "hello, world", missing = vim.NIL, empty = "" },
 			{ id = "2", name = "Bob", note = "two\nlines", missing = vim.NIL, empty = "" },
@@ -227,29 +259,17 @@ return {
     assert_equal(lines, { { id = 1 }, { id = 2 } })
   end,
 
-  ["adapters build backend-specific schema statements"] = function()
-    local statement = assert(adapters.schema_statement({
-      kind = "trino",
-      options = { catalog = "hive", schema = "default" },
-    }, { type = "columns", name = "events" }))
+  ["Trino connector builds schema statements"] = function()
+    local statement = assert(connector("trino").schema_statement({ catalog = "hive", schema = "default" }, { type = "columns", name = "events" }))
 
     assert(statement:match("information_schema%.columns"))
     assert(statement:match("table_name = 'events'"))
   end,
 
   ["schema_patterns limit relational schema discovery"] = function()
-    local trino = assert(adapters.schema_statement({
-      kind = "trino",
-      options = { catalog = "gridhive", schema_patterns = { gridhive = { "cleanroom", "report" }, iceberg = {} } },
-    }, { type = "tables" }))
-    local postgres = assert(adapters.schema_statement({
-      kind = "postgres",
-      options = { database = "orbit", schema_patterns = { "app" } },
-    }, { type = "tables" }))
-    local sqlite = assert(adapters.schema_statement({
-      kind = "sqlite",
-      options = { path = "/tmp/local.db", schema_patterns = { "other" } },
-    }, { type = "tables" }))
+		local trino = assert(connector("trino").schema_statement({ catalog = "gridhive", schema_patterns = { gridhive = { "cleanroom", "report" }, iceberg = {} } }, { type = "tables" }))
+		local postgres = assert(connector("postgres").schema_statement({ database = "orbit", schema_patterns = { "app" } }, { type = "tables" }))
+		local sqlite = assert(connector("sqlite").schema_statement({ path = "/tmp/local.db", schema_patterns = { "other" } }, { type = "tables" }))
 
     assert(trino:match('FROM "gridhive"%.information_schema%.tables'))
     assert(trino:match("table_schema IN %('cleanroom', 'report'%)"))
@@ -258,11 +278,8 @@ return {
     assert(sqlite:match("WHERE 1 = 0"))
   end,
 
-  ["adapters expose connector-specific schema object actions"] = function()
-    local sqlite_actions = assert(adapters.object_actions({
-      kind = "sqlite",
-      options = { path = "/tmp/local.db" },
-    }, { schema = "main", name = "sessions", type = "table" }, 25))
+  ["connectors expose schema object actions"] = function()
+    local sqlite_actions = assert(connector("sqlite").object_actions({ path = "/tmp/local.db" }, { schema = "main", name = "sessions", type = "table" }, 25))
     local action_ids = {}
     for _, action in ipairs(sqlite_actions) do
       action_ids[action.id] = action
@@ -276,29 +293,23 @@ return {
     assert(action_ids.foreign_keys.statement:match("PRAGMA foreign_key_list"))
     assert(action_ids.definition.statement:match("sqlite_master"))
 
-    local trino_actions = assert(adapters.object_actions({
-      kind = "trino",
-      options = { catalog = "hive", schema = "analytics" },
-    }, { schema = "analytics", name = "events", type = "table" }, 25))
+		local trino_actions = assert(connector("trino").object_actions({ catalog = "hive", schema = "analytics" }, { schema = "analytics", name = "events", type = "table" }, 25))
 
     assert(#trino_actions == 2)
     assert(trino_actions[1].id == "sample")
     assert(trino_actions[2].id == "columns")
     assert(trino_actions[2].statement:match("information_schema%.columns"))
 
-    local cross_catalog_actions = assert(adapters.object_actions({
-      kind = "trino",
-      options = { catalog = "hive" },
-    }, { catalog = "iceberg", schema = "cleanroom", name = "events", type = "table" }, 25))
+		local cross_catalog_actions = assert(connector("trino").object_actions({ catalog = "hive" }, { catalog = "iceberg", schema = "cleanroom", name = "events", type = "table" }, 25))
     assert(cross_catalog_actions[1].statement:match('FROM "iceberg"%."cleanroom"%."events"'))
     assert(cross_catalog_actions[2].statement:match('FROM "iceberg"%.information_schema%.columns'))
   end,
 
-	["adapters expose metadata categories by connector and object kind"] = function()
-    local sqlite_categories = adapters.metadata_categories({ kind = "sqlite", options = { path = "/tmp/local.db" } }, { type = "table" })
-    local view_categories = adapters.metadata_categories({ kind = "sqlite", options = { path = "/tmp/local.db" } }, { type = "view" })
-		local trino_categories = adapters.metadata_categories({ kind = "trino", options = { catalog = "hive" } }, { type = "table" })
-		local postgres_categories = adapters.metadata_categories({ kind = "postgres", options = { database = "orbit" } }, { type = "table" })
+	["connectors expose metadata categories by object kind"] = function()
+    local sqlite_categories = connector("sqlite").metadata_categories({ path = "/tmp/local.db" }, { type = "table" })
+    local view_categories = connector("sqlite").metadata_categories({ path = "/tmp/local.db" }, { type = "view" })
+		local trino_categories = connector("trino").metadata_categories({ catalog = "hive" }, { type = "table" })
+		local postgres_categories = connector("postgres").metadata_categories({ database = "orbit" }, { type = "table" })
 
     assert(vim.deep_equal(sqlite_categories, {
       { id = "columns", label = "columns" },
@@ -335,12 +346,12 @@ return {
 	end,
 
 	["PostgreSQL schema statements use shared metadata fields and ordered foreign keys"] = function()
-		local primary_keys = assert(adapters.schema_statement({ kind = "postgres", options = { database = "orbit" } }, {
+		local primary_keys = assert(connector("postgres").schema_statement({ database = "orbit" }, {
 			type = "primary_keys",
 			name = "orders",
 			schema = "app",
 		}))
-		local foreign_keys = assert(adapters.schema_statement({ kind = "postgres", options = { database = "orbit" } }, {
+		local foreign_keys = assert(connector("postgres").schema_statement({ database = "orbit" }, {
 			type = "foreign_keys",
 			name = "orders",
 			schema = "app",
@@ -373,10 +384,7 @@ return {
   end,
 
   ["Trino catalog discovery does not force a schema"] = function()
-    local statement = assert(adapters.schema_statement({
-      kind = "trino",
-      options = { catalog = "gridhive" },
-    }, { type = "tables" }))
+    local statement = assert(connector("trino").schema_statement({ catalog = "gridhive" }, { type = "tables" }))
 
     assert(statement:match("table_catalog = 'gridhive'"))
     assert(not statement:match("table_schema ="))
@@ -418,11 +426,8 @@ return {
     assert(err:match("options.confirm_mutations must be a boolean"))
   end,
 
-  ["adapters generate primary-key mutations in one transaction"] = function()
-    local statement = assert(adapters.mutation_statement({
-      kind = "sqlite",
-      options = {},
-    }, {
+	["SQLite connector generates primary-key mutations in one transaction"] = function()
+		local statement = assert(connector("sqlite").mutation_statement({}, {
       name = "users",
       primary_keys = { "id" },
     }, {

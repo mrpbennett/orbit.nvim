@@ -1,5 +1,6 @@
 local cache = require("orbit.schema_cache")
 local profiles = require("orbit.profiles")
+local adapters = require("orbit.adapters")
 
 local M = {}
 
@@ -12,19 +13,6 @@ local function item(word, kind, detail)
   }
 end
 
-local function postgres_identifier(value)
-  return '"' .. value:gsub('"', '""') .. '"'
-end
-
-local function postgres_schema_prefix(value)
-  -- Decode a quoted prefix for cache lookup; inserted completion words stay SQL-escaped.
-  local schema = value:sub(1, -2)
-  if schema:sub(1, 1) == '"' and schema:sub(-1) == '"' then
-    return schema:sub(2, -2):gsub('""', '"')
-  end
-  return schema
-end
-
 local function sorted(items)
   table.sort(items, function(left, right)
     return left.word < right.word
@@ -32,19 +20,12 @@ local function sorted(items)
   return items
 end
 
-local function table_items(profile, prefix)
+local function table_items(profile, connector, prefix)
   local items = {}
+  local schema = prefix ~= "" and connector.schema_of(profile.options, prefix) or nil
   for _, row in ipairs(cache.tables(profile.name)) do
-    local postgres_prefix = row.schema and postgres_identifier(row.schema) .. "." or nil
-    if prefix == "" or not row.schema or prefix == row.schema .. "." or (profile.kind == "postgres" and prefix == postgres_prefix) then
-      local name = row.schema and row.schema .. "." .. row.name or row.name
-      if profile.kind == "trino" and row.catalog and row.catalog ~= profile.options.catalog then
-        name = row.catalog .. "." .. name
-      end
-      if profile.kind == "postgres" and row.schema then
-        name = postgres_identifier(row.schema) .. "." .. postgres_identifier(row.name)
-      end
-      local word = profile.kind == "postgres" and name or prefix ~= "" and prefix .. row.name or name
+    if prefix == "" or row.schema == schema then
+			local word = assert(connector.completion_word(profile.options, row, prefix))
       table.insert(items, item(word, row.type == "view" and "View" or "Table", profile.name))
     end
   end
@@ -60,6 +41,10 @@ local function column_items(profile, table_name, prefix)
 end
 
 function M.items(profile, line, cursor)
+	local connector = adapters.connector(profile)
+	if not connector then
+		return {}
+	end
   local before = line:sub(1, cursor)
   local qualifier = before:match("([%w_\"]+%.)[%w_\"]*$")
   if qualifier then
@@ -68,11 +53,11 @@ function M.items(profile, line, cursor)
     if #cache.columns(profile.name, object) > 0 then
       return column_items(profile, object, qualifier)
     end
-    if profile.kind == "trino" or profile.kind == "postgres" then
-      local schema = profile.kind == "postgres" and postgres_schema_prefix(qualifier) or object
+		local schema = connector.schema_of(profile.options, qualifier)
+    if schema then
       for _, row in ipairs(cache.tables(profile.name)) do
         if row.schema == schema then
-          return table_items(profile, qualifier)
+					return table_items(profile, connector, qualifier)
         end
       end
     end
@@ -80,7 +65,7 @@ function M.items(profile, line, cursor)
 
   local keyword = before:upper():match("([A-Z]+)%s+[%w_%.]*$")
   if keyword == "FROM" or keyword == "JOIN" or keyword == "UPDATE" or keyword == "INTO" then
-    return table_items(profile, "")
+		return table_items(profile, connector, "")
   end
   return {}
 end

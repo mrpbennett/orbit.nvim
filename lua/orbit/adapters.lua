@@ -7,6 +7,14 @@ local connectors = {
 	trino = require("orbit.connectors.trino"),
 }
 
+function M.connector(profile)
+	local connector = connectors[profile and profile.kind]
+	if connector then
+		return connector
+	end
+	return nil, "unsupported profile kind: " .. tostring(profile and profile.kind)
+end
+
 function M.validate_options(profile)
 	local options = profile.options
 	if options.executable ~= nil and (type(options.executable) ~= "string" or options.executable == "") then
@@ -34,27 +42,11 @@ function M.validate_options(profile)
 		end
 	end
 
-	local connector = connectors[profile.kind]
-	if connector then
-		return connector.validate_options(profile.name, options)
+	local connector, err = M.connector(profile)
+	if not connector then
+		return nil, err
 	end
-	return nil, "unsupported profile kind: " .. tostring(profile.kind)
-end
-
-function M.prepare(profile, statement)
-	if type(profile) ~= "table" or type(profile.options) ~= "table" then
-		return nil, "profile options are required"
-	end
-	if type(statement) ~= "string" or statement == "" then
-		return nil, "statement is required"
-	end
-
-	local connector = connectors[profile.kind]
-	if connector then
-		return connector.prepare(profile.options, statement)
-	end
-
-	return nil, "unsupported profile kind: " .. tostring(profile.kind)
+	return connector.validate_options(profile.name, options)
 end
 
 function M.parse(output)
@@ -80,91 +72,6 @@ function M.parse(output)
 		table.insert(rows, row)
 	end
 	return rows
-end
-
-function M.parse_profile(profile, output)
-	local connector = connectors[profile.kind]
-	if connector and connector.parse then
-		return connector.parse(output)
-	end
-	return M.parse(output)
-end
-
-function M.environment(profile)
-	local connector = connectors[profile.kind]
-	if connector and connector.environment then
-		return connector.environment(profile.options)
-	end
-	return {}
-end
-
-function M.supports_session(profile)
-  local connector = connectors[profile.kind]
-  return connector ~= nil and connector.session_command ~= nil
-end
-
-function M.session_command(profile)
-  local connector = connectors[profile.kind]
-  if connector and connector.session_command then
-    return connector.session_command(profile.options)
-  end
-  return nil, "persistent sessions are not supported for profile kind: " .. tostring(profile.kind)
-end
-
-function M.session_request(profile, statement, marker)
-  local connector = connectors[profile.kind]
-  if connector and connector.session_request then
-    return connector.session_request(statement, marker)
-  end
-  return nil, "persistent sessions are not supported for profile kind: " .. tostring(profile.kind)
-end
-
-function M.session_output(profile, output, marker)
-  local connector = connectors[profile.kind]
-  if connector and connector.session_output then
-    return connector.session_output(output, marker)
-  end
-end
-
-function M.schema_statement(profile, node)
-	node = node or { type = "tables" }
-	local connector = connectors[profile.kind]
-	if connector then
-		return connector.schema_statement(profile.options, node)
-	end
-  return nil, "unsupported profile kind: " .. tostring(profile.kind)
-end
-
-function M.metadata_categories(profile, row)
-  local connector = connectors[profile.kind]
-  if connector and connector.metadata_categories then
-    return connector.metadata_categories(profile.options, row)
-  end
-  return {}
-end
-
-function M.object_actions(profile, row, limit)
-  local connector = connectors[profile.kind]
-  if connector and connector.object_actions then
-    return connector.object_actions(profile.options, row, limit)
-  end
-  return nil, "schema object actions are not supported for profile kind: " .. tostring(profile.kind)
-end
-
-function M.editable_table(profile, row, primary_keys)
-  local connector = connectors[profile.kind]
-  if connector and connector.editable_table then
-    return connector.editable_table(profile.options, row, primary_keys)
-  end
-  return nil, "Result is read-only: editing is not supported by this connection profile."
-end
-
-function M.mutation_statement(profile, table, changes)
-  local connector = connectors[profile.kind]
-  if connector and connector.mutation_statement then
-    return connector.mutation_statement(profile.options, table, changes)
-  end
-  return nil, "Result is read-only: editing is not supported by this connection profile."
 end
 
 return M

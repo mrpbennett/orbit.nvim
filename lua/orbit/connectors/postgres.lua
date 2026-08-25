@@ -19,6 +19,13 @@ local function qualified(row)
   return table.concat({ identifier(row.schema or "public"), identifier(row.name) }, ".")
 end
 
+local function unquote_identifier(value)
+  if value:sub(1, 1) == '"' and value:sub(-1) == '"' then
+    return value:sub(2, -2):gsub('""', '"')
+  end
+  return value
+end
+
 local function schema_filter(schemas)
   if not schemas then
     return nil
@@ -80,6 +87,18 @@ function M.prepare(options, statement)
     "--command", statement,
   })
   return command
+end
+
+function M.qualified_name(_, row)
+  return qualified(row)
+end
+
+function M.completion_word(_, row)
+  return qualified(row)
+end
+
+function M.schema_of(_, qualifier)
+  return unquote_identifier(qualifier:gsub("%.$", ""))
 end
 
 function M.session_command(options)

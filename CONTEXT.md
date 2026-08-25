@@ -8,6 +8,10 @@ Orbit.nvim is a personal Neovim database query workspace for Trino and SQLite. I
 A named JSON-defined database target with a `kind` and backend-specific options, containing the settings Orbit.nvim needs to invoke its CLI, including connection credentials where required.
 _Avoid_: connection, config, data source
 
+**Connector**:
+The backend-specific component selected by a connection profile's `kind`. It implements the capabilities supported by that backend using the profile's backend-specific options.
+_Avoid_: adapter, driver
+
 **Profile file**:
 The owner-protected JSON file in `~/.local/share/orbit.nvim/` that is the source of truth for connection profiles.
 _Avoid_: configuration file, credentials file
@@ -18,6 +22,13 @@ _Avoid_: database tree, sidebar
 
 **Schema acquisition**:
 The retrieval and refresh of the tables, views, and columns exposed by a connection profile for use by Orbit.nvim views and completion.
+
+**Qualified name**:
+The canonical SQL-pasteable identifier for a schema object. It is connector-specific: SQLite uses a quoted object name, PostgreSQL uses quoted schema and object names, and Trino uses quoted catalog, schema, and object names.
+_Avoid_: table name, object path
+
+**Completion qualifier**:
+The identifier prefix before a completion target, resolved by the connection profile's connector. PostgreSQL accepts either its canonical quoted schema prefix or its ordinary unquoted schema prefix.
 
 **Result grid**:
 A configurable formatted window, shown at the bottom by default, that displays the rows and column headers produced by an executed statement.

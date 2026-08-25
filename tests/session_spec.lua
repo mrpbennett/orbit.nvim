@@ -55,4 +55,31 @@ return {
     assert(request.done)
     session.close(profile.name)
   end,
+
+	["changing a profile replaces its retained session"] = function()
+		local profile = {
+			name = "session-profile-change",
+			kind = "sqlite",
+			options = { path = ":memory:" },
+		}
+		local created, create_err, select_err
+
+		runner.run(profile, "CREATE TEMP TABLE orbit_session_test (value INTEGER)", function(_, err)
+			created, create_err = true, err
+		end)
+		assert(vim.wait(1000, function()
+			return created
+		end), "timed out waiting for the initial SQLite session")
+		assert(create_err == nil, create_err)
+
+		profile.options = { arguments = { "-bail" }, path = ":memory:" }
+		runner.run(profile, "SELECT value FROM orbit_session_test", function(_, err)
+			select_err = err
+		end)
+		assert(vim.wait(1000, function()
+			return select_err ~= nil
+		end), "timed out waiting for the replacement SQLite session")
+		assert(select_err:match("connection closed"))
+		session.close(profile.name)
+	end,
 }

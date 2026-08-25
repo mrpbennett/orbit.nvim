@@ -40,13 +40,6 @@ end
 
 local object_name = schema_tree.object_name
 
-local function postgres_name(row)
-  local quote = function(value)
-    return '"' .. value:gsub('"', '""') .. '"'
-  end
-  return table.concat({ quote(row.schema or "public"), quote(row.name) }, ".")
-end
-
 local function discover_saved_queries(directory)
   local function scan(path)
     local handle = vim.uv.fs_scandir(path)
@@ -320,14 +313,14 @@ local function open_generated_query(state, profile, statement, table)
   vim.api.nvim_buf_set_lines(buffer, 0, -1, false, vim.split(statement, "\n", { plain = true }))
 end
 
-local function run_object_action(state, profile, row, action)
+local function run_object_action(state, profile, connector, row, action)
   if action.kind == "query_buffer" then
     -- Generated statements are editable; metadata actions execute immediately into the result grid.
     open_generated_query(state, profile, action.statement, row)
     return
   end
   local notice = feedback.start("Loading " .. action.label:lower() .. " for " .. object_name(row) .. "...")
-  runner.run(profile, action.statement, function(rows, err)
+	runner.run(profile, action.statement, function(rows, err)
     if workspaces[state.tabpage] ~= state or not vim.api.nvim_tabpage_is_valid(state.tabpage) then
       feedback.finish(notice, "Schema action discarded", vim.log.levels.DEBUG)
       return
@@ -346,11 +339,21 @@ local function run_object_action(state, profile, row, action)
       source_window = state.query_window,
       tabpage = state.tabpage,
     })
-  end)
+	end, connector)
 end
 
 local function select_object_action(state, profile, row)
-  local actions, err = adapters.object_actions(profile, row, state.config.result_limit)
+	local connector, err = adapters.connector(profile)
+	if not connector then
+		vim.notify(err, vim.log.levels.ERROR)
+		return
+	end
+	local actions
+	if connector.object_actions then
+		actions, err = connector.object_actions(profile.options, row, state.config.result_limit)
+	else
+		err = "schema object actions are not supported for profile kind: " .. tostring(profile.kind)
+	end
   if not actions then
     vim.notify(err, vim.log.levels.ERROR)
     return
@@ -362,19 +365,19 @@ local function select_object_action(state, profile, row)
     end,
   }, function(action)
     if action then
-      run_object_action(state, profile, row, action)
+			run_object_action(state, profile, connector, row, action)
     end
   end)
 end
 
 local function copy_object_name(profile, row)
   -- Connector-specific qualification produces an identifier that can be pasted back into SQL.
-  local name = row.name
-  if profile.kind == "trino" then
-    name = table.concat({ row.catalog or profile.options.catalog, row.schema or profile.options.schema, row.name }, ".")
-  elseif profile.kind == "postgres" then
-    name = postgres_name(row)
-  end
+	local connector, err = adapters.connector(profile)
+	if not connector then
+		vim.notify(err, vim.log.levels.ERROR)
+		return
+	end
+	local name = connector.qualified_name(profile.options, row)
   vim.fn.setreg('"', name)
   vim.notify("Orbit name copied")
 end
@@ -523,7 +526,8 @@ local function configure_sidebar(state)
     elseif node.kind == "table" and not schema_tree.is_expanded(state.tree, node) then
       schema_tree.toggle(state.tree, node)
       render(state)
-      for _, category in ipairs(adapters.metadata_categories(node.profile, node.row)) do
+			local connector = adapters.connector(node.profile)
+			for _, category in ipairs(connector and connector.metadata_categories and connector.metadata_categories(node.profile.options, node.row) or {}) do
         load_metadata(state, node.profile, node.row, category, false)
       end
     elseif node.kind == "metadata" and not schema_tree.is_expanded(state.tree, node) then
@@ -592,14 +596,24 @@ local function configure_sidebar(state)
   vim.keymap.set("n", "s", function()
     local node = current_node()
     if node and node.kind == "table" then
-      local actions, err = adapters.object_actions(node.profile, node.row, state.config.result_limit)
-      if not actions then
+			local connector, err = adapters.connector(node.profile)
+			if not connector then
+				vim.notify(err, vim.log.levels.ERROR)
+				return
+			end
+			local actions
+			if connector.object_actions then
+				actions, err = connector.object_actions(node.profile.options, node.row, state.config.result_limit)
+			else
+				err = "schema object actions are not supported for profile kind: " .. tostring(node.profile.kind)
+			end
+			if not actions then
         vim.notify(err, vim.log.levels.ERROR)
         return
       end
       for _, action in ipairs(actions) do
         if action.id == "sample" then
-          run_object_action(state, node.profile, node.row, action)
+				run_object_action(state, node.profile, connector, node.row, action)
           return
         end
       end

@@ -36,7 +36,7 @@ return {
     }))
   end,
 
-  ["PostgreSQL completion preserves quoted schema and table identifiers"] = function()
+  ["PostgreSQL completion accepts quoted and unquoted schema prefixes"] = function()
     cache.store_tables("postgres", {
       { schema = "Sales", name = "Order", type = "table" },
     })
@@ -44,9 +44,11 @@ return {
 
     local tables = completion.items(profile, "SELECT * FROM ", #"SELECT * FROM ")
     local schema_tables = completion.items(profile, 'SELECT * FROM "Sales".', #'SELECT * FROM "Sales".')
+    local unquoted_schema_tables = completion.items(profile, "SELECT * FROM Sales.", #"SELECT * FROM Sales.")
 
     assert(tables[1].word == '"Sales"."Order"')
     assert(schema_tables[1].word == '"Sales"."Order"')
+    assert(unquoted_schema_tables[1].word == '"Sales"."Order"')
   end,
 
   ["PostgreSQL omnifunc replaces quoted qualified identifiers"] = function()

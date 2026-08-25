@@ -478,7 +478,7 @@ return {
       assert(column_profile == "table-actions")
       vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "sessions")), 0 })
       vim.api.nvim_feedkeys("y", "mx", false)
-      assert(vim.fn.getreg('"') == "sessions")
+      assert(vim.fn.getreg('"') == '"sessions"')
 
       vim.api.nvim_feedkeys("s", "mx", false)
       local buffer = vim.api.nvim_get_current_buf()
@@ -504,6 +504,75 @@ return {
       workspace.close(state.tabpage)
     end
     vim.api.nvim_set_current_tabpage(original_tabpage)
+    assert(ok, err)
+  end,
+
+  ["workspace actions return results to the Workspace tabpage after focus changes"] = function()
+    local original_tabpage = vim.api.nvim_get_current_tabpage()
+    local original_run = runner.run
+    local original_select = vim.ui.select
+    local path = vim.fn.tempname()
+    local action_callback
+    assert(profiles.write(path, {
+      version = 1,
+      profiles = { { name = "action-tabpage", kind = "sqlite", options = { path = "/tmp/orbit-action-tabpage.db" } } },
+    }))
+    runner.run = function(_, statement, callback)
+      if statement:match("WHERE name =") then
+        action_callback = callback
+      else
+        callback({ { schema = "main", name = "sessions", type = "table" } })
+      end
+    end
+    vim.ui.select = function(items, _, callback)
+      for _, item in ipairs(items) do
+        if item.id == "definition" then
+          callback(item)
+          return
+        end
+      end
+      error("Definition action missing")
+    end
+
+    local state
+    local ok, err = xpcall(function()
+      state = workspace.open({ profile_path = path, result_limit = 25 })
+      vim.api.nvim_set_current_win(state.sidebar_window)
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { 6, 0 })
+      vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<CR>", true, false, true), "mx", false)
+      vim.api.nvim_feedkeys("l", "mx", false)
+      assert(vim.wait(100, function()
+        return line_number(state.sidebar, "main") ~= nil
+      end))
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "main")), 0 })
+      vim.api.nvim_feedkeys("l", "mx", false)
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "tables 1")), 0 })
+      vim.api.nvim_feedkeys("l", "mx", false)
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "sessions")), 0 })
+      vim.api.nvim_feedkeys("a", "mx", false)
+      assert(action_callback)
+
+      vim.cmd("tabnew")
+      action_callback({ { sql = "CREATE TABLE sessions (id INTEGER)" } })
+      assert(vim.wait(100, function()
+        for _, window in ipairs(vim.api.nvim_tabpage_list_wins(state.tabpage)) do
+          local buffer = vim.api.nvim_win_get_buf(window)
+          if vim.bo[buffer].filetype == "orbit-results" then
+            return table.concat(vim.api.nvim_buf_get_lines(buffer, 0, -1, false), "\n"):match("CREATE TABLE sessions") ~= nil
+          end
+        end
+        return false
+      end))
+      vim.cmd("tabclose")
+    end, debug.traceback)
+    runner.run = original_run
+    vim.ui.select = original_select
+    if state and vim.api.nvim_tabpage_is_valid(state.tabpage) then
+      workspace.close(state.tabpage)
+    end
+    if vim.api.nvim_tabpage_is_valid(original_tabpage) then
+      vim.api.nvim_set_current_tabpage(original_tabpage)
+    end
     assert(ok, err)
   end,
 

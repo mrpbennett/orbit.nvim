@@ -59,10 +59,17 @@ function M.load_tables(profile, options, callback)
     end)
     return
   end
-  table.insert(value.table_callbacks, callback)
-  value.loading_tables = true
-  local statement = assert(adapters.schema_statement(profile, { type = "tables" }))
-  runner.run(profile, statement, function(rows, err)
+	local connector, connector_err = adapters.connector(profile)
+	if not connector then
+		vim.schedule(function()
+			callback(nil, connector_err)
+		end)
+		return
+	end
+	table.insert(value.table_callbacks, callback)
+	value.loading_tables = true
+	local statement = assert(connector.schema_statement(profile.options, { type = "tables" }))
+	runner.run(profile, statement, function(rows, err)
     value.loading_tables = false
     local callbacks = value.table_callbacks
     value.table_callbacks = {}
@@ -75,7 +82,7 @@ function M.load_tables(profile, options, callback)
       end
     end
     deliver(callbacks, rows, err)
-  end)
+	end, connector)
 end
 
 function M.load_columns(profile, row, options, callback)
@@ -95,16 +102,23 @@ function M.load_columns(profile, row, options, callback)
     end)
     return
   end
-  value.column_callbacks[table_name] = value.column_callbacks[table_name] or {}
+	local connector, connector_err = adapters.connector(profile)
+	if not connector then
+		vim.schedule(function()
+			callback(nil, connector_err)
+		end)
+		return
+	end
+	value.column_callbacks[table_name] = value.column_callbacks[table_name] or {}
   table.insert(value.column_callbacks[table_name], callback)
   value.loading_columns[table_name] = true
-  local statement = assert(adapters.schema_statement(profile, {
+	local statement = assert(connector.schema_statement(profile.options, {
     type = "columns",
     name = row.name,
     schema = row.schema,
     catalog = row.catalog,
   }))
-  runner.run(profile, statement, function(columns, err)
+	runner.run(profile, statement, function(columns, err)
     value.loading_columns[table_name] = nil
     local callbacks = value.column_callbacks[table_name]
     value.column_callbacks[table_name] = nil
@@ -112,7 +126,7 @@ function M.load_columns(profile, row, options, callback)
       value.columns[table_name] = columns
     end
     deliver(callbacks, columns, err)
-  end)
+	end, connector)
 end
 
 function M.load_metadata(profile, row, category, options, callback)
@@ -138,16 +152,23 @@ function M.load_metadata(profile, row, category, options, callback)
     end)
     return
   end
-  value.metadata_callbacks[key] = value.metadata_callbacks[key] or {}
+	local connector, connector_err = adapters.connector(profile)
+	if not connector then
+		vim.schedule(function()
+			callback(nil, connector_err)
+		end)
+		return
+	end
+	value.metadata_callbacks[key] = value.metadata_callbacks[key] or {}
   table.insert(value.metadata_callbacks[key], callback)
   value.loading_metadata[key] = true
-  local statement = assert(adapters.schema_statement(profile, {
+	local statement = assert(connector.schema_statement(profile.options, {
     type = category,
     name = row.name,
     schema = row.schema,
     catalog = row.catalog,
   }))
-  runner.run(profile, statement, function(rows, err)
+	runner.run(profile, statement, function(rows, err)
     value.loading_metadata[key] = nil
     local callbacks = value.metadata_callbacks[key]
     value.metadata_callbacks[key] = nil
@@ -155,7 +176,7 @@ function M.load_metadata(profile, row, category, options, callback)
       value.metadata[key] = rows
     end
     deliver(callbacks, rows, err)
-  end)
+	end, connector)
 end
 
 return M

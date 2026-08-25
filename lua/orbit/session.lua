@@ -1,5 +1,3 @@
-local adapters = require("orbit.adapters")
-
 local M = {}
 local sessions = {}
 
@@ -34,12 +32,12 @@ local function start_next(session)
     return
   end
   if not session.process then
-    local command, command_err = adapters.session_command(session.profile)
+    local command, command_err = session.connector.session_command(session.profile.options)
     if not command then
       fail(session, command_err)
       return
     end
-    local environment = adapters.environment(session.profile)
+    local environment = session.connector.environment and session.connector.environment(session.profile.options) or {}
     local options = {
       stdin = true,
       stdout = function(err, data)
@@ -47,7 +45,7 @@ local function start_next(session)
           return
         end
         session.active.output = session.active.output .. data
-        local output = adapters.session_output(session.profile, session.active.output, session.active.marker)
+        local output = session.connector.session_output(session.active.output, session.active.marker)
         if output then
           local request = session.active
           session.active = nil
@@ -67,7 +65,7 @@ local function start_next(session)
     end
     local ok, process = pcall(vim.system, command, options, function(result)
       if sessions[session.profile.name] == session then
-        fail(session, result.code == 0 and "connection closed" or string.format("connection closed (%d): %s", result.code, vim.trim(result.stderr)))
+			fail(session, result.code == 0 and "connection closed" or string.format("connection closed (%d): %s", result.code, vim.trim(result.stderr or "")))
       end
     end)
     if not ok then
@@ -79,7 +77,7 @@ local function start_next(session)
 
   local request = table.remove(session.queue, 1)
   session.active = request
-  local input, input_err = adapters.session_request(session.profile, request.statement, request.marker)
+  local input, input_err = session.connector.session_request(request.statement, request.marker)
   if not input then
     session.active = nil
     finish(request, nil, input_err)
@@ -89,7 +87,7 @@ local function start_next(session)
   session.process:write(input)
 end
 
-local function session_for(profile)
+local function session_for(profile, connector)
   local signature = vim.json.encode({ kind = profile.kind, options = profile.options })
   local session = sessions[profile.name]
   if session and session.signature ~= signature then
@@ -100,6 +98,7 @@ local function session_for(profile)
   if not session then
     session = {
       profile = profile,
+			connector = connector,
       queue = {},
       signature = signature,
       sequence = 0,
@@ -109,8 +108,8 @@ local function session_for(profile)
   return session
 end
 
-function M.run(profile, statement, callback)
-  local session = session_for(profile)
+function M.run(profile, connector, statement, callback)
+  local session = session_for(profile, connector)
   session.sequence = session.sequence + 1
   local request = {
     callback = callback,

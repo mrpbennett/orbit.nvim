@@ -165,7 +165,13 @@ function M.execute(buffer, config, selection)
           local names = vim.tbl_map(function(primary_key)
             return primary_key.name
           end, primary_keys)
-          local editable, editable_err = require("orbit.adapters").editable_table(profile, table, names)
+			local connector, connector_err = require("orbit.adapters").connector(profile)
+			local editable, editable_err
+			if connector and connector.editable_table then
+				editable, editable_err = connector.editable_table(profile.options, table, names)
+			else
+				editable_err = connector_err or "Result is read-only: editing is not supported by this connection profile."
+			end
           if editable then
             result_options.editable = editable
             result_options.profile = profile

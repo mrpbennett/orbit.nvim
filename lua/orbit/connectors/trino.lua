@@ -71,6 +71,29 @@ function M.prepare(options, statement)
   return command
 end
 
+function M.qualified_name(options, row)
+  return table.concat({
+    identifier(row.catalog or options.catalog),
+    identifier(row.schema or options.schema),
+    identifier(row.name),
+  }, ".")
+end
+
+function M.completion_word(options, row, prefix)
+  if prefix ~= "" then
+    return prefix .. row.name
+  end
+  local parts = row.schema and { row.schema, row.name } or { row.name }
+  if row.catalog and row.catalog ~= options.catalog then
+    table.insert(parts, 1, row.catalog)
+  end
+  return table.concat(parts, ".")
+end
+
+function M.schema_of(_, qualifier)
+  return qualifier:gsub("%.$", "")
+end
+
 function M.schema_statement(options, node)
   if node.type == "tables" then
     if options.schema_patterns then

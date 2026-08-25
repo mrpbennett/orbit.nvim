@@ -3,9 +3,26 @@ local session = require("orbit.session")
 
 local M = {}
 
-local function run_once(profile, statement, callback)
+local function parse(connector, output)
+	return connector.parse and connector.parse(output) or adapters.parse(output)
+end
+
+local function run_once(profile, connector, statement, callback)
   -- Always deliver completion on Neovim's loop, including command construction and spawn failures.
-  local command, command_err = adapters.prepare(profile, statement)
+	if type(profile) ~= "table" or type(profile.options) ~= "table" then
+		vim.schedule(function()
+			callback(nil, "profile options are required")
+		end)
+		return nil
+	end
+	if type(statement) ~= "string" or statement == "" then
+		vim.schedule(function()
+			callback(nil, "statement is required")
+		end)
+		return nil
+	end
+
+	local command, command_err = connector.prepare(profile.options, statement)
   if not command then
     vim.schedule(function()
       callback(nil, command_err)
@@ -20,7 +37,7 @@ local function run_once(profile, statement, callback)
         return
       end
 
-      local rows, parse_err = adapters.parse_profile(profile, result.stdout)
+			local rows, parse_err = parse(connector, result.stdout)
       if not rows then
         callback(nil, parse_err)
         return
@@ -38,17 +55,27 @@ local function run_once(profile, statement, callback)
   return process
 end
 
-function M.run(profile, statement, callback)
+function M.run(profile, statement, callback, connector)
+	if not connector then
+		local err
+		connector, err = adapters.connector(profile)
+		if not connector then
+			vim.schedule(function()
+				callback(nil, err)
+			end)
+			return nil
+		end
+	end
   -- Trino uses one-shot processes; supported connectors retain a serialized CLI session.
-  if not adapters.supports_session(profile) then
-    return run_once(profile, statement, callback)
+	if not connector.session_command then
+		return run_once(profile, connector, statement, callback)
   end
-  return session.run(profile, statement, function(output, run_err)
+	return session.run(profile, connector, statement, function(output, run_err)
     if run_err then
       callback(nil, run_err)
       return
     end
-    local rows, parse_err = adapters.parse_profile(profile, output)
+		local rows, parse_err = parse(connector, output)
     callback(rows, parse_err)
   end)
 end

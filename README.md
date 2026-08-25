@@ -67,7 +67,7 @@ If a query buffer has no profile, executing it opens profile selection and retri
 
 `executable` replaces the CLI binary and `arguments` adds an array of string arguments before Orbit's generated arguments. This is useful for wrappers or CLI-specific authentication flags. For SQLite and PostgreSQL, Orbit retains one interactive CLI connection per profile; statements, schema browsing, and completion prewarming share it and are serialized per profile. A changed profile definition, failed CLI, `:OrbitDisconnect`, or Neovim exit closes the connection; the next request reconnects automatically. Trino statements instead run one `trino` CLI invocation per statement, serialized per profile, because the `trino` CLI does not flush its output while held open on a retained connection.
 
-`schema_patterns` restricts the tables and views shown by Orbit's schema browser, but does not change database permissions or restrict statements you run manually. For Trino, it maps each catalog to an array of exact schema names; use an empty array to include every non-system schema from that catalog. PostgreSQL and SQLite use a non-empty array of exact schema names instead. SQLite's only available schema is `main`.
+`schema_patterns` restricts the tables and views shown by Orbit's Workspace schema browser, but does not change database permissions or restrict statements you run manually. For Trino, it maps each catalog to an array of exact schema names; use an empty array to include every non-system schema from that catalog. PostgreSQL and SQLite use a non-empty array of exact schema names instead. SQLite's only available schema is `main`.
 
 ## Connection Profiles
 
@@ -203,8 +203,6 @@ From a workspace query buffer, `/` focuses the workspace filter. Elsewhere, `/` 
 | `:'<,'>OrbitExecute`      | Execute the selected line range.                                                          |
 | `:OrbitCancel`            | Cancel the statement running in the current buffer.                                       |
 | `:OrbitDisconnect`        | Close the connection for the current buffer's profile.                                    |
-| `:OrbitBrowse [profile]`  | Open the standalone schema browser for a profile or the buffer's profile.                 |
-| `:OrbitBrowse! [profile]` | Open the schema browser and focus its filter. In a workspace, focus the workspace filter. |
 | `:OrbitWorkspace`         | Open the workspace or toggle its profile/schema browser.                                  |
 | `:OrbitWorkspaceClose`    | Close the Orbit workspace tabpage.                                                        |
 
@@ -222,7 +220,6 @@ Orbit installs the following defaults:
 | Normal, SQL buffer | `<leader>E` | Execute the buffer statement.                            |
 | Visual, SQL buffer | `<leader>E` | Execute the visual selection.                            |
 | Normal, SQL buffer | `<leader>P` | Select a connection profile.                             |
-| Normal, SQL buffer | `<leader>B` | Open the schema browser.                                 |
 | Normal, SQL buffer | `<leader>X` | Cancel the running statement.                            |
 
 Configure action mappings through `keymaps`. `execute`, `browse`, `cancel`, and `select_profile` are buffer-local in SQL buffers; `workspace` is global. Set an action to `false` to disable its default mapping.
@@ -233,7 +230,6 @@ require("orbit").setup({
     execute = "<leader>E",
     workspace = "<leader>D",
     select_profile = "<leader>P",
-    browse = "<leader>B",
     cancel = "<leader>X",
   },
 })
@@ -259,20 +255,6 @@ require("orbit").setup({
 
 Expanding a table reveals its available metadata folders. SQLite provides columns, primary keys, foreign keys, and indexes; each folder loads on demand. Views remain under the schema's `views` group and expose their columns.
 
-### Standalone Schema Browser
-
-| Key           | Action                                                                                                     |
-| ------------- | ---------------------------------------------------------------------------------------------------------- |
-| `l` or `<CR>` | Expand an object's columns.                                                                                |
-| `h`           | Collapse an object's columns.                                                                              |
-| `s`           | Open a bound `SELECT * ... LIMIT ...` sample statement.                                                    |
-| `a`           | Select a connector-supported action for the object, such as columns, indexes, foreign keys, or definition. |
-| `y`           | Copy the object name. Trino names include catalog and schema.                                              |
-| `/`           | Filter objects.                                                                                            |
-| `r`           | Reload the profile and schema.                                                                             |
-| `?`           | Show help.                                                                                                 |
-| `q`           | Close the browser.                                                                                         |
-
 ### Result Grid
 
 | Key                | Action                                                                   |
@@ -282,7 +264,7 @@ Expanding a table reveals its available metadata folders. SQLite provides column
 | `y`                | Copy the raw selected value.                                             |
 | `q`                | Close the standalone grid, or return to the query editor in a workspace. |
 
-Schema-browser sample statements for PostgreSQL and SQLite base tables become editable when Orbit can load a primary key. Ad-hoc statements, views, Trino, and tables without a primary key remain read-only.
+Workspace sample statements for PostgreSQL and SQLite base tables become editable when Orbit can load a primary key. Ad-hoc statements, views, Trino, and tables without a primary key remain read-only.
 
 | Key / command | Action |
 | --- | --- |
@@ -303,7 +285,7 @@ Normal Neovim scrolling remains available, including `<C-d>`, `<C-u>`, `zh`, and
 
 ### Schema Object Actions
 
-Press `a` on a table or view in the standalone Schema browser to select an action supplied by its connection profile kind. Actions that inspect metadata open in the Result grid; sample actions create a bound query buffer instead.
+Press `a` on a table or view in the Workspace schema browser to select an action supplied by its connection profile kind. Actions that inspect metadata open in the Result grid; sample actions create a bound query buffer instead.
 
 - SQLite: sample statement, columns, primary keys, indexes, foreign keys, and object definition.
 - PostgreSQL: sample statement, columns, primary keys, indexes, foreign keys, and view definition.
@@ -319,7 +301,7 @@ Binding a connection profile attaches Orbit's native omnifunc to the query buffe
 - Trino and PostgreSQL tables and views after `schema.`.
 - Cached columns after `table.`.
 
-Selecting a profile preloads tables and views in the background; opening the schema browser fills more of the cache. Completion never runs the CLI while you type. SQL keywords, CTE aliases, formatting, and highlighting remain the responsibility of your existing SQL tooling.
+Selecting a profile preloads tables and views in the background; expanding it in the Workspace schema browser fills more of the cache. Completion never runs the CLI while you type. SQL keywords, CTE aliases, formatting, and highlighting remain the responsibility of your existing SQL tooling.
 
 ## Execution And Results
 
@@ -340,7 +322,6 @@ require("orbit").setup({
   result_height = 15,
   saved_query_dir = vim.fn.expand("~/queries"),
   max_cell_width = 48,
-  schema_width = 36,
   workspace_sidebar_width = 32,
   workspace_result_ratio = 0.30,
   winbar = false,
@@ -372,7 +353,6 @@ require("orbit").setup({
 | `result_height`           | `15`                                      | Height of a standalone result grid.                                                                                                                  |
 | `saved_query_dir`         | `nil`                                     | Directory of recursively discovered `.sql` files shown in the Workspace sidebar.                                                                     |
 | `max_cell_width`          | `48`                                      | Maximum displayed width of a result cell.                                                                                                            |
-| `schema_width`            | `36`                                      | Width of the standalone schema browser.                                                                                                              |
 | `workspace_sidebar_width` | `32`                                      | Width of the workspace sidebar.                                                                                                                      |
 | `workspace_result_ratio`  | `0.30`                                    | Fraction of editor height used by workspace results, with a six-line minimum.                                                                        |
 | `winbar`                  | `false`                                   | Show Orbit status in SQL-window winbars.                                                                                                             |

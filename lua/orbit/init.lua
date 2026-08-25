@@ -6,7 +6,6 @@ M.config = {
 	focus_results = false,
 	max_cell_width = 48,
 	keymaps = {
-		browse = "<leader>B",
 		cancel = "<leader>X",
 		execute = "<leader>E",
 		select_profile = "<leader>P",
@@ -31,7 +30,6 @@ M.config = {
 	result_height = 15,
 	result_limit = 200,
 	saved_query_dir = nil,
-	schema_width = 36,
 	winbar = false,
 	workspace_result_ratio = 0.30,
 	workspace_sidebar_width = 32,
@@ -51,7 +49,6 @@ end
 
 local function create_commands()
 	local query = require("orbit.query")
-	local browser = require("orbit.browser")
 	local workspace = require("orbit.workspace")
 
 	vim.api.nvim_create_user_command("OrbitExecute", function(command)
@@ -69,12 +66,6 @@ local function create_commands()
 	vim.api.nvim_create_user_command("OrbitProfile", function()
 		query.select_profile(vim.api.nvim_get_current_buf(), M.config)
 	end, { desc = "Search and bind an Orbit profile" })
-	vim.api.nvim_create_user_command("OrbitBrowse", function(command)
-		if command.bang and workspace.focus_filter() then
-			return
-		end
-		browser.open(M.config, command.args ~= "" and command.args or nil, vim.api.nvim_get_current_buf(), command.bang)
-	end, { bang = true, nargs = "?", desc = "Browse an Orbit schema" })
 	vim.api.nvim_create_user_command("OrbitProfiles", function()
 		local profiles = require("orbit.profiles")
 		local ok, err = profiles.ensure(M.config.profile_path)
@@ -116,7 +107,6 @@ local function apply_keymaps(buffer)
 		return
 	end
 	local commands = {
-		browse = "OrbitBrowse",
 		cancel = "OrbitCancel",
 		execute = "OrbitExecute",
 		select_profile = "OrbitSelectProfile",
