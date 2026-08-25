@@ -282,7 +282,7 @@ local function new_query(state)
     return
   end
   vim.api.nvim_set_current_win(ensure_query_window(state))
-  vim.cmd("new")
+  vim.cmd("vnew")
   vim.bo.filetype = "sql"
   require("orbit.query").bind_profile(0, state.selected)
   vim.b.orbit_workspace_tab = state.tabpage
