@@ -23,7 +23,7 @@ end
 local function table_items(profile, connector, prefix)
   local items = {}
   local schema = prefix ~= "" and connector.schema_of(profile.options, prefix) or nil
-  for _, row in ipairs(cache.tables(profile.name)) do
+  for _, row in ipairs(cache.tables(profile)) do
     if prefix == "" or row.schema == schema then
 			local word = assert(connector.completion_word(profile.options, row, prefix))
       table.insert(items, item(word, row.type == "view" and "View" or "Table", profile.name))
@@ -34,7 +34,7 @@ end
 
 local function column_items(profile, table_name, prefix)
   local items = {}
-  for _, column in ipairs(cache.columns(profile.name, table_name)) do
+  for _, column in ipairs(cache.columns(profile, table_name)) do
     table.insert(items, item(prefix .. column.name, "Column", column.type or ""))
   end
   return sorted(items)
@@ -50,12 +50,12 @@ function M.items(profile, line, cursor)
   if qualifier then
     -- Prefer columns on a known object, then schema-qualified objects, before keyword completion.
     local object = qualifier:sub(1, -2)
-    if #cache.columns(profile.name, object) > 0 then
+    if #cache.columns(profile, object) > 0 then
       return column_items(profile, object, qualifier)
     end
 		local schema = connector.schema_of(profile.options, qualifier)
     if schema then
-      for _, row in ipairs(cache.tables(profile.name)) do
+      for _, row in ipairs(cache.tables(profile)) do
         if row.schema == schema then
 					return table_items(profile, connector, qualifier)
         end

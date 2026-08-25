@@ -3,38 +3,25 @@ local runner = require("orbit.runner")
 
 local M = {}
 local profiles = {}
+local metadata_categories = {
+  columns = true,
+  foreign_keys = true,
+  indexes = true,
+  primary_keys = true,
+}
 
-local function entry(profile_name)
-  -- Cache entries also hold callback queues, coalescing concurrent requests per profile/node.
-  profiles[profile_name] = profiles[profile_name] or {
-    columns = {},
-    column_callbacks = {},
-    metadata = {},
-    metadata_callbacks = {},
-    loading_metadata = {},
-    loading_columns = {},
-    loading_tables = false,
-    table_callbacks = {},
-    tables = nil,
-  }
-  return profiles[profile_name]
-end
-
-function M.store_tables(profile_name, tables)
-  local value = entry(profile_name)
-  value.tables = tables
-end
-
-function M.tables(profile_name)
-  return entry(profile_name).tables or {}
-end
-
-function M.store_columns(profile_name, table_name, columns)
-  entry(profile_name).columns[table_name] = columns
-end
-
-function M.columns(profile_name, table_name)
-  return entry(profile_name).columns[table_name] or {}
+local function entry(profile)
+  local signature = vim.json.encode({ kind = profile.kind, options = profile.options })
+  if not profiles[profile.name] or profiles[profile.name].signature ~= signature then
+    profiles[profile.name] = {
+      columns = {},
+      metadata = {},
+      requests = {},
+      signature = signature,
+      tables = nil,
+    }
+  end
+  return profiles[profile.name]
 end
 
 local function deliver(callbacks, rows, err)
@@ -43,140 +30,206 @@ local function deliver(callbacks, rows, err)
   end
 end
 
-function M.load_tables(profile, options, callback)
-  options = options or {}
-  callback = callback or function() end
-  local value = entry(profile.name)
-  if value.loading_tables then
-    -- Join the in-flight acquisition instead of spawning a duplicate backend statement.
-    table.insert(value.table_callbacks, callback)
+local start_acquisition
+
+local function finish_acquisition(request, rows, err)
+  local refresh = request.refreshing
+  local callbacks = request.callbacks
+  local refresh_queued = #request.queued_refresh_callbacks > 0
+  if refresh_queued then
+    -- Reserve the queued refresh before callbacks run so reentrant requests join it.
+    request.callbacks = request.queued_refresh_callbacks
+    request.queued_refresh_callbacks = {}
+    request.loading = true
+    request.refreshing = true
+  else
+    request.callbacks = {}
+    request.loading = false
+    request.refreshing = false
+  end
+  if not err then
+    request.store(rows)
+    if refresh and request.invalidate then
+      request.invalidate()
+    end
+  end
+  deliver(callbacks, rows, err)
+
+  if refresh_queued then
+    start_acquisition(request, true)
+  end
+end
+
+start_acquisition = function(request, refresh)
+  request.loading = true
+  request.refreshing = refresh
+  request.execute(function(rows, err)
+    finish_acquisition(request, rows, err)
+  end)
+end
+
+local function acquire(state, key, options, callback, cached, store, execute, invalidate)
+  local request = state.requests[key]
+  if not request then
+    request = {
+      callbacks = {},
+      loading = false,
+      queued_refresh_callbacks = {},
+      refreshing = false,
+    }
+    state.requests[key] = request
+  end
+
+  if request.loading then
+    if options.refresh and not request.refreshing then
+      table.insert(request.queued_refresh_callbacks, callback)
+    else
+      -- Normal requests join a refresh; refresh requests queue behind ordinary acquisition.
+      table.insert(request.callbacks, callback)
+    end
     return
   end
-  if value.tables and not options.refresh then
+
+  local rows = cached()
+  if rows and not options.refresh then
     -- Cache hits remain asynchronous so callers have one completion timing model.
     vim.schedule(function()
-      callback(value.tables)
+      callback(rows)
     end)
     return
   end
-	local connector, connector_err = adapters.connector(profile)
-	if not connector then
-		vim.schedule(function()
-			callback(nil, connector_err)
-		end)
-		return
-	end
-	table.insert(value.table_callbacks, callback)
-	value.loading_tables = true
-	local statement = assert(connector.schema_statement(profile.options, { type = "tables" }))
-	runner.run(profile, statement, function(rows, err)
-    value.loading_tables = false
-    local callbacks = value.table_callbacks
-    value.table_callbacks = {}
-    if not err then
-      value.tables = rows
-      if options.refresh then
-        -- A successful table refresh invalidates dependent object metadata, not failed data.
-        value.columns = {}
-        value.metadata = {}
-      end
+
+  request.callbacks = { callback }
+  request.execute = execute
+  request.invalidate = invalidate
+  request.store = store
+  start_acquisition(request, options.refresh == true)
+end
+
+local function run_schema_statement(profile, connector, node, callback)
+  if not connector then
+    local connector_err
+    connector, connector_err = adapters.connector(profile)
+    if not connector then
+      vim.schedule(function()
+        callback(nil, connector_err)
+      end)
+      return
     end
-    deliver(callbacks, rows, err)
-	end, connector)
+  end
+  local statement, statement_err = connector.schema_statement(profile.options, node)
+  if not statement then
+    vim.schedule(function()
+      callback(nil, statement_err)
+    end)
+    return
+  end
+  runner.run(profile, statement, callback, connector)
+end
+
+local function connector_for_metadata(profile, row, category, callback)
+  local connector, connector_err = adapters.connector(profile)
+  if not connector then
+    vim.schedule(function()
+      callback(nil, connector_err)
+    end)
+    return
+  end
+  for _, candidate in ipairs(connector.metadata_categories and connector.metadata_categories(profile.options, row) or {}) do
+    if candidate.id == category then
+      return connector
+    end
+  end
+  vim.schedule(function()
+    callback({})
+  end)
+end
+
+local function object_name(row)
+  return table.concat(vim.tbl_filter(function(value)
+    return value and value ~= ""
+  end, { row.catalog, row.schema, row.name }), ".")
+end
+
+function M.tables(profile)
+  return entry(profile).tables or {}
+end
+
+function M.columns(profile, table_name)
+  return entry(profile).columns[table_name] or {}
+end
+
+function M.load_tables(profile, options, callback)
+  options = options or {}
+  callback = callback or function() end
+  local state = entry(profile)
+  acquire(state, "tables", options, callback, function()
+    return state.tables
+  end, function(rows)
+    state.tables = rows
+  end, function(done)
+    run_schema_statement(profile, nil, { type = "tables" }, done)
+  end, function()
+    -- A successful table refresh invalidates dependent object metadata, not failed data.
+    state.columns = {}
+    state.metadata = {}
+  end)
 end
 
 function M.load_columns(profile, row, options, callback)
   options = options or {}
   callback = callback or function() end
-  local table_name = table.concat(vim.tbl_filter(function(value)
-    return value and value ~= ""
-  end, { row.catalog, row.schema, row.name }), ".")
-  local value = entry(profile.name)
-  if value.loading_columns[table_name] then
-    table.insert(value.column_callbacks[table_name], callback)
+  local connector = connector_for_metadata(profile, row, "columns", callback)
+  if not connector then
     return
   end
-  if value.columns[table_name] and not options.refresh then
-    vim.schedule(function()
-      callback(value.columns[table_name])
-    end)
-    return
-  end
-	local connector, connector_err = adapters.connector(profile)
-	if not connector then
-		vim.schedule(function()
-			callback(nil, connector_err)
-		end)
-		return
-	end
-	value.column_callbacks[table_name] = value.column_callbacks[table_name] or {}
-  table.insert(value.column_callbacks[table_name], callback)
-  value.loading_columns[table_name] = true
-	local statement = assert(connector.schema_statement(profile.options, {
-    type = "columns",
-    name = row.name,
-    schema = row.schema,
-    catalog = row.catalog,
-  }))
-	runner.run(profile, statement, function(columns, err)
-    value.loading_columns[table_name] = nil
-    local callbacks = value.column_callbacks[table_name]
-    value.column_callbacks[table_name] = nil
-    if not err then
-      value.columns[table_name] = columns
-    end
-    deliver(callbacks, columns, err)
-	end, connector)
+  local table_name = object_name(row)
+  local state = entry(profile)
+  acquire(state, "columns\0" .. table_name, options, callback, function()
+    return state.columns[table_name]
+  end, function(rows)
+    state.columns[table_name] = rows
+  end, function(done)
+    run_schema_statement(profile, connector, {
+      type = "columns",
+      name = row.name,
+      schema = row.schema,
+      catalog = row.catalog,
+    }, done)
+  end)
 end
 
 function M.load_metadata(profile, row, category, options, callback)
+  options = options or {}
+  callback = callback or function() end
+  if not metadata_categories[category] then
+    vim.schedule(function()
+      callback(nil, "unknown table metadata category: " .. tostring(category))
+    end)
+    return
+  end
   if category == "columns" then
     return M.load_columns(profile, row, options, callback)
   end
 
-  options = options or {}
-  callback = callback or function() end
-  local table_name = table.concat(vim.tbl_filter(function(value)
-    return value and value ~= ""
-  end, { row.catalog, row.schema, row.name }), ".")
-  local key = table_name .. "\0" .. category
-  -- Category-specific keys allow independent metadata loads for the same object.
-  local value = entry(profile.name)
-  if value.loading_metadata[key] then
-    table.insert(value.metadata_callbacks[key], callback)
+  local connector = connector_for_metadata(profile, row, category, callback)
+  if not connector then
     return
   end
-  if value.metadata[key] and not options.refresh then
-    vim.schedule(function()
-      callback(value.metadata[key])
-    end)
-    return
-  end
-	local connector, connector_err = adapters.connector(profile)
-	if not connector then
-		vim.schedule(function()
-			callback(nil, connector_err)
-		end)
-		return
-	end
-	value.metadata_callbacks[key] = value.metadata_callbacks[key] or {}
-  table.insert(value.metadata_callbacks[key], callback)
-  value.loading_metadata[key] = true
-	local statement = assert(connector.schema_statement(profile.options, {
-    type = category,
-    name = row.name,
-    schema = row.schema,
-    catalog = row.catalog,
-  }))
-	runner.run(profile, statement, function(rows, err)
-    value.loading_metadata[key] = nil
-    local callbacks = value.metadata_callbacks[key]
-    value.metadata_callbacks[key] = nil
-    if not err then
-      value.metadata[key] = rows
-    end
-    deliver(callbacks, rows, err)
-	end, connector)
+  local key = object_name(row) .. "\0" .. category
+  local state = entry(profile)
+  acquire(state, "metadata\0" .. key, options, callback, function()
+    return state.metadata[key]
+  end, function(rows)
+    state.metadata[key] = rows
+  end, function(done)
+    run_schema_statement(profile, connector, {
+      type = category,
+      name = row.name,
+      schema = row.schema,
+      catalog = row.catalog,
+    }, done)
+  end)
 end
 
 return M

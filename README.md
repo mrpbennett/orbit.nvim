@@ -67,6 +67,8 @@ If a query buffer has no profile, executing it opens profile selection and retri
 
 `executable` replaces the CLI binary and `arguments` adds an array of string arguments before Orbit's generated arguments. This is useful for wrappers or CLI-specific authentication flags. For SQLite and PostgreSQL, Orbit retains one interactive CLI connection per profile; statements, schema browsing, and completion prewarming share it and are serialized per profile. A changed profile definition, failed CLI, `:OrbitDisconnect`, or Neovim exit closes the connection; the next request reconnects automatically. Trino statements instead run one `trino` CLI invocation per statement, serialized per profile, because the `trino` CLI does not flush its output while held open on a retained connection.
 
+Schema browsing and completion cache rows only while the connection profile's kind and options are unchanged. Updating a profile clears its prior schema rows before Orbit acquires replacements. Connector metadata that is unavailable for an object, such as Trino primary keys, is shown as unavailable rather than treated as a statement failure. Explicit Workspace refreshes run after pending acquisitions and coalesce with other refresh requests.
+
 `schema_patterns` restricts the tables and views shown by Orbit's Workspace schema browser, but does not change database permissions or restrict statements you run manually. For Trino, it maps each catalog to an array of exact schema names; use an empty array to include every non-system schema from that catalog. PostgreSQL and SQLite use a non-empty array of exact schema names instead. SQLite's only available schema is `main`.
 
 ## Connection Profiles

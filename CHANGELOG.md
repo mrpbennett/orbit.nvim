@@ -2,22 +2,24 @@
 
 All notable changes to Orbit.nvim are documented in this file.
 
-## Unreleased
+## 0.2.0 - 2026-08-25
 
 ### Changed
 
 - Made the dedicated Workspace tabpage the sole schema-browsing workflow. `:OrbitBrowse`, its mapping, configuration, implementation, and tests were removed.
 - Moved schema-object naming and completion qualifier handling into each connector, preserving canonical quoted identifiers for copied object names.
 - Replaced the forwarding-heavy adapter API with one connector resolver. Execution, schema acquisition, sessions, completion, Workspace actions, and editable result writes now use connector capabilities directly.
+- Deepened Schema acquisition around connector capabilities, connection-profile identity, and refresh coordination. Cached schema rows now invalidate when a profile changes, unsupported metadata is empty rather than an execution failure, and explicit refreshes coalesce without losing their intent.
 - Updated documentation to describe Workspace schema browsing and the supported configuration surface.
 
 ### Fixed
 
 - Retained sessions now replace their CLI process after a connection profile changes and safely report CLI exits that provide no stderr output.
+- Prevented Trino sample-table results from failing while checking unsupported primary-key metadata.
 
 ### Tests
 
-- Added coverage for connector resolution, direct connector capabilities, one-resolution schema handoff, unsupported profile kinds, and session replacement after profile changes.
+- Added coverage for connector resolution, direct connector capabilities, one-resolution schema handoff, unsupported profile kinds, session replacement after profile changes, and Schema acquisition capability, identity, and refresh behavior.
 
 ## 0.1.0 - 2026-08-25
 

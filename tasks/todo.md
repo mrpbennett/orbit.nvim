@@ -12,6 +12,54 @@
 - Trino and PostgreSQL include the allowlist in their metadata queries; SQLite exposes its fixed `main` schema only when listed.
 - Verification: `nvim --headless -u NONE -l tests/run.lua` and `git diff --check` passed. `stylua` is not installed in this environment.
 
+## Architecture Review 2026-08-25 (current)
+
+- [x] Scan the recent Result grid and connector/session/schema-acquisition hot spots using the domain model and deletion test.
+- [x] Validate deepening candidates against tests and completed architecture work.
+- [x] Produce, verify, and open a temporary HTML report with before/after visuals.
+
+### Review
+
+- Report: `/tmp/architecture-review-20260825-155140.html`; opened in the existing browser session.
+- Top recommendation: deepen Schema acquisition around Connector capability interpretation; a focused reproduction confirmed Trino primary-key acquisition raises `unsupported schema node`.
+- No ADRs exist under `docs/adr/`; completed Connector resolver, naming, and Schema tree work was not re-suggested.
+- Verification: `nvim --headless -u NONE -l tests/run.lua`, HTML validation, and `git diff --check` passed.
+
+## Schema Acquisition Deepening
+
+- [x] Make recognized unsupported table metadata an expected empty acquisition and reject unknown categories.
+- [x] Key cached and in-flight Schema acquisition by full connection-profile identity, isolating old generations.
+- [x] Preserve refresh intent when a refresh arrives during an ordinary acquisition.
+- [x] Make synchronous reads profile-aware and remove test-only cache mutation functions.
+- [x] Add interface-level regression coverage, run the complete suite, and review the change.
+
+### Settled Design
+
+- Schema acquisition remains the sole module and seam; no additional seam is introduced.
+- Profile name locates state while `kind` and validated `options` define its identity.
+- An identity change hides old cached data immediately. Old in-flight work may finish only for its original callbacks and cannot populate or satisfy the new generation.
+- A recognized category unsupported by a Connector returns an empty result; an unknown category is an error.
+- Failed refreshes retain successful data only within the same identity. A refresh arriving during ordinary acquisition runs afterward and coalesces.
+- All reads accept the full connection profile. Tests populate state through the acquisition interface.
+
+### Review
+
+- Schema acquisition owns the canonical table metadata categories. Recognized unsupported categories, including columns, return an empty result without running a statement; unknown categories return an error.
+- Cache entries use connection-profile kind and options as identity. New identities receive empty state while old in-flight work remains isolated with its original callbacks.
+- One internal acquisition state machine coalesces ordinary requests, active refreshes, queued refreshes, and refreshes requested reentrantly from completion callbacks.
+- Completion reads cached rows with the full connection profile, and tests populate cache state through acquisition rather than mutation helpers.
+- Verification: `nvim --headless -u NONE -l tests/run.lua` and `git diff --check` passed. Independent standards and spec reviews found no remaining issues. `stylua` is not installed.
+
+## 0.2.0 Release
+
+- [x] Update the changelog and README for the completed release changes.
+- [ ] Run release verification and inspect the complete staged diff.
+- [ ] Commit the release and create the local `v0.2.0` tag.
+
+### Review
+
+- Pending.
+
 ## Trino Multi-Catalog Schema Plan
 
 - [x] Change Trino `schema_patterns` to map catalogs to exact schema allowlists, with an empty allowlist including the catalog's schemas.

@@ -21,7 +21,10 @@ A navigable view of the hierarchy and metadata exposed by a connection profile, 
 _Avoid_: database tree, sidebar
 
 **Schema acquisition**:
-The retrieval and refresh of the tables, views, and columns exposed by a connection profile for use by Orbit.nvim views and completion.
+The retrieval and refresh of the tables, views, and table metadata exposed by a connection profile for use by Orbit.nvim views, completion, and editable results.
+
+**Table metadata category**:
+A recognized kind of metadata for a schema object: columns, primary keys, foreign keys, or indexes. A connector exposes only the categories it supports for that object.
 
 **Qualified name**:
 The canonical SQL-pasteable identifier for a schema object. It is connector-specific: SQLite uses a quoted object name, PostgreSQL uses quoted schema and object names, and Trino uses quoted catalog, schema, and object names.
