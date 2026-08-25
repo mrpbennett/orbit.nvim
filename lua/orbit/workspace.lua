@@ -1,5 +1,5 @@
 local profiles = require("orbit.profiles")
-local schema = require("orbit.schema")
+local schema_tree = require("orbit.schema_tree")
 local cache = require("orbit.schema_cache")
 local feedback = require("orbit.feedback")
 local results = require("orbit.results")
@@ -37,12 +37,13 @@ local function filter_text(state)
   return line:sub(#"Filter: " + 1)
 end
 
-local function object_name(row)
-  return row.schema and row.schema .. "." .. row.name or row.name
-end
+local object_name = schema_tree.object_name
 
-local function group_name(schema_name, kind)
-  return schema_name .. "\0" .. kind
+local function postgres_name(row)
+  local quote = function(value)
+    return '"' .. value:gsub('"', '""') .. '"'
+  end
+  return table.concat({ quote(row.schema or "public"), quote(row.name) }, ".")
 end
 
 local function discover_saved_queries(directory)
@@ -106,46 +107,25 @@ local function render(state)
   for _, profile in ipairs(state.profiles) do
     local expanded = state.schema_profile == profile.name
     local profile_matches = state.filter == "" or profile.name:lower():find(state.filter:lower(), 1, true) or profile.kind:lower():find(state.filter:lower(), 1, true)
-    local groups = expanded and schema.group(state.tables, profile_matches and "" or state.filter) or {}
-    if profile_matches or (expanded and #groups > 0) then
+    local tree_lines, tree_nodes, tree_highlights, has_matches = {}, {}, {}, false
+    if expanded then
+      tree_lines, tree_nodes, tree_highlights, has_matches = schema_tree.lines(state.tree, profile, profile_matches and "" or state.filter, { icons = icons, loading = state.loading })
+    end
+    if profile_matches or (expanded and has_matches) then
       table.insert(lines, string.format("  %s %s %s (%s)", expanded and icons.expanded or icons.collapsed, icons.profile, profile.name, profile.kind))
       state.nodes[#lines] = { kind = "profile", profile = profile }
       table.insert(highlights, { group = "OrbitProfile", line = #lines })
     end
-    if expanded and (profile_matches or #groups > 0) then
-      if state.loading then
-        table.insert(lines, "      loading schema...")
-      elseif #groups == 0 then
-        table.insert(lines, "      No matching tables or views")
+    if expanded and (profile_matches or has_matches) then
+      local base = #lines
+      for _, line in ipairs(tree_lines) do
+        table.insert(lines, "    " .. line)
       end
-      for _, schema_group in ipairs(groups) do
-        local schema_expanded = state.expanded_schemas[schema_group.name] or state.filter ~= ""
-        table.insert(lines, string.format("      %s %s", schema_expanded and icons.expanded or icons.collapsed, schema_group.name))
-        state.nodes[#lines] = { kind = "schema", name = schema_group.name }
-        for _, kind in ipairs({ "tables", "views" }) do
-          local objects = schema_group[kind]
-          if schema_expanded and #objects > 0 then
-            local group_expanded = state.expanded_groups[group_name(schema_group.name, kind)] or state.filter ~= ""
-            table.insert(lines, string.format("        %s %s %d", group_expanded and icons.expanded or icons.collapsed, kind, #objects))
-            state.nodes[#lines] = { kind = "group", schema = schema_group.name, group = kind }
-            if group_expanded then
-              for _, row in ipairs(objects) do
-                local name = object_name(row)
-                local columns = state.columns[name]
-                local object_kind = row.type == "view" and "view" or "table"
-                table.insert(lines, string.format("          %s %s %s", columns and icons.expanded or icons.collapsed, icons[object_kind], row.name))
-                state.nodes[#lines] = { kind = "table", profile = profile, row = row }
-                table.insert(highlights, { group = object_kind == "view" and "OrbitView" or "OrbitTable", line = #lines })
-                if columns then
-                  for _, column in ipairs(columns) do
-                    table.insert(lines, string.format("              %s %s  %s", icons.column, column.name, column.type or ""))
-                    table.insert(highlights, { group = "OrbitColumn", line = #lines })
-                  end
-                end
-              end
-            end
-          end
-        end
+      for line_number, node in pairs(tree_nodes) do
+        state.nodes[base + line_number] = node
+      end
+      for _, highlight in ipairs(tree_highlights) do
+        table.insert(highlights, { group = highlight.group, line = base + highlight.line })
       end
     end
   end
@@ -216,10 +196,7 @@ local function load_schema(state, profile, force)
   state.selected = profile
   state.schema_profile = profile.name
   if changed_profile then
-    state.tables = {}
-    state.columns = {}
-    state.expanded_schemas = {}
-    state.expanded_groups = {}
+    schema_tree.reset(state.tree)
   end
   state.loading = true
   render(state)
@@ -232,12 +209,10 @@ local function load_schema(state, profile, force)
     state.schema_notice = nil
     state.loading = false
     if not err then
-      state.tables = rows
       if force then
-        state.columns = {}
-        state.expanded_schemas = {}
-        state.expanded_groups = {}
+        schema_tree.reset(state.tree)
       end
+      schema_tree.set_tables(state.tree, rows)
     end
     render(state)
     if err then
@@ -251,10 +226,7 @@ local function collapse_schema_tree(state)
     return
   end
   state.schema_profile = nil
-  state.tables = {}
-  state.columns = {}
-  state.expanded_schemas = {}
-  state.expanded_groups = {}
+  schema_tree.reset(state.tree)
   render(state)
 end
 
@@ -270,36 +242,38 @@ local function reload_profiles(state)
   end
   if state.schema_profile and not profiles.find(document, state.schema_profile) then
     state.schema_profile = nil
-    state.tables = {}
-    state.columns = {}
-    state.expanded_schemas = {}
-    state.expanded_groups = {}
+    schema_tree.reset(state.tree)
   end
   return document
 end
 
-local function expand_table(state, profile, row)
-  local name = object_name(row)
-  if state.columns[name] then
-    state.columns[name] = nil
-    render(state)
+local function load_metadata(state, profile, row, category, show_progress)
+  if schema_tree.is_metadata_loaded(state.tree, row, category.id) or schema_tree.is_metadata_loading(state.tree, row, category.id) then
     return
   end
   local generation = state.generation
-  state.columns[name] = {}
-  render(state)
-  local notice = feedback.start("Loading columns for " .. name .. "...")
-  cache.load_columns(profile, row, {}, function(columns, err)
-    if state.generation ~= generation or not vim.api.nvim_buf_is_valid(state.sidebar) or not state.columns[name] then
+  schema_tree.set_metadata_loading(state.tree, row, category.id, true)
+  local notice = show_progress and feedback.start("Loading " .. category.label .. " for " .. object_name(row) .. "...")
+  cache.load_metadata(profile, row, category.id, {}, function(entries, err)
+    if state.generation ~= generation or not vim.api.nvim_buf_is_valid(state.sidebar) then
       return
     end
-    state.columns[name] = err and {} or columns
-    feedback.finish(notice, err and "Column load failed: " .. name or string.format("Columns loaded: %d", #columns), err and vim.log.levels.ERROR or vim.log.levels.INFO)
+    schema_tree.set_metadata_loading(state.tree, row, category.id, nil)
+    schema_tree.set_metadata(state.tree, row, category.id, err and {} or entries)
+    if notice then
+      feedback.finish(notice, err and category.label .. " load failed: " .. object_name(row) or string.format("%s loaded: %d", category.label, #entries), err and vim.log.levels.ERROR or vim.log.levels.INFO)
+    end
     render(state)
     if err then
       vim.notify(err, vim.log.levels.ERROR)
     end
   end)
+end
+
+local function expand_metadata(state, profile, row, category)
+  schema_tree.toggle(state.tree, { category = category, kind = "metadata", profile = profile, row = row })
+  render(state)
+  load_metadata(state, profile, row, category, true)
 end
 
 local function new_query(state)
@@ -384,7 +358,9 @@ end
 local function copy_object_name(profile, row)
   local name = row.name
   if profile.kind == "trino" then
-    name = table.concat({ profile.options.catalog, row.schema or profile.options.schema, row.name }, ".")
+    name = table.concat({ row.catalog or profile.options.catalog, row.schema or profile.options.schema, row.name }, ".")
+  elseif profile.kind == "postgres" then
+    name = postgres_name(row)
   end
   vim.fn.setreg('"', name)
   vim.notify("Orbit name copied")
@@ -490,43 +466,56 @@ local function configure_sidebar(state)
   local function current_node()
     return state.nodes[vim.api.nvim_win_get_cursor(state.sidebar_window)[1]]
   end
+  local function current_expanded()
+    local node = current_node()
+    if not node then
+      return false
+    end
+    if node.kind == "profile" then
+      return state.schema_profile == node.profile.name
+    end
+    if node.kind == "saved_directory" then
+      return state.expanded_saved_dirs[node.path]
+    end
+    return schema_tree.is_expanded(state.tree, node)
+  end
   local function collapse_current()
     local node = current_node()
-    if node and node.kind == "profile" and state.schema_profile == node.profile.name then
+    if not node then
+      return
+    end
+    if node.kind == "profile" and state.schema_profile == node.profile.name then
       state.schema_profile = nil
-      state.tables = {}
-      state.columns = {}
-      state.expanded_schemas = {}
-      state.expanded_groups = {}
+      schema_tree.reset(state.tree)
       render(state)
-    elseif node and node.kind == "schema" and state.expanded_schemas[node.name] then
-      state.expanded_schemas[node.name] = nil
-      render(state)
-    elseif node and node.kind == "group" and state.expanded_groups[group_name(node.schema, node.group)] then
-      state.expanded_groups[group_name(node.schema, node.group)] = nil
-      render(state)
-    elseif node and node.kind == "table" and state.columns[object_name(node.row)] then
-      state.columns[object_name(node.row)] = nil
-      render(state)
-    elseif node and node.kind == "saved_directory" and state.expanded_saved_dirs[node.path] then
+    elseif node.kind == "saved_directory" and state.expanded_saved_dirs[node.path] then
       state.expanded_saved_dirs[node.path] = nil
+      render(state)
+    elseif schema_tree.is_expanded(state.tree, node) then
+      schema_tree.toggle(state.tree, node)
       render(state)
     end
   end
   local function expand_current()
     local node = current_node()
-    if node and node.kind == "profile" and state.schema_profile ~= node.profile.name then
+    if not node then
+      return
+    end
+    if node.kind == "profile" and state.schema_profile ~= node.profile.name then
       load_schema(state, node.profile)
-    elseif node and node.kind == "schema" and not state.expanded_schemas[node.name] then
-      state.expanded_schemas[node.name] = true
-      render(state)
-    elseif node and node.kind == "group" and not state.expanded_groups[group_name(node.schema, node.group)] then
-      state.expanded_groups[group_name(node.schema, node.group)] = true
-      render(state)
-    elseif node and node.kind == "table" and not state.columns[object_name(node.row)] then
-      expand_table(state, node.profile, node.row)
-    elseif node and node.kind == "saved_directory" and not state.expanded_saved_dirs[node.path] then
+    elseif node.kind == "saved_directory" and not state.expanded_saved_dirs[node.path] then
       state.expanded_saved_dirs[node.path] = true
+      render(state)
+    elseif node.kind == "table" and not schema_tree.is_expanded(state.tree, node) then
+      schema_tree.toggle(state.tree, node)
+      render(state)
+      for _, category in ipairs(adapters.metadata_categories(node.profile, node.row)) do
+        load_metadata(state, node.profile, node.row, category, false)
+      end
+    elseif node.kind == "metadata" and not schema_tree.is_expanded(state.tree, node) then
+      expand_metadata(state, node.profile, node.row, node.category)
+    elseif (node.kind == "schema" or node.kind == "group") and not schema_tree.is_expanded(state.tree, node) then
+      schema_tree.toggle(state.tree, node)
       render(state)
     end
   end
@@ -553,8 +542,13 @@ local function configure_sidebar(state)
     local position = vim.fn.getmousepos()
     if position.winid == state.sidebar_window and position.line > 0 then
       vim.api.nvim_win_set_cursor(state.sidebar_window, { position.line, 0 })
-      activate_current()
-      if current_node() and current_node().kind == "profile" then
+      local node = current_node()
+      if node and node.kind == "profile" then
+        activate_current()
+      end
+      if current_expanded() then
+        collapse_current()
+      else
         expand_current()
       end
     end
@@ -665,11 +659,8 @@ function M.open(config)
 
   local document = profiles.load(config.profile_path)
   local state = {
-    columns = {},
     config = config,
-    expanded_groups = {},
     expanded_saved_dirs = {},
-    expanded_schemas = {},
     filter = "",
     filtering = false,
     generation = 0,
@@ -682,8 +673,8 @@ function M.open(config)
     selected = nil,
     sidebar = sidebar,
     sidebar_window = sidebar_window,
-    tables = {},
     tabpage = tabpage,
+    tree = schema_tree.new(),
   }
   if type(config.saved_query_dir) == "string" and config.saved_query_dir ~= "" then
     state.saved_query_dir = vim.fn.fnamemodify(vim.fn.expand(config.saved_query_dir), ":p")

@@ -12,6 +12,18 @@ local function item(word, kind, detail)
   }
 end
 
+local function postgres_identifier(value)
+  return '"' .. value:gsub('"', '""') .. '"'
+end
+
+local function postgres_schema_prefix(value)
+  local schema = value:sub(1, -2)
+  if schema:sub(1, 1) == '"' and schema:sub(-1) == '"' then
+    return schema:sub(2, -2):gsub('""', '"')
+  end
+  return schema
+end
+
 local function sorted(items)
   table.sort(items, function(left, right)
     return left.word < right.word
@@ -22,9 +34,16 @@ end
 local function table_items(profile, prefix)
   local items = {}
   for _, row in ipairs(cache.tables(profile.name)) do
-    if prefix == "" or not row.schema or prefix == row.schema .. "." then
+    local postgres_prefix = row.schema and postgres_identifier(row.schema) .. "." or nil
+    if prefix == "" or not row.schema or prefix == row.schema .. "." or (profile.kind == "postgres" and prefix == postgres_prefix) then
       local name = row.schema and row.schema .. "." .. row.name or row.name
-      local word = prefix ~= "" and prefix .. row.name or name
+      if profile.kind == "trino" and row.catalog and row.catalog ~= profile.options.catalog then
+        name = row.catalog .. "." .. name
+      end
+      if profile.kind == "postgres" and row.schema then
+        name = postgres_identifier(row.schema) .. "." .. postgres_identifier(row.name)
+      end
+      local word = profile.kind == "postgres" and name or prefix ~= "" and prefix .. row.name or name
       table.insert(items, item(word, row.type == "view" and "View" or "Table", profile.name))
     end
   end
@@ -41,15 +60,16 @@ end
 
 function M.items(profile, line, cursor)
   local before = line:sub(1, cursor)
-  local qualifier = before:match("([%w_]+%.)[%w_]*$")
+  local qualifier = before:match("([%w_\"]+%.)[%w_\"]*$")
   if qualifier then
     local object = qualifier:sub(1, -2)
     if #cache.columns(profile.name, object) > 0 then
       return column_items(profile, object, qualifier)
     end
-    if profile.kind == "trino" then
+    if profile.kind == "trino" or profile.kind == "postgres" then
+      local schema = profile.kind == "postgres" and postgres_schema_prefix(qualifier) or object
       for _, row in ipairs(cache.tables(profile.name)) do
-        if row.schema == object then
+        if row.schema == schema then
           return table_items(profile, qualifier)
         end
       end
@@ -77,7 +97,7 @@ function M.omnifunc(findstart, base)
   local cursor = vim.api.nvim_win_get_cursor(0)[2]
   local line = vim.api.nvim_get_current_line()
   if findstart == 1 then
-    local word = line:sub(1, cursor):match("[%w_%.]*$") or ""
+    local word = line:sub(1, cursor):match("[%w_%.\"]*$") or ""
     return cursor - #word
   end
   local profile = profile_for_buffer(vim.api.nvim_get_current_buf())

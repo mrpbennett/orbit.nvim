@@ -35,4 +35,25 @@ return {
       "orders.id",
     }))
   end,
+
+  ["PostgreSQL completion preserves quoted schema and table identifiers"] = function()
+    cache.store_tables("postgres", {
+      { schema = "Sales", name = "Order", type = "table" },
+    })
+    local profile = { name = "postgres", kind = "postgres", options = { database = "orbit" } }
+
+    local tables = completion.items(profile, "SELECT * FROM ", #"SELECT * FROM ")
+    local schema_tables = completion.items(profile, 'SELECT * FROM "Sales".', #'SELECT * FROM "Sales".')
+
+    assert(tables[1].word == '"Sales"."Order"')
+    assert(schema_tables[1].word == '"Sales"."Order"')
+  end,
+
+  ["PostgreSQL omnifunc replaces quoted qualified identifiers"] = function()
+    local line = 'SELECT * FROM "Sales".'
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { line })
+    vim.api.nvim_win_set_cursor(0, { 1, #line })
+
+    assert(completion.omnifunc(1, "") == #"SELECT * FROM ")
+  end,
 }

@@ -15,6 +15,10 @@ local function read(path)
     uv.fs_close(fd)
     return nil, "cannot stat profile file: " .. stat_err
   end
+  if bit.band(stat.mode, 511) ~= 384 then
+    uv.fs_close(fd)
+    return nil, "profile file must use owner-only mode 0600"
+  end
 
   local contents, read_err = uv.fs_read(fd, stat.size, 0)
   uv.fs_close(fd)
@@ -23,14 +27,6 @@ local function read(path)
   end
 
   return contents
-end
-
-local function is_owner_only(path)
-  local stat, stat_err = uv.fs_stat(path)
-  if not stat then
-    return nil, "cannot stat profile file: " .. stat_err
-  end
-  return bit.band(stat.mode, 511) == 384
 end
 
 local function require_string(value, field, profile_name)
@@ -49,14 +45,16 @@ local function validate_profile(profile)
   if not valid then
     return nil, err
   end
-  if profile.kind ~= "trino" and profile.kind ~= "sqlite" then
+	if profile.kind ~= "trino" and profile.kind ~= "sqlite" and profile.kind ~= "postgres" then
     return nil, string.format("profile %q has unsupported kind %q", profile.name, tostring(profile.kind))
   end
   if type(profile.options) ~= "table" then
     return nil, string.format("profile %q requires options", profile.name)
   end
 
-  local required = profile.kind == "trino" and { "server", "user", "catalog" } or { "path" }
+	local required = profile.kind == "trino" and { "server", "user", "catalog" }
+		or profile.kind == "postgres" and { "database" }
+		or { "path" }
   for _, field in ipairs(required) do
     valid, err = require_string(profile.options[field], "options." .. field, profile.name)
     if not valid then
@@ -103,13 +101,6 @@ end
 
 function M.load(path)
   path = path or M.default_path()
-  local owner_only, mode_err = is_owner_only(path)
-  if owner_only == nil then
-    return nil, mode_err
-  end
-  if not owner_only then
-    return nil, "profile file must use owner-only mode 0600"
-  end
   local contents, read_err = read(path)
   if not contents then
     return nil, read_err

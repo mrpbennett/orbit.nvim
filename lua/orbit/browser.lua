@@ -10,7 +10,16 @@ local M = {}
 local tab_browsers = {}
 
 local function object_name(row)
-  return row.schema and row.schema .. "." .. row.name or row.name
+  return table.concat(vim.tbl_filter(function(value)
+    return value and value ~= ""
+  end, { row.catalog, row.schema, row.name }), ".")
+end
+
+local function postgres_name(row)
+  local quote = function(value)
+    return '"' .. value:gsub('"', '""') .. '"'
+  end
+  return table.concat({ quote(row.schema or "public"), quote(row.name) }, ".")
 end
 
 local function set_lines(state, lines)
@@ -183,7 +192,9 @@ end
 local function copy_name(state, row)
   local name = row.name
   if state.profile.kind == "trino" then
-    name = table.concat({ state.profile.options.catalog, row.schema or state.profile.options.schema, row.name }, ".")
+    name = table.concat({ row.catalog or state.profile.options.catalog, row.schema or state.profile.options.schema, row.name }, ".")
+  elseif state.profile.kind == "postgres" then
+    name = postgres_name(row)
   end
   vim.fn.setreg('"', name)
   vim.notify("Orbit name copied")

@@ -8,6 +8,9 @@ local function entry(profile_name)
   profiles[profile_name] = profiles[profile_name] or {
     columns = {},
     column_callbacks = {},
+    metadata = {},
+    metadata_callbacks = {},
+    loading_metadata = {},
     loading_columns = {},
     loading_tables = false,
     table_callbacks = {},
@@ -64,6 +67,7 @@ function M.load_tables(profile, options, callback)
       value.tables = rows
       if options.refresh then
         value.columns = {}
+        value.metadata = {}
       end
     end
     deliver(callbacks, rows, err)
@@ -73,7 +77,9 @@ end
 function M.load_columns(profile, row, options, callback)
   options = options or {}
   callback = callback or function() end
-  local table_name = row.schema and row.schema .. "." .. row.name or row.name
+  local table_name = table.concat(vim.tbl_filter(function(value)
+    return value and value ~= ""
+  end, { row.catalog, row.schema, row.name }), ".")
   local value = entry(profile.name)
   if value.loading_columns[table_name] then
     table.insert(value.column_callbacks[table_name], callback)
@@ -92,6 +98,7 @@ function M.load_columns(profile, row, options, callback)
     type = "columns",
     name = row.name,
     schema = row.schema,
+    catalog = row.catalog,
   }))
   runner.run(profile, statement, function(columns, err)
     value.loading_columns[table_name] = nil
@@ -101,6 +108,48 @@ function M.load_columns(profile, row, options, callback)
       value.columns[table_name] = columns
     end
     deliver(callbacks, columns, err)
+  end)
+end
+
+function M.load_metadata(profile, row, category, options, callback)
+  if category == "columns" then
+    return M.load_columns(profile, row, options, callback)
+  end
+
+  options = options or {}
+  callback = callback or function() end
+  local table_name = table.concat(vim.tbl_filter(function(value)
+    return value and value ~= ""
+  end, { row.catalog, row.schema, row.name }), ".")
+  local key = table_name .. "\0" .. category
+  local value = entry(profile.name)
+  if value.loading_metadata[key] then
+    table.insert(value.metadata_callbacks[key], callback)
+    return
+  end
+  if value.metadata[key] and not options.refresh then
+    vim.schedule(function()
+      callback(value.metadata[key])
+    end)
+    return
+  end
+  value.metadata_callbacks[key] = value.metadata_callbacks[key] or {}
+  table.insert(value.metadata_callbacks[key], callback)
+  value.loading_metadata[key] = true
+  local statement = assert(adapters.schema_statement(profile, {
+    type = category,
+    name = row.name,
+    schema = row.schema,
+    catalog = row.catalog,
+  }))
+  runner.run(profile, statement, function(rows, err)
+    value.loading_metadata[key] = nil
+    local callbacks = value.metadata_callbacks[key]
+    value.metadata_callbacks[key] = nil
+    if not err then
+      value.metadata[key] = rows
+    end
+    deliver(callbacks, rows, err)
   end)
 end
 

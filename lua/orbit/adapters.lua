@@ -1,6 +1,7 @@
 local M = {}
 
 local connectors = {
+	postgres = require("orbit.connectors.postgres"),
 	sqlite = require("orbit.connectors.sqlite"),
 	trino = require("orbit.connectors.trino"),
 }
@@ -20,6 +21,16 @@ function M.validate_options(profile)
 	end
 	if options.confirm_mutations ~= nil and type(options.confirm_mutations) ~= "boolean" then
 		return nil, string.format("profile %q options.confirm_mutations must be a boolean", profile.name)
+	end
+	if profile.kind ~= "trino" and options.schema_patterns ~= nil then
+		if type(options.schema_patterns) ~= "table" or not vim.islist(options.schema_patterns) or #options.schema_patterns == 0 then
+			return nil, string.format("profile %q options.schema_patterns must be a non-empty array", profile.name)
+		end
+		for _, schema in ipairs(options.schema_patterns) do
+			if type(schema) ~= "string" or schema == "" then
+				return nil, string.format("profile %q options.schema_patterns must contain non-empty strings", profile.name)
+			end
+		end
 	end
 
 	local connector = connectors[profile.kind]
@@ -70,6 +81,50 @@ function M.parse(output)
 	return rows
 end
 
+function M.parse_profile(profile, output)
+	local connector = connectors[profile.kind]
+	if connector and connector.parse then
+		return connector.parse(output)
+	end
+	return M.parse(output)
+end
+
+function M.environment(profile)
+	local connector = connectors[profile.kind]
+	if connector and connector.environment then
+		return connector.environment(profile.options)
+	end
+	return {}
+end
+
+function M.supports_session(profile)
+  local connector = connectors[profile.kind]
+  return connector ~= nil and connector.session_command ~= nil
+end
+
+function M.session_command(profile)
+  local connector = connectors[profile.kind]
+  if connector and connector.session_command then
+    return connector.session_command(profile.options)
+  end
+  return nil, "persistent sessions are not supported for profile kind: " .. tostring(profile.kind)
+end
+
+function M.session_request(profile, statement, marker)
+  local connector = connectors[profile.kind]
+  if connector and connector.session_request then
+    return connector.session_request(statement, marker)
+  end
+  return nil, "persistent sessions are not supported for profile kind: " .. tostring(profile.kind)
+end
+
+function M.session_output(profile, output, marker)
+  local connector = connectors[profile.kind]
+  if connector and connector.session_output then
+    return connector.session_output(output, marker)
+  end
+end
+
 function M.schema_statement(profile, node)
 	node = node or { type = "tables" }
 	local connector = connectors[profile.kind]
@@ -77,6 +132,14 @@ function M.schema_statement(profile, node)
 		return connector.schema_statement(profile.options, node)
 	end
   return nil, "unsupported profile kind: " .. tostring(profile.kind)
+end
+
+function M.metadata_categories(profile, row)
+  local connector = connectors[profile.kind]
+  if connector and connector.metadata_categories then
+    return connector.metadata_categories(profile.options, row)
+  end
+  return {}
 end
 
 function M.object_actions(profile, row, limit)

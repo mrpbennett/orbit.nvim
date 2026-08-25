@@ -102,7 +102,7 @@ function M.execute(buffer, config, selection)
     return
   end
 
-  local notice = feedback.start("Connecting to " .. profile.name .. "...")
+  local notice = feedback.start((runner.connected(profile.name) and "Running on " or "Connecting to ") .. profile.name .. "...")
   local state = {
     cancelled = false,
     profile_name = profile.name,
@@ -165,6 +165,16 @@ function M.cancel(buffer)
   runner.cancel(running[buffer].process)
 end
 
+function M.disconnect(buffer)
+  local profile_name = vim.b[buffer].orbit_profile
+  if not profile_name then
+    vim.notify("No Orbit profile is bound to this buffer", vim.log.levels.INFO)
+    return
+  end
+  runner.close(profile_name)
+  vim.notify("Orbit disconnected: " .. profile_name)
+end
+
 function M.status(buffer, config)
   local state = running[buffer]
   local profile_name = state and state.profile_name or vim.b[buffer].orbit_profile
@@ -175,7 +185,7 @@ function M.status(buffer, config)
     local elapsed = math.floor((vim.uv.hrtime() - state.started_at) / 1000000000)
     return string.format("Orbit: %s [%ds]", profile_name, elapsed)
   end
-  return "Orbit: " .. profile_name
+  return string.format("Orbit: %s [%s]", profile_name, runner.connected(profile_name) and "connected" or "bound")
 end
 
 return M

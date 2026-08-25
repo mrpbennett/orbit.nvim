@@ -21,6 +21,7 @@ function M.validate_options(profile_name, options)
     confirm_mutations = true,
     executable = true,
     schema = true,
+    schema_patterns = true,
     server = true,
     user = true,
   }
@@ -31,6 +32,21 @@ function M.validate_options(profile_name, options)
   end
   if options.schema ~= nil and type(options.schema) ~= "string" then
     return nil, string.format("profile %q options.schema must be a string", profile_name)
+  end
+  if options.schema_patterns ~= nil then
+    if type(options.schema_patterns) ~= "table" or vim.islist(options.schema_patterns) then
+      return nil, string.format("profile %q options.schema_patterns must map catalogs to schema arrays", profile_name)
+    end
+    for catalog, schemas in pairs(options.schema_patterns) do
+      if type(catalog) ~= "string" or catalog == "" or type(schemas) ~= "table" or not vim.islist(schemas) then
+        return nil, string.format("profile %q options.schema_patterns must map catalog names to schema arrays", profile_name)
+      end
+      for _, schema in ipairs(schemas) do
+        if type(schema) ~= "string" or schema == "" then
+          return nil, string.format("profile %q options.schema_patterns must contain non-empty schema names", profile_name)
+        end
+      end
+    end
   end
   return true
 end
@@ -56,8 +72,27 @@ end
 
 function M.schema_statement(options, node)
   if node.type == "tables" then
+    if options.schema_patterns then
+      local statements = {}
+      for catalog, schemas in pairs(options.schema_patterns) do
+        local clauses = {
+          "SELECT " .. literal(catalog) .. " AS catalog, table_schema AS schema, table_name AS name, table_type AS type",
+          "FROM " .. identifier(catalog) .. ".information_schema.tables",
+          "WHERE table_schema <> 'information_schema'",
+        }
+        if #schemas > 0 then
+          local values = {}
+          for _, schema in ipairs(schemas) do
+            table.insert(values, literal(schema))
+          end
+          table.insert(clauses, "AND table_schema IN (" .. table.concat(values, ", ") .. ")")
+        end
+        table.insert(statements, table.concat(clauses, " "))
+      end
+      return table.concat(statements, " UNION ALL ") .. " ORDER BY catalog, schema, name"
+    end
     local clauses = {
-      "SELECT table_schema AS schema, table_name AS name, table_type AS type",
+      "SELECT table_catalog AS catalog, table_schema AS schema, table_name AS name, table_type AS type",
       "FROM information_schema.tables",
       "WHERE table_catalog = " .. literal(options.catalog),
       "AND table_schema <> 'information_schema'",
@@ -65,18 +100,19 @@ function M.schema_statement(options, node)
     if options.schema and options.schema ~= "" then
       table.insert(clauses, "AND table_schema = " .. literal(options.schema))
     end
-    table.insert(clauses, "ORDER BY table_schema, table_name")
+    table.insert(clauses, "ORDER BY catalog, schema, name")
     return table.concat(clauses, " ")
   end
   if node.type == "columns" and node.name then
     local schema = node.schema or options.schema
+    local catalog = node.catalog or options.catalog
     if not schema or schema == "" then
       return nil, "schema is required to load Trino columns"
     end
     return table.concat({
       "SELECT column_name AS name, data_type AS type",
-      "FROM information_schema.columns",
-      "WHERE table_catalog = " .. literal(options.catalog),
+      "FROM " .. identifier(catalog) .. ".information_schema.columns",
+      "WHERE table_catalog = " .. literal(catalog),
       "AND table_schema = " .. literal(schema),
       "AND table_name = " .. literal(node.name),
       "ORDER BY ordinal_position",
@@ -85,16 +121,21 @@ function M.schema_statement(options, node)
   return nil, "unsupported schema node"
 end
 
+function M.metadata_categories()
+  return { { id = "columns", label = "columns" } }
+end
+
 function M.object_actions(options, row, limit)
   local schema = row.schema or options.schema
   if not schema or schema == "" then
     return nil, "schema is required for Trino schema object actions"
   end
-  local qualified = table.concat({ identifier(schema), identifier(row.name) }, ".")
+  local qualified = table.concat({ identifier(row.catalog or options.catalog), identifier(schema), identifier(row.name) }, ".")
   local columns = assert(M.schema_statement(options, {
     type = "columns",
     name = row.name,
     schema = schema,
+    catalog = row.catalog,
   }))
   return {
     {

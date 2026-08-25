@@ -135,6 +135,64 @@ return {
     assert(ok, err)
   end,
 
+  ["workspace double click toggles schema and table nodes"] = function()
+    local original = vim.api.nvim_get_current_tabpage()
+    local original_run = runner.run
+    local original_getmousepos = vim.fn.getmousepos
+    local path = vim.fn.tempname()
+    assert(profiles.write(path, {
+      version = 1,
+      profiles = { { name = "double-click-tree", kind = "sqlite", options = { path = "/tmp/orbit-test.db" } } },
+    }))
+    runner.run = function(_, statement, callback)
+      if statement:match("PRAGMA table_info") then
+        callback({ { name = "id", type = "INTEGER" } })
+      else
+        callback({ { schema = "main", name = "sessions", type = "table" } })
+      end
+    end
+    local state
+    local mouse_line
+    vim.fn.getmousepos = function()
+      return { winid = state and state.sidebar_window or 0, line = mouse_line }
+    end
+
+    local function double_click(text)
+      mouse_line = assert(line_number(state.sidebar, text))
+      vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<2-LeftMouse>", true, false, true), "mx", false)
+    end
+
+    local ok, err = xpcall(function()
+      state = workspace.open({ profile_path = path })
+      vim.api.nvim_set_current_win(state.sidebar_window)
+      mouse_line = 6
+      vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<2-LeftMouse>", true, false, true), "mx", false)
+      assert(vim.wait(100, function()
+        return line_number(state.sidebar, "main") ~= nil
+      end))
+
+      double_click("main")
+      assert(line_number(state.sidebar, "tables 1"))
+      double_click("tables 1")
+      assert(line_number(state.sidebar, "sessions"))
+      double_click("sessions")
+      assert(line_number(state.sidebar, "columns"))
+      double_click("sessions")
+      assert(not line_number(state.sidebar, "columns"))
+      double_click("main")
+      assert(not line_number(state.sidebar, "tables 1"))
+    end, debug.traceback)
+    vim.fn.getmousepos = original_getmousepos
+    runner.run = original_run
+    if state and vim.api.nvim_tabpage_is_valid(state.tabpage) then
+      workspace.close(state.tabpage)
+    end
+    if vim.api.nvim_tabpage_is_valid(original) then
+      vim.api.nvim_set_current_tabpage(original)
+    end
+    assert(ok, err)
+  end,
+
   ["workspace renders schemas before object groups"] = function()
     local original_tabpage = vim.api.nvim_get_current_tabpage()
     local original_run = runner.run
@@ -155,19 +213,62 @@ return {
       vim.api.nvim_set_current_win(state.sidebar_window)
       vim.api.nvim_win_set_cursor(state.sidebar_window, { 6, 0 })
       vim.api.nvim_feedkeys("l", "mx", false)
-      assert(vim.api.nvim_buf_get_lines(state.sidebar, 6, 7, false)[1]:match("main"))
+      assert(vim.wait(100, function()
+        return line_number(state.sidebar, "main") ~= nil
+      end))
 
-      vim.api.nvim_win_set_cursor(state.sidebar_window, { 7, 0 })
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "main")), 0 })
       vim.api.nvim_feedkeys("l", "mx", false)
-      assert(vim.api.nvim_buf_get_lines(state.sidebar, 7, 8, false)[1]:match("tables 1"))
-
-      vim.api.nvim_win_set_cursor(state.sidebar_window, { 8, 0 })
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "tables 1")), 0 })
       vim.api.nvim_feedkeys("l", "mx", false)
-      assert(vim.api.nvim_buf_get_lines(state.sidebar, 8, 9, false)[1]:match("sessions"))
+      assert(line_number(state.sidebar, "sessions"))
       workspace.close()
       vim.api.nvim_set_current_tabpage(original_tabpage)
     end, debug.traceback)
     runner.run = original_run
+    assert(ok, err)
+  end,
+
+  ["workspace displays SQLite metadata below expanded tables"] = function()
+    local original_tabpage = vim.api.nvim_get_current_tabpage()
+    local original_run = runner.run
+    local path = vim.fn.tempname()
+    assert(profiles.write(path, {
+      version = 1,
+      profiles = { { name = "metadata-tree", kind = "sqlite", options = { path = "/tmp/orbit-metadata.db" } } },
+    }))
+    runner.run = function(_, statement, callback)
+      if statement:match("PRAGMA table_info") then
+        callback({ { name = "id", type = "INTEGER" } })
+      else
+        callback({ { schema = "main", name = "sessions", type = "table" } })
+      end
+    end
+    local state
+    local ok, err = xpcall(function()
+      state = workspace.open({ profile_path = path })
+      vim.api.nvim_set_current_win(state.sidebar_window)
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { 6, 0 })
+      vim.api.nvim_feedkeys("l", "mx", false)
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "main")), 0 })
+      vim.api.nvim_feedkeys("l", "mx", false)
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "tables 1")), 0 })
+      vim.api.nvim_feedkeys("l", "mx", false)
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "sessions")), 0 })
+      vim.api.nvim_feedkeys("l", "mx", false)
+      assert(line_number(state.sidebar, "columns"))
+
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "columns")), 0 })
+      vim.api.nvim_feedkeys("l", "mx", false)
+      assert(vim.wait(100, function()
+        return line_number(state.sidebar, "id  INTEGER") ~= nil
+      end))
+    end, debug.traceback)
+    runner.run = original_run
+    if state and vim.api.nvim_tabpage_is_valid(state.tabpage) then
+      workspace.close(state.tabpage)
+    end
+    vim.api.nvim_set_current_tabpage(original_tabpage)
     assert(ok, err)
   end,
 
@@ -369,10 +470,13 @@ return {
       vim.api.nvim_set_current_win(state.sidebar_window)
       vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "sessions")), 0 })
       vim.api.nvim_feedkeys("l", "mx", false)
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "columns")), 0 })
+      vim.api.nvim_feedkeys("l", "mx", false)
       assert(vim.wait(100, function()
         return column_profile ~= nil
       end))
       assert(column_profile == "table-actions")
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "sessions")), 0 })
       vim.api.nvim_feedkeys("y", "mx", false)
       assert(vim.fn.getreg('"') == "sessions")
 
