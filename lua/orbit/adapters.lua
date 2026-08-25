@@ -151,4 +151,20 @@ function M.object_actions(profile, row, limit)
   return nil, "schema object actions are not supported for profile kind: " .. tostring(profile.kind)
 end
 
+function M.editable_table(profile, row, primary_keys)
+  local connector = connectors[profile.kind]
+  if connector and connector.editable_table then
+    return connector.editable_table(profile.options, row, primary_keys)
+  end
+  return nil, "Result is read-only: editing is not supported by this connection profile."
+end
+
+function M.mutation_statement(profile, table, changes)
+  local connector = connectors[profile.kind]
+  if connector and connector.mutation_statement then
+    return connector.mutation_statement(profile.options, table, changes)
+  end
+  return nil, "Result is read-only: editing is not supported by this connection profile."
+end
+
 return M

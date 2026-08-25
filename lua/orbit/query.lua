@@ -3,10 +3,12 @@ local diagnostics = require("orbit.diagnostics")
 local feedback = require("orbit.feedback")
 local results = require("orbit.results")
 local runner = require("orbit.runner")
+local schema_cache = require("orbit.schema_cache")
 local statements = require("orbit.statements")
 
 local M = {}
 local running = {}
+local result_generation = {}
 
 local mutating = {
   alter = true,
@@ -73,6 +75,7 @@ function M.bind_profile(buffer, profile)
 end
 
 function M.execute(buffer, config, selection)
+  result_generation[buffer] = (result_generation[buffer] or 0) + 1
   local profile, profile_err = M.profile_for_buffer(buffer, config)
   if not profile then
     vim.notify(profile_err, vim.log.levels.ERROR)
@@ -111,6 +114,7 @@ function M.execute(buffer, config, selection)
     tabpage = vim.api.nvim_get_current_tabpage(),
     window = vim.api.nvim_get_current_win(),
     notice = notice,
+    result_generation = result_generation[buffer],
   }
   running[buffer] = state
   state.timer = vim.uv.new_timer()
@@ -137,6 +141,7 @@ function M.execute(buffer, config, selection)
       return
     end
     local result_options = {
+      confirm_mutations = config.confirm_mutations,
       height = config.result_height,
       limit = config.result_limit,
       max_cell_width = config.max_cell_width,
@@ -147,6 +152,47 @@ function M.execute(buffer, config, selection)
       tabpage = state.tabpage,
       elapsed = math.floor((vim.uv.hrtime() - state.started_at) / 1000000000),
     }
+    local table = vim.b[buffer].orbit_table
+    if table and vim.trim(statement) == vim.trim(vim.b[buffer].orbit_table_statement or "") then
+      result_options.source_name = table.name
+      result_options.reload = function(callback)
+        runner.run(profile, statement, callback)
+      end
+      schema_cache.load_metadata(profile, table, "primary_keys", {}, function(primary_keys, metadata_err)
+        if metadata_err then
+          vim.notify(metadata_err, vim.log.levels.WARN)
+        else
+          local names = vim.tbl_map(function(primary_key)
+            return primary_key.name
+          end, primary_keys)
+          local editable, editable_err = require("orbit.adapters").editable_table(profile, table, names)
+          if editable then
+            result_options.editable = editable
+            result_options.profile = profile
+          elseif editable_err then
+            result_options.read_only_reason = editable_err
+          end
+        end
+        schema_cache.load_columns(profile, table, {}, function(columns)
+          if result_generation[buffer] ~= state.result_generation then
+            return
+          end
+          if columns then
+            result_options.columns = vim.tbl_map(function(column)
+              return column.name
+            end, columns)
+          end
+          local workspace = require("orbit.workspace")
+          if workspace.is_workspace(state.tabpage) then
+            workspace.open_results(rows, result_options)
+          else
+            results.open(rows, result_options)
+          end
+        end)
+      end)
+      feedback.finish(state.notice, string.format("Query finished: %d rows in %ds", #rows, math.floor((vim.uv.hrtime() - state.started_at) / 1000000000)))
+      return
+    end
     local workspace = require("orbit.workspace")
     if workspace.is_workspace(state.tabpage) then
       -- Workspace-owned grids preserve its fixed result region and close behavior.

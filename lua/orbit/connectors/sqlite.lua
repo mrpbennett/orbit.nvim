@@ -40,8 +40,81 @@ end
 function M.session_command(options)
   local command = { options.executable or "sqlite3" }
   append(command, options.arguments or {})
-  append(command, { "-json", options.path })
+  -- Abort the CLI on SQL errors so an uncommitted transaction rolls back on disconnect.
+  append(command, { "-bail", "-json", options.path })
   return command
+end
+
+function M.editable_table(_, row, primary_keys)
+  if row.type ~= "table" or #primary_keys == 0 then
+    return nil, "Result is read-only: unable to determine a unique database row."
+  end
+  return { name = row.name, schema = row.schema, primary_keys = primary_keys }
+end
+
+function M.mutation_statement(_, target, changes)
+  local name = identifier(target.name)
+  local primary_keys = target.primary_keys
+  local function value_sql(value)
+    return value == vim.NIL and "NULL" or literal(value)
+  end
+  local statements = { "BEGIN IMMEDIATE" }
+  for _, row in ipairs(changes.deleted) do
+    local conditions = {}
+    for _, column in ipairs(primary_keys) do
+      local value = row.original[column]
+      if value == nil or value == vim.NIL then
+        return nil, "Cannot delete a row with a NULL primary key."
+      end
+      conditions[#conditions + 1] = identifier(column) .. " = " .. value_sql(value)
+    end
+    statements[#statements + 1] = "DELETE FROM " .. name .. " WHERE " .. table.concat(conditions, " AND ")
+  end
+  for _, row in ipairs(changes.modified) do
+    local assignments, conditions = {}, {}
+    for column, value in pairs(row.values) do
+      if not vim.deep_equal(value, row.original[column]) then
+        for _, primary_key in ipairs(primary_keys) do
+          if column == primary_key then
+            return nil, "Editing primary key values is not supported."
+          end
+        end
+        assignments[#assignments + 1] = identifier(column) .. " = " .. value_sql(value)
+      end
+    end
+    for _, column in ipairs(primary_keys) do
+      local value = row.original[column]
+      if value == nil or value == vim.NIL then
+        return nil, "Cannot update a row with a NULL primary key."
+      end
+      conditions[#conditions + 1] = identifier(column) .. " = " .. value_sql(value)
+    end
+    if #assignments > 0 then
+      statements[#statements + 1] = "UPDATE " .. name .. " SET " .. table.concat(assignments, ", ") .. " WHERE " .. table.concat(conditions, " AND ")
+    end
+  end
+  for _, row in ipairs(changes.inserted) do
+    local columns, values = {}, {}
+    for column, value in pairs(row.values) do
+      if value ~= nil then
+        columns[#columns + 1] = identifier(column)
+        values[#values + 1] = value_sql(value)
+      end
+    end
+    table.sort(columns)
+    if #columns == 0 then
+      statements[#statements + 1] = "INSERT INTO " .. name .. " DEFAULT VALUES"
+    else
+      local ordered_values = {}
+      for _, column in ipairs(columns) do
+        local raw = column:sub(2, -2):gsub('""', '"')
+        ordered_values[#ordered_values + 1] = value_sql(row.values[raw])
+      end
+      statements[#statements + 1] = "INSERT INTO " .. name .. " (" .. table.concat(columns, ", ") .. ") VALUES (" .. table.concat(ordered_values, ", ") .. ")"
+    end
+  end
+  statements[#statements + 1] = "COMMIT"
+  return table.concat(statements, ";\n") .. ";"
 end
 
 function M.session_request(statement, marker)

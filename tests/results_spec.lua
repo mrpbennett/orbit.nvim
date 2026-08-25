@@ -1,6 +1,7 @@
 local results = require("orbit.results")
 local workspace = require("orbit.workspace")
 local grid = require("orbit.grid")
+local runner = require("orbit.runner")
 
 local function assert_equal(actual, expected)
   assert(vim.deep_equal(actual, expected), vim.inspect(actual) .. " ~= " .. vim.inspect(expected))
@@ -32,11 +33,11 @@ return {
     local model = grid.render({ { id = 1, name = "Orbit" }, { id = 22, name = "Q" } })
     local lines, widths = grid.layout(model, "local")
 
-    assert(lines[2] == "| id | name  |")
+    assert(lines[3] == "| id | name  |")
     assert(vim.deep_equal(widths, { 2, 5 }))
-    assert(vim.deep_equal(grid.cell_at(model, widths, 4, 2), { row = 1, column = 1 }))
+    assert(vim.deep_equal(grid.cell_at(model, widths, 5, 2), { row = 1, column = 1 }))
     assert(vim.deep_equal(grid.move(model, widths, { row = 1, column = 1 }, 1, 1), { row = 2, column = 2 }))
-    assert(vim.deep_equal(grid.cursor_for(widths, { row = 2, column = 2 }), { 5, 7 }))
+    assert(vim.deep_equal(grid.cursor_for(widths, { row = 2, column = 2 }), { 6, 7 }))
   end,
 
   ["results.open reuses one result window per tabpage"] = function()
@@ -44,7 +45,7 @@ return {
     local second = results.open({ { id = 2 } }, { height = 3 })
 
     assert(first.window == second.window)
-    assert(vim.deep_equal(vim.api.nvim_win_get_cursor(second.window), { 4, 2 }))
+    assert(vim.deep_equal(vim.api.nvim_win_get_cursor(second.window), { 5, 2 }))
     vim.api.nvim_win_close(second.window, true)
   end,
 
@@ -52,7 +53,7 @@ return {
     local opened = results.open({ { account_id = 1, account_name = "Orbit" } }, { height = 3 })
 
     assert(vim.wo[opened.window].winbar == "")
-    assert(vim.api.nvim_buf_get_lines(opened.buffer, 1, 2, false)[1]:match("account_id"))
+    assert(vim.api.nvim_buf_get_lines(opened.buffer, 2, 3, false)[1]:match("account_id"))
 
     vim.api.nvim_win_close(opened.window, true)
   end,
@@ -86,5 +87,54 @@ return {
     assert(vim.api.nvim_win_is_valid(opened.window))
     workspace.close()
     vim.api.nvim_set_current_tabpage(original)
+  end,
+
+  ["editable result grids retain local rows until write reloads them"] = function()
+    local original_run = runner.run
+    local statement
+    runner.run = function(_, value, callback)
+      statement = value
+      callback({}, nil)
+    end
+    local opened = results.open({ { id = "1", name = "Alice" } }, {
+      columns = { "id", "name" },
+      confirm_mutations = false,
+      editable = { name = "users", primary_keys = { "id" } },
+      profile = { kind = "sqlite", options = {} },
+      reload = function(callback)
+        callback({ { id = "1", name = "Alice" } })
+      end,
+    })
+    vim.api.nvim_set_current_win(opened.window)
+
+    vim.api.nvim_feedkeys("o", "mx", false)
+    assert(vim.bo[opened.buffer].modified)
+    assert(vim.api.nvim_buf_get_lines(opened.buffer, 0, -1, false)[5]:match("|"))
+    vim.cmd("edit!")
+    assert(not vim.bo[opened.buffer].modified)
+    vim.api.nvim_feedkeys("o", "mx", false)
+    vim.cmd("write")
+
+    assert(statement:match("BEGIN IMMEDIATE"))
+    assert(not vim.bo[opened.buffer].modified)
+    vim.api.nvim_feedkeys("o", "mx", false)
+    vim.cmd("wq")
+    assert(not vim.api.nvim_win_is_valid(opened.window))
+    runner.run = original_run
+  end,
+
+  ["result grids display editing actions or their read-only reason"] = function()
+    local editable = results.open({ { id = "1" } }, {
+      editable = { name = "users", primary_keys = { "id" } },
+      profile = { kind = "sqlite", options = {} },
+    })
+    assert(vim.api.nvim_buf_get_lines(editable.buffer, -2, -1, false)[1]:match("%[Add Row%]"))
+    vim.api.nvim_win_close(editable.window, true)
+
+    local read_only = results.open({ { id = "1" } }, {
+      read_only_reason = "Result is read-only: unable to determine a unique database row.",
+    })
+    assert(vim.api.nvim_buf_get_lines(read_only.buffer, -2, -1, false)[1]:match("Result is read%-only"))
+    vim.api.nvim_win_close(read_only.window, true)
   end,
 }

@@ -139,17 +139,21 @@ local function toggle_columns(state, row)
   end)
 end
 
-local function open_statement(state, statement)
+local function open_statement(state, statement, table)
   vim.cmd("new")
   vim.bo.filetype = "sql"
   vim.b.orbit_profile = state.profile.name
+  if table and table.type == "table" then
+    vim.b.orbit_table = vim.deepcopy(table)
+    vim.b.orbit_table_statement = statement
+  end
   require("orbit.completion").attach(0)
   vim.api.nvim_buf_set_lines(0, 0, -1, false, vim.split(statement, "\n", { plain = true }))
 end
 
 local function run_action(state, row, action)
   if action.kind == "query_buffer" then
-    open_statement(state, action.statement)
+    open_statement(state, action.statement, row)
     return
   end
   local source_window = state.window

@@ -282,6 +282,23 @@ Expanding a table reveals its available metadata folders. SQLite provides column
 | `y`                | Copy the raw selected value.                                             |
 | `q`                | Close the standalone grid, or return to the query editor in a workspace. |
 
+Schema-browser sample statements for PostgreSQL and SQLite base tables become editable when Orbit can load a primary key. Ad-hoc statements, views, Trino, and tables without a primary key remain read-only.
+
+| Key / command | Action |
+| --- | --- |
+| `o`, `O` | Insert a local row below or above the current row. |
+| `i`, `<CR>` | Edit the focused cell. |
+| `dd` | Mark the current row for local deletion. |
+| `V`, `j` / `k`, `d` | Select complete rows and delete the selection. |
+| `u` | Undo the most recent local edit. |
+| `:w` | Confirm, transactionally save, and reload pending changes. |
+| `:wq` | Save successfully, then close the Result grid. |
+| `:q!` | Discard local changes and close. |
+| `:e!` | Discard local changes and reload the table. |
+
+Edits are never sent to the database until `:w`. A failed write leaves the local Result grid unchanged.
+Enter `NULL` in the cell prompt to write a SQL `NULL` value.
+
 Normal Neovim scrolling remains available, including `<C-d>`, `<C-u>`, `zh`, and `zl`.
 
 ### Schema Object Actions

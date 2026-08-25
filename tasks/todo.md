@@ -530,3 +530,33 @@ Files: `lua/orbit/adapters.lua` (148 lines, 13 functions).
 
 - Added comments only; source lines were not otherwise changed.
 - Verification: `nvim --headless -u NONE -l tests/run.lua` and `git diff --check` passed.
+
+## Editable Result Grid Discoverability Fix
+
+- [x] Render an explicit editable action bar and read-only explanation in every Result grid.
+- [x] Name eligible sample-table Result grids after their table instead of the anonymous query buffer.
+- [x] Add visible-output regression coverage and run the complete suite.
+
+- Verification: `nvim --headless -u NONE -l tests/run.lua` and `git diff --check` passed.
+
+## Editable Result Grid Plan
+
+- [x] Add a database-agnostic editable-result model with ordered rows, row states, row selection, and local undo.
+- [x] Add PostgreSQL and SQLite editability, primary-key, literal, and transactional mutation capabilities; leave Trino read-only.
+- [x] Carry known table identity from schema-browser sample statements through execution into the Result grid.
+- [x] Make editable Result grids `acwrite` buffers and implement local row operations, cell prompting, `:w`, `:wq`, `:q!`, and `:e!`.
+- [x] Add focused model, adapter, and Result grid coverage; document the capability and run the full suite.
+
+### Settled Design
+
+- Only Result grids whose table identity originates in the Schema browser are editable in this slice. Arbitrary statements remain read-only.
+- PostgreSQL and SQLite are editable when a primary key is present. Trino is read-only.
+- Cell edits use a focused-cell prompt via `i` or `<CR>`; rendered table text never becomes the data source.
+- A write is one confirmed transaction. A failed transaction retains every local change.
+
+### Review
+
+- [x] Record verification and review findings.
+
+- Review fixes: cancelling a local insert now removes it rather than generating an invalid delete; reused read-only grids remove editable mappings and autocommands; generated SQL must remain unchanged before its result can be editable; a successful transaction clears local changes even if reload fails; stale schema callbacks cannot replace a newer result; and `NULL` input preserves SQL null semantics.
+- Verification: `nvim --headless -u NONE -l tests/run.lua` and `git diff --check` passed.

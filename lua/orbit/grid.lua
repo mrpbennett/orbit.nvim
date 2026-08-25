@@ -41,7 +41,7 @@ function M.render(rows, options)
   local limit = options.limit or 200
   local max_cell_width = options.max_cell_width or 48
   local count = math.min(#rows, limit)
-  local columns = columns_for(rows)
+  local columns = options.columns or columns_for(rows)
   local rendered = {}
   local raw_rows = {}
 
@@ -65,9 +65,10 @@ function M.render(rows, options)
   }
 end
 
-function M.layout(grid, source)
+function M.layout(grid, source, footer)
+  footer = footer or "q close  y copy raw value  <CR> inspect  <C-d>/<C-u> page  zh/zl scroll"
   if #grid.columns == 0 then
-    return { "Orbit Results: " .. source, "No rows returned.", "q close  y copy  <CR> inspect" }, {}
+    return { "Orbit Results: " .. source, "No rows returned.", footer }, {}
   end
 
   local widths = {}
@@ -94,6 +95,7 @@ function M.layout(grid, source)
   end
   local lines = {
     "Orbit Results: " .. source,
+    "",
     row_line(grid.columns),
     "|-" .. table.concat(separator, "-|-") .. "-|",
   }
@@ -103,13 +105,14 @@ function M.layout(grid, source)
   if grid.limited then
     table.insert(lines, string.format("Showing the first %d rows.", #grid.rows))
   end
-  table.insert(lines, "q close  y copy raw value  <CR> inspect  <C-d>/<C-u> page  zh/zl scroll")
+  table.insert(lines, "")
+  table.insert(lines, footer)
   return lines, widths
 end
 
 function M.cell_at(grid, widths, line, column)
-  -- Grid navigation shares layout's fixed three-line header and ASCII table offsets.
-  local row = line - 3
+  -- Grid navigation shares layout's fixed four-line title/header offset.
+  local row = line - 4
   if row < 1 or not grid.raw_rows[row] then
     return nil
   end
@@ -137,7 +140,7 @@ function M.cursor_for(widths, cell)
   for index = 1, cell.column - 1 do
     start = start + widths[index] + 3
   end
-  return { cell.row + 3, start }
+  return { cell.row + 4, start }
 end
 
 return M

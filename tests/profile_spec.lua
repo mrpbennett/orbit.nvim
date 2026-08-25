@@ -211,7 +211,7 @@ return {
 		}, "SELECT 1"))):match("secret"))
 	end,
 
-	["PostgreSQL CSV output is normalized into rows"] = function()
+  ["PostgreSQL CSV output is normalized into rows"] = function()
 		local rows = assert(adapters.parse_profile({ kind = "postgres", options = {} }, 'id,name,note,missing,empty\n1,Alice,"hello, world",,""\n2,Bob,"two\nlines",,""\n'))
 		assert_equal(rows, {
 			{ id = "1", name = "Alice", note = "hello, world", missing = vim.NIL, empty = "" },
@@ -416,5 +416,25 @@ return {
     loaded, err = invalid_options({ confirm_mutations = "false" })
     assert(loaded == nil)
     assert(err:match("options.confirm_mutations must be a boolean"))
+  end,
+
+  ["adapters generate primary-key mutations in one transaction"] = function()
+    local statement = assert(adapters.mutation_statement({
+      kind = "sqlite",
+      options = {},
+    }, {
+      name = "users",
+      primary_keys = { "id" },
+    }, {
+      deleted = { { original = { id = "2" } } },
+      inserted = { { values = { name = "Ada" } } },
+      modified = { { original = { id = "1", name = "Alice" }, values = { id = "1", name = "Ada" } } },
+    }))
+
+    assert(statement:match("BEGIN IMMEDIATE"))
+    assert(statement:match('DELETE FROM "users" WHERE "id" = \'2\''))
+    assert(statement:match('UPDATE "users" SET "name" = \'Ada\' WHERE "id" = \'1\''))
+    assert(statement:match('INSERT INTO "users" %("name"%) VALUES %(\'Ada\'%)'))
+    assert(statement:match("COMMIT"))
   end,
 }

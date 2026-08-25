@@ -11,7 +11,8 @@ local modules = {
   "orbit.browser",
 	"orbit.completion",
 	"orbit.connectors.postgres",
-  "orbit.diagnostics",
+   "orbit.diagnostics",
+   "orbit.editable_result",
   "orbit.feedback",
   "orbit.profiles",
   "orbit.query",
@@ -41,7 +42,8 @@ local specs = {
   require("tests.schema_tree_spec"),
   require("tests.session_spec"),
   require("tests.workspace_spec"),
-  require("tests.completion_spec"),
+   require("tests.completion_spec"),
+   require("tests.editable_result_spec"),
 }
 
 local failures = {}

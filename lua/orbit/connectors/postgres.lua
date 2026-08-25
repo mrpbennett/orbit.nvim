@@ -105,6 +105,77 @@ function M.session_command(options)
   return command
 end
 
+function M.editable_table(_, row, primary_keys)
+  if row.type ~= "table" or #primary_keys == 0 then
+    return nil, "Result is read-only: unable to determine a unique database row."
+  end
+  return { name = row.name, schema = row.schema, primary_keys = primary_keys }
+end
+
+function M.mutation_statement(_, target, changes)
+  local name = qualified(target)
+  local primary_keys = target.primary_keys
+  local function value_sql(value)
+    return value == vim.NIL and "NULL" or literal(value)
+  end
+  local statements = { "BEGIN" }
+  for _, row in ipairs(changes.deleted) do
+    local conditions = {}
+    for _, column in ipairs(primary_keys) do
+      local value = row.original[column]
+      if value == nil or value == vim.NIL then
+        return nil, "Cannot delete a row with a NULL primary key."
+      end
+      conditions[#conditions + 1] = identifier(column) .. " = " .. value_sql(value)
+    end
+    statements[#statements + 1] = "DELETE FROM " .. name .. " WHERE " .. table.concat(conditions, " AND ")
+  end
+  for _, row in ipairs(changes.modified) do
+    local assignments, conditions = {}, {}
+    for column, value in pairs(row.values) do
+      if not vim.deep_equal(value, row.original[column]) then
+        for _, primary_key in ipairs(primary_keys) do
+          if column == primary_key then
+            return nil, "Editing primary key values is not supported."
+          end
+        end
+        assignments[#assignments + 1] = identifier(column) .. " = " .. value_sql(value)
+      end
+    end
+    for _, column in ipairs(primary_keys) do
+      local value = row.original[column]
+      if value == nil or value == vim.NIL then
+        return nil, "Cannot update a row with a NULL primary key."
+      end
+      conditions[#conditions + 1] = identifier(column) .. " = " .. value_sql(value)
+    end
+    if #assignments > 0 then
+      statements[#statements + 1] = "UPDATE " .. name .. " SET " .. table.concat(assignments, ", ") .. " WHERE " .. table.concat(conditions, " AND ")
+    end
+  end
+  for _, row in ipairs(changes.inserted) do
+    local columns = {}
+    for column, value in pairs(row.values) do
+      if value ~= nil then
+        columns[#columns + 1] = column
+      end
+    end
+    table.sort(columns)
+    if #columns == 0 then
+      statements[#statements + 1] = "INSERT INTO " .. name .. " DEFAULT VALUES"
+    else
+      local identifiers, values = {}, {}
+      for _, column in ipairs(columns) do
+        identifiers[#identifiers + 1] = identifier(column)
+        values[#values + 1] = value_sql(row.values[column])
+      end
+      statements[#statements + 1] = "INSERT INTO " .. name .. " (" .. table.concat(identifiers, ", ") .. ") VALUES (" .. table.concat(values, ", ") .. ")"
+    end
+  end
+  statements[#statements + 1] = "COMMIT"
+  return table.concat(statements, ";\n") .. ";"
+end
+
 function M.session_request(statement, marker)
   -- The sentinel row delimits this request's CSV output in the shared psql stream.
   return statement .. ";\nSELECT '" .. marker .. "' AS __orbit_marker;\n"

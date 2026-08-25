@@ -306,20 +306,24 @@ local function configure_query_buffer(state, buffer)
   end, { buffer = buffer, silent = true, nowait = true, desc = "Filter Orbit workspace" })
 end
 
-local function open_generated_query(state, profile, statement)
+local function open_generated_query(state, profile, statement, table)
   vim.api.nvim_set_current_win(ensure_query_window(state))
   vim.cmd("new")
   local buffer = vim.api.nvim_get_current_buf()
   vim.bo[buffer].filetype = "sql"
   configure_query_buffer(state, buffer)
   require("orbit.query").bind_profile(buffer, profile)
+  if table and table.type == "table" then
+    vim.b[buffer].orbit_table = vim.deepcopy(table)
+    vim.b[buffer].orbit_table_statement = statement
+  end
   vim.api.nvim_buf_set_lines(buffer, 0, -1, false, vim.split(statement, "\n", { plain = true }))
 end
 
 local function run_object_action(state, profile, row, action)
   if action.kind == "query_buffer" then
     -- Generated statements are editable; metadata actions execute immediately into the result grid.
-    open_generated_query(state, profile, action.statement)
+    open_generated_query(state, profile, action.statement, row)
     return
   end
   local notice = feedback.start("Loading " .. action.label:lower() .. " for " .. object_name(row) .. "...")
