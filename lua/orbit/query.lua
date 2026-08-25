@@ -106,7 +106,8 @@ function M.execute(buffer, config, selection)
 		return
 	end
 
-	local notice = feedback.start((runner.connected(profile.name) and "Running on " or "") .. profile.name .. "...")
+	local notice =
+		feedback.start((runner.connected(profile.name) and "Running on " or "Querying on ") .. profile.name .. "...")
 	local state = {
 		cancelled = false,
 		profile_name = profile.name,
