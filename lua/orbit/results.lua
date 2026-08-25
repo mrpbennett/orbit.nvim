@@ -99,6 +99,7 @@ function M.open(rows, options)
   local selection_anchor
   local visual = false
   local saving = false
+  local inline_edit
   local function current_cell()
     return selected_cell(window, grid, widths)
   end
@@ -191,23 +192,38 @@ function M.open(rows, options)
       tab_results[tabpage] = nil
     end
   end, { buffer = buffer, silent = true, nowait = true, desc = "Close Orbit results" })
-  vim.keymap.set("n", "<CR>", function()
+  local function edit_cell()
     local cell = selected_cell(window, grid, widths)
     if not model then
       inspect(cell and grid.raw_rows[cell.row][cell.column])
       return
     end
+    if not cell then
+      return
+    end
     local row = editable_result.visible_rows(model)[cell.row]
     local column = grid.columns[cell.column]
-    vim.ui.input({ prompt = "Orbit " .. column .. ": ", default = grid_model.serialize(row.values[column]) }, function(value)
-      if value == "NULL" then
-        value = vim.NIL
-      end
-      if value ~= nil and editable_result.set_value(model, row.id, column, value) then
-        render(cell)
-      end
-    end)
-  end, { buffer = buffer, silent = true, nowait = true, desc = "Inspect Orbit value" })
+    local line, start = unpack(grid_model.cursor_for(widths, cell))
+    local finish = start + widths[cell.column]
+
+    -- The formatted grid remains model-owned; expose only this cell while inserting.
+    vim.bo[buffer].modifiable = true
+    vim.api.nvim_buf_set_text(buffer, line - 1, start, line - 1, finish, { grid_model.serialize(row.values[column]) })
+    local namespace = vim.api.nvim_create_namespace("OrbitInlineResultEdit")
+    inline_edit = {
+      cell = cell,
+      column = column,
+      finish = vim.api.nvim_buf_set_extmark(buffer, namespace, line - 1, start + #grid_model.serialize(row.values[column]), {
+        right_gravity = true,
+      }),
+      namespace = namespace,
+      row_id = row.id,
+      start = vim.api.nvim_buf_set_extmark(buffer, namespace, line - 1, start, { right_gravity = false }),
+    }
+    vim.api.nvim_win_set_cursor(window, { line, start })
+    vim.cmd("startinsert")
+  end
+  vim.keymap.set("n", "<CR>", edit_cell, { buffer = buffer, silent = true, nowait = true, desc = "Edit Orbit cell" })
   vim.keymap.set("n", "y", function()
     local cell = selected_cell(window, grid, widths)
     local value = cell and grid.raw_rows[cell.row][cell.column]
@@ -236,7 +252,7 @@ function M.open(rows, options)
   end, { buffer = buffer, silent = true, nowait = true, desc = "Move Orbit cell right" })
   if model then
     vim.keymap.set("n", "i", function()
-      vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<CR>", true, false, true), "m", false)
+      edit_cell()
     end, { buffer = buffer, silent = true, nowait = true, desc = "Edit Orbit cell" })
     vim.keymap.set("n", "o", function()
       local cell = current_cell()
@@ -363,6 +379,30 @@ function M.open(rows, options)
       end
     end
     local group = vim.api.nvim_create_augroup("OrbitResults" .. buffer, { clear = true })
+    vim.api.nvim_create_autocmd("InsertLeave", {
+      buffer = buffer,
+      group = group,
+      callback = function()
+        if not inline_edit then
+          return
+        end
+        local edit = inline_edit
+        inline_edit = nil
+        local start = vim.api.nvim_buf_get_extmark_by_id(buffer, edit.namespace, edit.start, {})
+        local finish = vim.api.nvim_buf_get_extmark_by_id(buffer, edit.namespace, edit.finish, {})
+        vim.api.nvim_buf_clear_namespace(buffer, edit.namespace, 0, -1)
+        if #start == 0 or #finish == 0 or start[1] ~= finish[1] then
+          render(edit.cell)
+          return
+        end
+        local value = vim.api.nvim_buf_get_text(buffer, start[1], start[2], finish[1], finish[2], {})[1]
+        if value == "NULL" then
+          value = vim.NIL
+        end
+        editable_result.set_value(model, edit.row_id, edit.column, value)
+        render(edit.cell)
+      end,
+    })
     vim.api.nvim_create_autocmd("BufWriteCmd", {
       buffer = buffer,
       group = group,

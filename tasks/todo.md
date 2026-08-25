@@ -560,3 +560,22 @@ Files: `lua/orbit/adapters.lua` (148 lines, 13 functions).
 
 - Review fixes: cancelling a local insert now removes it rather than generating an invalid delete; reused read-only grids remove editable mappings and autocommands; generated SQL must remain unchanged before its result can be editable; a successful transaction clears local changes even if reload fails; stale schema callbacks cannot replace a newer result; and `NULL` input preserves SQL null semantics.
 - Verification: `nvim --headless -u NONE -l tests/run.lua` and `git diff --check` passed.
+
+## Inline Editable Result Grid Plan
+
+- [x] Add a focused regression test for entering, committing, and navigating inline cell edits without opening a prompt.
+- [x] Replace the editable-grid `i` prompt with a temporary buffer edit that commits the focused cell on leaving Insert mode.
+- [x] Preserve cell navigation, local undo, database-write behavior, and safe redraws after an inline edit.
+- [x] Update Result grid editing documentation and run the complete headless test suite plus whitespace validation.
+
+### Design
+
+- `i` enters Insert mode at the focused cell in the Result grid; no `vim.ui.input` prompt is opened.
+- Leaving Insert mode commits only the focused cell's displayed text into the editable-result model, then redraws the grid and keeps the cell focused.
+- The grid remains model-owned: structural table text, headers, and footers are never interpreted as database data. Inline mode temporarily exposes only the focused cell for editing and restores the rendered grid immediately after commit.
+- `NULL` continues to represent a SQL null when entered as the complete cell value.
+
+### Review
+
+- `i` and `<CR>` enter Insert mode directly in the focused cell. Leaving Insert mode commits the cell to the local model and restores the formatted grid for continued navigation.
+- Verification: `nvim --headless -u NONE -l tests/run.lua` and `git diff --check` passed. `stylua` is not installed in this environment.

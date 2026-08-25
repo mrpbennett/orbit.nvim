@@ -287,7 +287,7 @@ Schema-browser sample statements for PostgreSQL and SQLite base tables become ed
 | Key / command | Action |
 | --- | --- |
 | `o`, `O` | Insert a local row below or above the current row. |
-| `i`, `<CR>` | Edit the focused cell. |
+| `i`, `<CR>` | Enter Insert mode in the focused cell; press `Esc` to keep the local edit. |
 | `dd` | Mark the current row for local deletion. |
 | `V`, `j` / `k`, `d` | Select complete rows and delete the selection. |
 | `u` | Undo the most recent local edit. |
@@ -297,7 +297,7 @@ Schema-browser sample statements for PostgreSQL and SQLite base tables become ed
 | `:e!` | Discard local changes and reload the table. |
 
 Edits are never sent to the database until `:w`. A failed write leaves the local Result grid unchanged.
-Enter `NULL` in the cell prompt to write a SQL `NULL` value.
+Type `NULL` as the complete cell value to write a SQL `NULL` value.
 
 Normal Neovim scrolling remains available, including `<C-d>`, `<C-u>`, `zh`, and `zl`.
 

@@ -123,6 +123,41 @@ return {
     runner.run = original_run
   end,
 
+  ["editable result grids commit focused cells inline on leaving Insert mode"] = function()
+    local original_run = runner.run
+    local statement
+    local input = vim.ui.input
+    runner.run = function(_, value, callback)
+      statement = value
+      callback({}, nil)
+    end
+    vim.ui.input = function()
+      error("inline editing must not open a prompt")
+    end
+    local opened = results.open({ { id = "1", name = "Alice" } }, {
+      columns = { "id", "name" },
+      confirm_mutations = false,
+      editable = { name = "users", primary_keys = { "id" } },
+      profile = { kind = "sqlite", options = {} },
+      reload = function(callback)
+        callback({ { id = "1", name = "AdaAlice" } })
+      end,
+    })
+    vim.api.nvim_set_current_win(opened.window)
+
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("liAda<Esc>h", true, false, true), "mx", false)
+
+    assert(vim.bo[opened.buffer].modified)
+    assert(vim.api.nvim_buf_get_lines(opened.buffer, 4, 5, false)[1]:match("AdaAlice"))
+    assert(vim.deep_equal(vim.api.nvim_win_get_cursor(opened.window), { 5, 2 }))
+    vim.cmd("write")
+    assert(statement:match("AdaAlice"))
+
+    vim.ui.input = input
+    runner.run = original_run
+    vim.api.nvim_win_close(opened.window, true)
+  end,
+
   ["result grids display editing actions or their read-only reason"] = function()
     local editable = results.open({ { id = "1" } }, {
       editable = { name = "users", primary_keys = { "id" } },
