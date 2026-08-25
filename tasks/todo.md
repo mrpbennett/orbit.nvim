@@ -518,3 +518,15 @@ Files: `lua/orbit/adapters.lua` (148 lines, 13 functions).
 
 - Reproduced the hang and the fix against a real `trino` CLI (version 483) and a local mock Trino HTTP server: before the fix, a query never returned; after the fix, the same query resolves in well under a second.
 - Verification: `nvim --headless -u NONE -l tests/run.lua` passed (64 tests). `git diff --check` passed. `stylua` is not installed in this environment.
+
+## Source Commenting Plan
+
+- [x] Add concise module and implementation comments for invariants, asynchronous lifecycle guards, cache/session protocols, and backend-specific SQL or stream handling.
+- [x] Add comments to user-interface modules where programmatic redraws, buffer/window reuse, and cross-tab asynchronous results have non-obvious behavior.
+- [x] Leave self-explanatory functions and mechanical dispatch unannotated; do not alter executable code or tests.
+- [x] Inspect the comment-only diff and run the complete headless test suite plus whitespace validation.
+
+### Review
+
+- Added comments only; source lines were not otherwise changed.
+- Verification: `nvim --headless -u NONE -l tests/run.lua` and `git diff --check` passed.

@@ -21,6 +21,7 @@ local mutating = {
 }
 
 local function requires_confirmation(statement)
+	-- This deliberately conservative lexical check is not a SQL parser: ambiguity is treated as mutable.
   local without_comments = statement:gsub("^%s*%-%-[^\n]*\n", ""):gsub("^%s*/%*.-%*/", "")
   local keyword = without_comments:lower():match("^%s*([%a]+)")
   local semicolons = select(2, without_comments:gsub(";", ""))
@@ -118,6 +119,7 @@ function M.execute(buffer, config, selection)
   end))
   vim.cmd.redrawstatus()
   state.process = runner.run(profile, statement, function(rows, run_err)
+    -- A previous completion must not clear or render over a newer run in this buffer.
     if running[buffer] ~= state then
       return
     end
@@ -147,6 +149,7 @@ function M.execute(buffer, config, selection)
     }
     local workspace = require("orbit.workspace")
     if workspace.is_workspace(state.tabpage) then
+      -- Workspace-owned grids preserve its fixed result region and close behavior.
       workspace.open_results(rows, result_options)
     else
       results.open(rows, result_options)

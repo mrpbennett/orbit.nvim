@@ -7,6 +7,7 @@ local function append(arguments, values)
 end
 
 local function literal(value)
+  -- SQL literals and identifiers use distinct escaping rules and must never be interchangeable.
   return "'" .. tostring(value):gsub("'", "''") .. "'"
 end
 
@@ -73,6 +74,7 @@ end
 function M.schema_statement(options, node)
   if node.type == "tables" then
     if options.schema_patterns then
+      -- Patterns are catalog-to-schema maps, so each catalog needs its own information_schema query.
       local statements = {}
       for catalog, schemas in pairs(options.schema_patterns) do
         local clauses = {
@@ -131,6 +133,7 @@ function M.object_actions(options, row, limit)
     return nil, "schema is required for Trino schema object actions"
   end
   local qualified = table.concat({ identifier(row.catalog or options.catalog), identifier(schema), identifier(row.name) }, ".")
+  -- A discovered object may live outside the configured default catalog or schema.
   local columns = assert(M.schema_statement(options, {
     type = "columns",
     name = row.name,

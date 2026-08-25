@@ -1,6 +1,7 @@
 local M = {}
 
 function M.serialize(value)
+  -- This raw representation is used for copy/inspect and must not inherit display truncation.
   if value == nil then
     return ""
   end
@@ -107,6 +108,7 @@ function M.layout(grid, source)
 end
 
 function M.cell_at(grid, widths, line, column)
+  -- Grid navigation shares layout's fixed three-line header and ASCII table offsets.
   local row = line - 3
   if row < 1 or not grid.raw_rows[row] then
     return nil

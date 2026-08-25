@@ -23,6 +23,7 @@ local function postgres_name(row)
 end
 
 local function set_lines(state, lines)
+  -- Ignore this programmatic redraw in the attached filter-edit callback.
   state.rendering = true
   vim.bo[state.buffer].modifiable = true
   vim.api.nvim_buf_set_lines(state.buffer, 1, -1, false, lines)
@@ -74,6 +75,7 @@ local function refresh(state, force)
   local generation = state.generation
   local notice = feedback.start("Loading schema for " .. state.profile.name .. "...")
   cache.load_tables(state.profile, { refresh = force }, function(rows, run_err)
+    -- A refresh or closed buffer makes older acquisitions irrelevant.
     if not vim.api.nvim_buf_is_valid(state.buffer) or state.generation ~= generation then
       return
     end
@@ -116,6 +118,7 @@ local function toggle_columns(state, row)
     return
   end
   state.expanded[name] = true
+  -- Expand first so the UI can show loading; completion also requires the node remain open.
   if state.columns[name] then
     render(state)
     return
@@ -150,6 +153,7 @@ local function run_action(state, row, action)
     return
   end
   local source_window = state.window
+  -- Capture the origin before asynchronous work so results return to the correct tab/window.
   local tabpage = vim.api.nvim_get_current_tabpage()
   local notice = feedback.start("Loading " .. action.label:lower() .. " for " .. object_name(row) .. "...")
   runner.run(state.profile, action.statement, function(rows, run_err)
@@ -261,6 +265,7 @@ local function create_browser(profile, config)
 
   vim.api.nvim_buf_attach(buffer, false, {
     on_lines = function()
+      -- Only edits made by filter mode update state; render writes are ignored above.
       if vim.bo[buffer].modifiable and not state.rendering then
         state.filter = filter_text(state)
         vim.schedule(function()
@@ -368,6 +373,7 @@ function M.open(config, name, buffer, search)
   if state and vim.api.nvim_win_is_valid(state.window) and state.profile.name == profile.name then
     vim.api.nvim_set_current_win(state.window)
   elseif state and vim.api.nvim_win_is_valid(state.window) then
+    -- Each tabpage owns one browser; changing profiles resets its display and invalidates callbacks.
     state.profile = profile
     state.tables = {}
     state.columns = {}

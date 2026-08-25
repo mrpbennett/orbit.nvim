@@ -4,6 +4,7 @@ local session = require("orbit.session")
 local M = {}
 
 local function run_once(profile, statement, callback)
+  -- Always deliver completion on Neovim's loop, including command construction and spawn failures.
   local command, command_err = adapters.prepare(profile, statement)
   if not command then
     vim.schedule(function()
@@ -38,6 +39,7 @@ local function run_once(profile, statement, callback)
 end
 
 function M.run(profile, statement, callback)
+  -- Trino uses one-shot processes; supported connectors retain a serialized CLI session.
   if not adapters.supports_session(profile) then
     return run_once(profile, statement, callback)
   end
@@ -56,6 +58,7 @@ function M.cancel(process)
     return
   end
   if process.kill then
+    -- One-shot vim.system handles expose kill; session requests are opaque queue entries.
     process:kill(15)
   else
     session.cancel(process)

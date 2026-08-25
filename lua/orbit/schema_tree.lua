@@ -30,6 +30,7 @@ function M.object_name(row)
 end
 
 local function group_key(schema_name, kind)
+  -- NUL delimiters keep adjacent schema, object, and category names from colliding.
   return "group\0" .. schema_name .. "\0" .. kind
 end
 
@@ -125,6 +126,7 @@ function M.lines(tree, profile, filter, options)
   end
   for _, schema_group in ipairs(groups) do
     local schema_node = { kind = "schema", name = schema_group.name }
+    -- Filtering reveals matching ancestors without changing the user's saved expansion state.
     local schema_expanded = M.is_expanded(tree, schema_node) or filter ~= ""
     table.insert(lines, string.format("%s %s", schema_expanded and icons.expanded or icons.collapsed, schema_group.name))
     nodes[#lines] = schema_node
@@ -148,6 +150,7 @@ function M.lines(tree, profile, filter, options)
                 local metadata_node = { category = category, kind = "metadata", profile = profile, row = row }
                 local metadata_expanded = M.is_expanded(tree, metadata_node)
                 local entries = tree.metadata[metadata_key(row, category.id)]
+                -- nil is not loaded yet; an empty table is a completed lookup with no entries.
                 local label = entries and string.format("%s %d", category.label, #entries) or category.label
                 table.insert(lines, string.format("      %s %s %s", metadata_expanded and icons.expanded or icons.collapsed, icons.folder, label))
                 nodes[#lines] = metadata_node

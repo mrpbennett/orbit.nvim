@@ -7,6 +7,7 @@ local function append(arguments, values)
 end
 
 local function literal(value)
+  -- SQL literals and identifiers are different syntactic domains.
   return "'" .. tostring(value):gsub("'", "''") .. "'"
 end
 
@@ -98,12 +99,14 @@ function M.session_command(options)
     "--csv",
     "--no-psqlrc",
     "--pset", "footer=off",
+    -- A persistent process must survive statement errors so they reach the owning request.
     "--set", "ON_ERROR_STOP=off",
   })
   return command
 end
 
 function M.session_request(statement, marker)
+  -- The sentinel row delimits this request's CSV output in the shared psql stream.
   return statement .. ";\nSELECT '" .. marker .. "' AS __orbit_marker;\n"
 end
 
@@ -122,6 +125,7 @@ end
 function M.environment(options)
   local environment = {}
   if options.password then
+    -- Keep credentials out of argv, where process listings could expose them.
     environment.PGPASSWORD = options.password
   end
   if options.sslmode then
@@ -169,6 +173,7 @@ function M.schema_statement(options, node)
     }, " ")
   end
   if node.type == "foreign_keys" and node.name then
+    -- WITH ORDINALITY pairs composite source and target key columns by position.
     return table.concat({
       "SELECT constraint_row.conname AS id, source_column.attname AS \"from\",",
       "target_table.relname AS \"table\", target_column.attname AS \"to\"",
@@ -248,6 +253,7 @@ function M.object_actions(_, row, limit)
 end
 
 function M.parse(output)
+  -- Preserve quoted empty strings separately from unquoted SQL NULL fields in psql's CSV output.
   local records, record, field = {}, {}, {}
   local quoted, in_quotes, index = false, false, 1
   local function finish_field()

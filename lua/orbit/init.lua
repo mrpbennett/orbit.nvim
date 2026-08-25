@@ -42,6 +42,7 @@ local default_profile_warned = false
 local workspace_mapping = nil
 
 local function visual_selection(command)
+	-- Ex command ranges are inclusive, 1-based buffer rows, matching statements.target's contract.
 	if command.range == 0 then
 		return nil
 	end
@@ -110,6 +111,7 @@ end
 
 local function apply_keymaps(buffer)
 	local keymaps = M.config.keymaps
+	-- Do not duplicate buffer-local mappings when setup or FileType runs again.
 	if type(keymaps) ~= "table" or vim.b[buffer].orbit_keymaps then
 		return
 	end
@@ -130,6 +132,7 @@ local function apply_keymaps(buffer)
 			}
 			vim.keymap.set("n", lhs, "<Cmd>" .. command .. "<CR>", options)
 			if action == "execute" then
+				-- Visual execution passes the selected line range through the Ex command.
 				vim.keymap.set("x", lhs, ":<C-u>'<,'>" .. command .. "<CR>", options)
 			end
 		end
@@ -187,6 +190,7 @@ end
 local function apply_workspace_keymap()
 	local keymaps = M.config.keymaps
 	if type(keymaps) == "table" and type(keymaps.workspace) == "string" then
+		-- Reconfiguration must not leave the previous global mapping behind.
 		if workspace_mapping and workspace_mapping ~= keymaps.workspace then
 			pcall(vim.keymap.del, "n", workspace_mapping)
 		end
@@ -213,6 +217,7 @@ function M.setup(options)
 	M.config = vim.tbl_deep_extend("force", M.config, options or {})
 	M.config.default_profile = nil
 	if not configured then
+		-- Commands and autocommands are registered once; current SQL buffers are updated below.
 		_G.OrbitComplete = function(findstart, base)
 			return require("orbit.completion").omnifunc(findstart, base)
 		end

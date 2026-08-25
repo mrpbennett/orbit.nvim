@@ -45,6 +45,7 @@ function M.session_command(options)
 end
 
 function M.session_request(statement, marker)
+  -- The marker query delimits one JSON response in SQLite's persistent stdout stream.
   return statement .. ";\nSELECT '" .. marker .. "' AS __orbit_marker;\n"
 end
 
@@ -63,6 +64,7 @@ end
 function M.schema_statement(options, node)
   if node.type == "tables" then
     if options.schema_patterns then
+      -- SQLite exposes only main here; filters without it intentionally acquire no rows.
       for _, schema in ipairs(options.schema_patterns) do
         if schema == "main" then
           return "SELECT 'main' AS schema, name, type FROM sqlite_master WHERE type IN ('table', 'view') ORDER BY name"
@@ -101,6 +103,7 @@ end
 
 function M.object_actions(_, row, limit)
   local name = literal(row.name)
+  -- PRAGMAs take string literals, while generated sample SQL needs an escaped identifier.
   return {
     {
       id = "sample",

@@ -17,6 +17,7 @@ local function postgres_identifier(value)
 end
 
 local function postgres_schema_prefix(value)
+  -- Decode a quoted prefix for cache lookup; inserted completion words stay SQL-escaped.
   local schema = value:sub(1, -2)
   if schema:sub(1, 1) == '"' and schema:sub(-1) == '"' then
     return schema:sub(2, -2):gsub('""', '"')
@@ -62,6 +63,7 @@ function M.items(profile, line, cursor)
   local before = line:sub(1, cursor)
   local qualifier = before:match("([%w_\"]+%.)[%w_\"]*$")
   if qualifier then
+    -- Prefer columns on a known object, then schema-qualified objects, before keyword completion.
     local object = qualifier:sub(1, -2)
     if #cache.columns(profile.name, object) > 0 then
       return column_items(profile, object, qualifier)
@@ -97,6 +99,7 @@ function M.omnifunc(findstart, base)
   local cursor = vim.api.nvim_win_get_cursor(0)[2]
   local line = vim.api.nvim_get_current_line()
   if findstart == 1 then
+    -- Neovim supplies a byte column; Lua's byte-oriented string indexing matches it here.
     local word = line:sub(1, cursor):match("[%w_%.\"]*$") or ""
     return cursor - #word
   end
@@ -106,6 +109,7 @@ function M.omnifunc(findstart, base)
   end
   local items = M.items(profile, line, cursor)
   if base ~= "" then
+    -- Item generation can be broad; omnifunc applies the final exact prefix filter.
     local filtered = {}
     for _, candidate in ipairs(items) do
       if candidate.word:sub(1, #base) == base then

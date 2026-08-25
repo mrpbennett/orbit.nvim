@@ -75,6 +75,7 @@ function M.open(rows, options)
   local window
   local placeholder
   if state and vim.api.nvim_win_is_valid(state.window) and vim.api.nvim_buf_is_valid(state.buffer) then
+    -- Each tabpage keeps one reusable result grid rather than accumulating result splits.
     buffer = state.buffer
     window = state.window
   else
@@ -94,6 +95,7 @@ function M.open(rows, options)
   vim.bo[buffer].modifiable = false
   vim.bo[buffer].filetype = "orbit-results"
   vim.api.nvim_win_set_buf(window, buffer)
+  -- Only delete the split's listed placeholder, never an arbitrary user buffer.
   if placeholder and vim.api.nvim_buf_is_valid(placeholder) and vim.bo[placeholder].buflisted then
     vim.api.nvim_buf_delete(placeholder, { force = true })
   end
@@ -145,6 +147,7 @@ function M.open(rows, options)
   if options.focus then
     vim.api.nvim_set_current_win(window)
   elseif vim.api.nvim_win_is_valid(original_window) and vim.api.nvim_tabpage_is_valid(original_tabpage) then
+    -- Prefer the caller's context, falling back to the source window after tab changes.
     vim.api.nvim_set_current_tabpage(original_tabpage)
     vim.api.nvim_set_current_win(original_window)
   elseif vim.api.nvim_win_is_valid(source_window) then

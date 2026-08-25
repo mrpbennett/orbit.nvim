@@ -5,6 +5,7 @@ local M = {}
 local profiles = {}
 
 local function entry(profile_name)
+  -- Cache entries also hold callback queues, coalescing concurrent requests per profile/node.
   profiles[profile_name] = profiles[profile_name] or {
     columns = {},
     column_callbacks = {},
@@ -47,10 +48,12 @@ function M.load_tables(profile, options, callback)
   callback = callback or function() end
   local value = entry(profile.name)
   if value.loading_tables then
+    -- Join the in-flight acquisition instead of spawning a duplicate backend statement.
     table.insert(value.table_callbacks, callback)
     return
   end
   if value.tables and not options.refresh then
+    -- Cache hits remain asynchronous so callers have one completion timing model.
     vim.schedule(function()
       callback(value.tables)
     end)
@@ -66,6 +69,7 @@ function M.load_tables(profile, options, callback)
     if not err then
       value.tables = rows
       if options.refresh then
+        -- A successful table refresh invalidates dependent object metadata, not failed data.
         value.columns = {}
         value.metadata = {}
       end
@@ -122,6 +126,7 @@ function M.load_metadata(profile, row, category, options, callback)
     return value and value ~= ""
   end, { row.catalog, row.schema, row.name }), ".")
   local key = table_name .. "\0" .. category
+  -- Category-specific keys allow independent metadata loads for the same object.
   local value = entry(profile.name)
   if value.loading_metadata[key] then
     table.insert(value.metadata_callbacks[key], callback)

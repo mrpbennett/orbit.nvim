@@ -15,6 +15,7 @@ local function read(path)
     uv.fs_close(fd)
     return nil, "cannot stat profile file: " .. stat_err
   end
+  -- Profile files may contain credentials, so reject them before parsing unless owner-only.
   if bit.band(stat.mode, 511) ~= 384 then
     uv.fs_close(fd)
     return nil, "profile file must use owner-only mode 0600"
@@ -144,6 +145,7 @@ function M.write(path, document)
   end
 
   local temporary = path .. ".tmp-" .. tostring(uv.os_getpid())
+  -- Write and sync a sibling first so rename replaces the document atomically.
   local fd, open_err = uv.fs_open(temporary, "w", 384)
   if not fd then
     return nil, "cannot create profile file: " .. open_err
@@ -163,6 +165,7 @@ function M.write(path, document)
     uv.fs_unlink(temporary)
     return nil, "cannot replace profile file: " .. rename_err
   end
+  -- Rename inherits filesystem behavior, so enforce owner-only mode on the final path too.
   local chmodded, chmod_err = uv.fs_chmod(path, 384)
   if not chmodded then
     return nil, "cannot protect profile file: " .. chmod_err
@@ -173,6 +176,7 @@ end
 
 function M.ensure(path)
   if uv.fs_stat(path) then
+    -- Repair permissions on existing files; initialize missing files as an empty v1 document.
     local ok, err = uv.fs_chmod(path, 384)
     if not ok then
       return nil, "cannot protect profile file: " .. err

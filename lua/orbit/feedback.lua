@@ -10,6 +10,7 @@ local function progress(state)
 end
 
 function M.start(message)
+  -- Echo supplies in-place progress while the command runs; completion emits a bounded notification.
   local state = { message = message, started_at = vim.uv.hrtime() }
   progress(state)
   state.timer = vim.uv.new_timer()

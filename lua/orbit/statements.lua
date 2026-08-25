@@ -38,6 +38,7 @@ function M.target(request)
   end
 
   local semicolons = select(2, contents:gsub(";", ""))
+  -- This is intentionally a safety rule, not SQL parsing: ambiguous buffers require a selection.
   if semicolons > 1 or (semicolons == 1 and not contents:match(";%s*$")) then
     return nil, "statement is ambiguous; select the statement explicitly"
   end

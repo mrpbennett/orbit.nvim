@@ -19,6 +19,7 @@ function M.group(rows, query)
 	query = vim.trim(query or ""):lower()
 	local by_schema = {}
 	for _, row in ipairs(rows) do
+    -- Catalog is part of a Trino schema's identity; matching a schema includes all of its objects.
     local schema_name = row.catalog and row.catalog .. "." .. (row.schema or "main") or row.schema or "main"
 		local schema_matches = query == "" or schema_name:lower():find(query, 1, true)
 		local object_matches = query == "" or row.name:lower():find(query, 1, true)

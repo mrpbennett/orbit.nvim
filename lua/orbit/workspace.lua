@@ -23,6 +23,7 @@ local fallback_icons = {
 }
 
 local function set_content(state, lines)
+  -- on_lines must distinguish this redraw from an edit to the filter input.
   state.rendering = true
   vim.bo[state.sidebar].modifiable = true
   vim.api.nvim_buf_set_lines(state.sidebar, 2, -1, false, lines)
@@ -62,6 +63,7 @@ local function discover_saved_queries(directory)
       local entry_path = path .. "/" .. name
       if kind == "directory" then
         local children = scan(entry_path)
+        -- Empty directories add no actionable node, while directories sort before SQL files.
         if #children > 0 then
           table.insert(entries, { kind = "saved_directory", name = name, path = entry_path, children = children })
         end
@@ -103,6 +105,7 @@ local function render(state)
     "Profiles:",
   }
   local highlights = { { group = "OrbitHeader", line = 2 } }
+  -- Nodes are keyed by rendered buffer line so mappings can resolve the cursor without parsing text.
   state.nodes = {}
   for _, profile in ipairs(state.profiles) do
     local expanded = state.schema_profile == profile.name
@@ -180,6 +183,7 @@ local function ensure_query_window(state)
       return window
     end
   end
+  -- A workspace can survive after its query split closes, so recreate it only as a fallback.
   vim.api.nvim_set_current_win(state.sidebar_window)
   vim.cmd("rightbelow vsplit")
   state.query_window = vim.api.nvim_get_current_win()
@@ -202,6 +206,7 @@ local function load_schema(state, profile, force)
   render(state)
   state.schema_notice = feedback.start("Loading schema for " .. profile.name .. "...")
   cache.load_tables(profile, { refresh = force }, function(rows, err)
+    -- Ignore callbacks from replaced loads and from a workspace that has been closed.
     if state.generation ~= generation or not vim.api.nvim_buf_is_valid(state.sidebar) then
       return
     end
@@ -248,6 +253,7 @@ local function reload_profiles(state)
 end
 
 local function load_metadata(state, profile, row, category, show_progress)
+  -- Loaded and loading are distinct: the latter coalesces requests, the former permits empty results.
   if schema_tree.is_metadata_loaded(state.tree, row, category.id) or schema_tree.is_metadata_loading(state.tree, row, category.id) then
     return
   end
@@ -292,6 +298,7 @@ local function new_query(state)
 end
 
 local function configure_query_buffer(state, buffer)
+  -- Workspace tagging routes later results back here and makes / target the sidebar filter.
   vim.b[buffer].orbit_workspace_tab = state.tabpage
   require("orbit.completion").attach(buffer)
   vim.keymap.set("n", "/", function()
@@ -311,6 +318,7 @@ end
 
 local function run_object_action(state, profile, row, action)
   if action.kind == "query_buffer" then
+    -- Generated statements are editable; metadata actions execute immediately into the result grid.
     open_generated_query(state, profile, action.statement)
     return
   end
@@ -356,6 +364,7 @@ local function select_object_action(state, profile, row)
 end
 
 local function copy_object_name(profile, row)
+  -- Connector-specific qualification produces an identifier that can be pasted back into SQL.
   local name = row.name
   if profile.kind == "trino" then
     name = table.concat({ row.catalog or profile.options.catalog, row.schema or profile.options.schema, row.name }, ".")
@@ -445,6 +454,7 @@ end
 local function configure_sidebar(state)
   vim.api.nvim_buf_attach(state.sidebar, false, {
     on_lines = function()
+      -- Only user edits to the first two lines update the filter and schedule a redraw.
       if vim.bo[state.sidebar].modifiable and not state.rendering then
         state.filter = filter_text(state)
         vim.schedule(function()
@@ -544,6 +554,7 @@ local function configure_sidebar(state)
       vim.api.nvim_win_set_cursor(state.sidebar_window, { position.line, 0 })
       local node = current_node()
       if node and node.kind == "profile" then
+        -- Profile double-click both binds the profile and toggles its schema tree.
         activate_current()
       end
       if current_expanded() then
@@ -630,6 +641,7 @@ local function toggle_sidebar(state)
 end
 
 local function existing_workspace()
+  -- Orbit intentionally keeps one workspace tabpage, reopening it instead of creating duplicates.
   for tabpage, state in pairs(workspaces) do
     if vim.api.nvim_tabpage_is_valid(tabpage) then
       vim.api.nvim_set_current_tabpage(tabpage)
@@ -698,6 +710,7 @@ function M.open_results(rows, options)
   local state = workspaces[options.tabpage]
   options.height = math.max(6, math.floor(vim.o.lines * ((state and state.config.workspace_result_ratio) or 0.30)))
   options.on_quit = function(_, source_window)
+    -- The workspace owns result geometry and returns focus to the originating query split.
     if vim.api.nvim_win_is_valid(source_window) then
       vim.api.nvim_set_current_win(source_window)
     end
@@ -738,6 +751,7 @@ function M.select_profile(config, buffer, on_select)
     render(state)
   end
   state.binding_target = buffer
+  -- Binding is deferred until the profile node is activated in the shared workspace picker.
   state.binding_callback = on_select
   focus_filter(state)
 end

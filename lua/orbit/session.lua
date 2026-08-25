@@ -4,6 +4,7 @@ local M = {}
 local sessions = {}
 
 local function finish(request, output, err)
+  -- Process exit, cancellation, and marker detection can race; complete a request exactly once.
   if request.done then
     return
   end
@@ -14,6 +15,7 @@ local function finish(request, output, err)
 end
 
 local function fail(session, err)
+  -- One shared CLI cannot safely continue after failure, so fail its active and queued requests.
   local active = session.active
   session.active = nil
   session.process = nil
@@ -27,6 +29,7 @@ local function fail(session, err)
 end
 
 local function start_next(session)
+  -- The session is single-flight FIFO: stdout accumulates until this request's marker is observed.
   if session.active or #session.queue == 0 then
     return
   end
@@ -90,6 +93,7 @@ local function session_for(profile)
   local signature = vim.json.encode({ kind = profile.kind, options = profile.options })
   local session = sessions[profile.name]
   if session and session.signature ~= signature then
+    -- Profile edits require a new process so no request uses stale connection settings.
     M.close(profile.name)
     session = nil
   end
@@ -110,6 +114,7 @@ function M.run(profile, statement, callback)
   session.sequence = session.sequence + 1
   local request = {
     callback = callback,
+    -- The unique sentinel delimits one response in a long-lived CLI output stream.
     marker = string.format("__orbit_%s_%d_%d", profile.name:gsub("[^%w]", "_"), vim.uv.hrtime(), session.sequence),
     output = "",
     stderr = "",
@@ -126,6 +131,7 @@ function M.cancel(request)
   end
   for _, session in pairs(sessions) do
     if session.active == request then
+      -- Cancelling active work kills its shared process; queued work is removed independently.
       if session.process then
         session.process:kill(15)
       end

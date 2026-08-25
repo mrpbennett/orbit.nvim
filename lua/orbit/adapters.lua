@@ -1,5 +1,6 @@
 local M = {}
 
+-- This is the normalized connector boundary; backend capabilities are optional by design.
 local connectors = {
 	postgres = require("orbit.connectors.postgres"),
 	sqlite = require("orbit.connectors.sqlite"),
