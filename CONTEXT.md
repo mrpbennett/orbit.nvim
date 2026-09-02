@@ -1,6 +1,6 @@
 # Orbit.nvim
 
-Orbit.nvim is a personal Neovim database query workspace for Trino and SQLite. It provides statement execution, schema browsing, and formatted query results through backend-specific CLIs.
+Orbit.nvim is a personal Neovim database query workspace for Trino, SQLite, and PostgreSQL. It provides statement execution, schema browsing, and formatted query results through backend-specific CLIs.
 
 ## Language
 
@@ -60,3 +60,11 @@ _Avoid_: save directory, save location
 **Workspace**:
 A dedicated Neovim tabpage containing Orbit's profile/schema browser, query buffers, and persistent result grid.
 _Avoid_: IDE, dashboard
+
+**Table alias**:
+The short name introduced for a table, view, or derived table within a single statement's `FROM`/`JOIN` clauses, scoped to that statement, used to qualify column references within it.
+_Avoid_: alias (bare), table nickname
+
+**Derived table**:
+A subquery given a table alias in a `FROM`/`JOIN` clause. Orbit recognizes the alias as valid but does not infer its columns.
+_Avoid_: subquery table, inline view

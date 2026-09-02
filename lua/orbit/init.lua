@@ -2,6 +2,7 @@ local M = {}
 local status_winbar = "%{luaeval(\"require('orbit').status()\")}"
 
 M.config = {
+	completion = true,
 	confirm_mutations = true,
 	focus_results = false,
 	max_cell_width = 48,
@@ -166,7 +167,7 @@ local function apply_keymaps(buffer)
 end
 
 local function apply_completion(buffer)
-	if vim.b[buffer].orbit_profile then
+	if M.config.completion and vim.b[buffer].orbit_profile then
 		require("orbit.completion").attach(buffer)
 	end
 end

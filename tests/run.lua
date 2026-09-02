@@ -18,6 +18,9 @@ local modules = {
   "orbit.results",
   "orbit.runner",
   "orbit.session",
+  "orbit.sql.tokenizer",
+  "orbit.sql.scope",
+  "orbit.blink",
   "orbit.schema",
   "orbit.schema_cache",
   "orbit.schema_tree",
@@ -43,6 +46,9 @@ local specs = {
   require("tests.workspace_spec"),
    require("tests.completion_spec"),
    require("tests.editable_result_spec"),
+   require("tests.sql_tokenizer_spec"),
+   require("tests.sql_scope_spec"),
+   require("tests.blink_spec"),
 }
 
 local failures = {}

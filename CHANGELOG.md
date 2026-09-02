@@ -2,6 +2,23 @@
 
 All notable changes to Orbit.nvim are documented in this file.
 
+## Unreleased
+
+### Added
+
+- Added clause-aware SQL completion: a dependency-free tokenizer and statement/alias-scope resolver replace the old single-line regexes, so tables, schemas, columns, and table aliases complete correctly in `SELECT`, `WHERE`, `ON`, `GROUP BY`, `ORDER BY`, `FROM`-family clauses, `INSERT INTO t (...)`, and `UPDATE t SET ...`, across multi-line statements. Table aliases resolve to their columns, including old-style comma joins; unqualified columns are offered from every table in scope, annotated by source.
+- Added an optional `blink.cmp` completion source (`orbit.blink`) offering the same suggestions; since blink.cmp has no runtime source-registration API, it must be added to the user's own `sources.providers`/`sources.default` config (documented in the README).
+- Added a `completion` configuration option (default `true`) to disable both the native omnifunc attachment and the blink.cmp source.
+- Added multiple named saved-query locations (`saved_query_dirs`), replacing the single `saved_query_dir` option, each rendered as its own root in the Workspace sidebar.
+
+### Changed
+
+- Saved-query roots in the Workspace sidebar now start collapsed instead of expanded.
+
+### Tests
+
+- Added tokenizer, statement/clause/alias-scope, completion, and blink.cmp source coverage, including malformed-input resilience, multi-statement alias isolation, comma-joins, CTE/derived-table graceful degradation, and per-dialect qualifier depth.
+
 ## 0.2.0 - 2026-08-25
 
 ### Changed

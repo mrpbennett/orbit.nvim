@@ -689,7 +689,7 @@ Files: `lua/orbit/adapters.lua` (148 lines, 13 functions).
 
 - `saved_query_dirs = { { Work = "~/sql/work" }, { Personal = "~/sql/personal" } }` replaces `saved_query_dir`; each key is displayed exactly and array order controls root order.
 - Setup rejects malformed entries, duplicate names, and duplicate normalized paths. Paths are expanded and made absolute during setup.
-- Every top-level root starts expanded. Unavailable and empty roots remain visible, overlapping roots are allowed, and symbolic links remain ignored.
+- Every top-level root starts collapsed. Unavailable and empty roots remain visible, overlapping roots are allowed, and symbolic links remain ignored.
 - Refreshing any saved-query directory rescans only its containing top-level root.
 
 ### Review
@@ -700,3 +700,34 @@ Files: `lua/orbit/adapters.lua` (148 lines, 13 functions).
 - Workspace roots preserve configured labels and order, remain visible when unavailable, carry root-scoped expansion identity for overlapping paths, and refresh only the selected directory's containing root.
 - Coverage includes replacement during repeated setup, lexical path normalization, invalid entries, unavailable and overlapping roots, independent refresh and expansion, and ignored file and directory symlinks.
 - Verification: `nvim --headless -u NONE -l tests/run.lua` and `git diff --check` passed. A follow-up code review found no remaining correctness or specification issues. `stylua` is not installed in this environment.
+
+## Clause-Aware SQL Autocomplete
+
+Plan: `~/.claude/plans/sprightly-seeking-blanket.md`. Replaces the two single-line regexes in `completion.lua` with a hand-rolled tokenizer + statement/alias scope resolver, enabling clause-aware table/schema/column/alias completion. ADR: `docs/adr/0002-hand-rolled-sql-tokenizer-for-completion.md`.
+
+- [x] Build `lua/orbit/sql/tokenizer.lua` (pure lexer: strings, quoted identifiers, comments, paren depth, never throws) with `tests/sql_tokenizer_spec.lua`.
+- [x] Build `lua/orbit/sql/scope.lua` (statement-at-cursor boundary, clause detection, alias/comma-join/CTE/derived-table scope) with `tests/sql_scope_spec.lua`.
+- [x] Rewrite `lua/orbit/completion.lua`: change `M.items` signature to `(profile, lines, row, col)`, consume tokenizer/scope, add Table/View/Column/Schema/Alias kinds, connector-driven qualifier-depth matching, prefix-first sort. Update `tests/completion_spec.lua` in lockstep.
+- [x] Add `M.config.completion` toggle (default `true`) in `init.lua`; guard `apply_completion` and `query.lua`'s direct `completion.attach`/`prewarm` call site.
+- [x] Build `lua/orbit/blink.lua` blink.cmp source module with `tests/blink_spec.lua`; document the LazyVim `sources.providers`/`sources.default` snippet in the README (no nvim-cmp bridge in v1).
+- [x] Register new modules/specs in `tests/run.lua`.
+- [x] Update README's completion section; run the complete test suite and record verification.
+
+### Settled Design
+
+- Tokenizer and statement/alias scope resolution are pure, dialect-agnostic, and never throw on malformed input; all dialect naming/quoting stays behind the existing `completion_word`/`schema_of`/`qualified_name` connector seam.
+- Alias scope is bounded to the statement containing the cursor; CTEs and derived tables are recognized structurally but resolve to zero columns, not an error.
+- Unqualified column completion with multiple tables in scope shows every table's columns, annotated by source, never deduplicated.
+- blink.cmp has no runtime provider-registration API, so its source ships with a documented one-line user-side config snippet rather than auto-registration; no nvim-cmp bridge in v1.
+- Qualifier depth (schema.table vs. catalog.schema.table) is generic: rows are filtered by comparing the typed segments against each row's own empty-prefix canonical decomposition, not a hardcoded schema-only check. A bonus `Schema`-kind item is only offered when 2+ distinct next-level segments are genuinely ambiguous, additive to the direct table listing so it never disturbs the single-schema case.
+- `M.items(profile, line, cursor)` became `M.items(profile, lines, row, col)`; `M.attach`/`M.prewarm` signatures are unchanged.
+
+### Review
+
+- [x] Record implementation outcomes and verification.
+
+- New `lua/orbit/sql/tokenizer.lua` (pure lexer) and `lua/orbit/sql/scope.lua` (statement/clause/alias-scope resolution) replace the two single-line regexes in `completion.lua`; `completion.lua` is the only place dialect naming (`completion_word`/`schema_of`) is consulted.
+- `lua/orbit/blink.lua` is a new optional blink.cmp source with no require-time dependency on blink.cmp itself; `completion._profile_for_buffer` was exported so both it and tests can resolve a buffer's profile without duplicating that logic.
+- A real bug was caught by the test suite, not by inspection: `object_name`'s `ipairs({row.catalog, row.schema, row.name})` silently stopped at the leading `nil` when catalog/schema were absent, so every alias-qualified/unqualified column lookup returned zero columns until it was rewritten as three individual field checks.
+- CONTEXT.md was corrected (PostgreSQL is a supported backend, not just Trino/SQLite) and gained **Table alias** and **Derived table** glossary entries; ADR `docs/adr/0002-hand-rolled-sql-tokenizer-for-completion.md` records the tokenizer-vs-regex decision.
+- Verification: `nvim --headless -u NONE -l tests/run.lua` (111 tests, all passing) and `git diff --check` passed. `stylua` is not installed in this environment.

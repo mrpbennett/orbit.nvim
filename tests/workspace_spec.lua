@@ -371,11 +371,13 @@ return {
         workspace_result_ratio = 0.30,
         workspace_sidebar_width = 32,
        })
-       vim.api.nvim_set_current_win(state.sidebar_window)
-       vim.api.nvim_win_set_cursor(state.sidebar_window, { 6, 0 })
+      vim.api.nvim_set_current_win(state.sidebar_window)
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "local")), 0 })
       vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<CR>", true, false, true), "mx", false)
 
-       local reports_line = assert(line_number(state.sidebar, "reports"))
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "Team queries")), 0 })
+      vim.api.nvim_feedkeys("l", "mx", false)
+      local reports_line = assert(line_number(state.sidebar, "reports"))
       vim.api.nvim_win_set_cursor(state.sidebar_window, { reports_line, 0 })
       vim.api.nvim_feedkeys("l", "mx", false)
       local weekly_line = assert(line_number(state.sidebar, "weekly.sql"))
@@ -598,6 +600,8 @@ return {
         saved_query_dirs = { { name = "Preview queries", path = directory } },
       })
       vim.api.nvim_set_current_win(state.sidebar_window)
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "Preview queries")), 0 })
+      vim.api.nvim_feedkeys("l", "mx", false)
       vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "preview.sql")), 0 })
       vim.api.nvim_feedkeys("P", "mx", false)
       local buffer = vim.api.nvim_get_current_buf()
@@ -613,7 +617,7 @@ return {
     assert(ok, err)
   end,
 
-  ["workspace renders named saved query locations in order and refreshes one root"] = function()
+  ["workspace collapses named saved query locations by default and refreshes one root"] = function()
     local original = vim.api.nvim_get_current_tabpage()
     local first = vim.fn.tempname()
     local second = vim.fn.tempname()
@@ -642,16 +646,29 @@ return {
       assert(work_line < personal_line)
       local offline_line = assert(line_number(state.sidebar, "Offline SQL"))
       assert(personal_line < nested_root_line and nested_root_line < offline_line)
-      assert(vim.api.nvim_buf_get_lines(state.sidebar, offline_line, offline_line + 1, false)[1]:find("No saved SQL files", 1, true))
+      assert(not line_number(state.sidebar, "No saved SQL files"))
+      assert(not line_number(state.sidebar, "nested"))
+      assert(not line_number(state.sidebar, "second.sql"))
+      assert(not line_number(state.sidebar, "first.sql"))
+
+      vim.api.nvim_set_current_win(state.sidebar_window)
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { work_line, 0 })
+      vim.api.nvim_feedkeys("l", "mx", false)
       assert(line_number(state.sidebar, "nested"))
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "Personal SQL")), 0 })
+      vim.api.nvim_feedkeys("l", "mx", false)
       assert(line_number(state.sidebar, "second.sql"))
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "Nested SQL")), 0 })
+      vim.api.nvim_feedkeys("l", "mx", false)
       assert(line_count(state.sidebar, "first.sql") == 1)
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "Offline SQL")), 0 })
+      vim.api.nvim_feedkeys("l", "mx", false)
+      assert(line_number(state.sidebar, "No saved SQL files"))
       assert(not line_number(state.sidebar, "linked.sql"))
       assert(not line_number(state.sidebar, "linked-directory"))
 
       vim.fn.writefile({ "SELECT 3;" }, nested .. "/added-work.sql")
       vim.fn.writefile({ "SELECT 4;" }, second .. "/added-personal.sql")
-      vim.api.nvim_set_current_win(state.sidebar_window)
       vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "nested")), 0 })
       vim.api.nvim_feedkeys("r", "mx", false)
 

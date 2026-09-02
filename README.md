@@ -16,7 +16,8 @@ Orbit runs statements through your existing database CLI, retains one connection
 - Browse tables, views, and columns; run connector-specific object actions; create a bound sample statement; copy qualified object names.
 - Inspect and copy raw result values, including structured JSON values.
 - Confirm potentially mutating statements before they run.
-- Complete cached tables, views, and columns with Neovim's built-in omnifunc.
+- Complete cached tables, views, columns, and table aliases, clause-aware, with Neovim's built-in omnifunc or an optional blink.cmp source.
+- Browse reusable SQL files from multiple named saved-query locations.
 
 ## Requirements
 
@@ -190,7 +191,16 @@ Orbit passes profile values to the CLI as literal arguments. It does **not** exp
 3. Press `n` to open a new SQL buffer already bound to the selected profile.
 4. Execute a statement. Results appear in the reusable bottom result grid.
 
-Set `saved_query_dirs` to add ordered, named recursive trees of `.sql` files to the sidebar. Each array entry maps its displayed top-level name to a directory. Select a profile, then press `<CR>` on a saved query to open it in the Workspace query window bound to that profile; loading the schema is not required. Press `r` on any saved-query directory to rescan its top-level location.
+Set `saved_query_dirs` to add ordered, named recursive trees of `.sql` files to the sidebar:
+
+```lua
+saved_query_dirs = {
+  { Work = "~/queries/work" },
+  { Personal = "~/queries/personal" },
+}
+```
+
+Each entry must contain one unique display name and directory. Orbit preserves the configured order, expands paths such as `~`, and shows each location as a separate top-level tree collapsed by default. Select a profile, then press `<CR>` on a saved query to open it in the Workspace query window bound to that profile; loading the schema is not required. Press `r` on any saved-query directory to rescan only its top-level location.
 
 From a workspace query buffer, `/` focuses the workspace filter. Elsewhere, `/` retains normal Neovim search behavior.
 
@@ -297,13 +307,34 @@ Available actions are intentionally connector-specific. Orbit does not present m
 
 ## Completion
 
-Binding a connection profile attaches Orbit's native omnifunc to the query buffer. Use `<C-x><C-o>` in Insert mode for cached schema objects:
+Binding a connection profile attaches Orbit's native omnifunc to the query buffer. Use `<C-x><C-o>` in Insert mode for cached schema objects. Completion is clause-aware: it parses the statement around your cursor (not just the current line) with a small dependency-free SQL tokenizer, so suggestions depend on where you are:
 
-- Tables and views after `FROM`, `JOIN`, `UPDATE`, or `INTO`.
-- Trino and PostgreSQL tables and views after `schema.`.
-- Cached columns after `table.`.
+- Tables and views after any `FROM`-family clause (`FROM`, `JOIN`, `UPDATE`, `INTO`), and after `schema.`/`catalog.schema.` qualifiers on connectors that support them (PostgreSQL, Trino).
+- Columns in the `SELECT` list, `WHERE`, `ON`, `GROUP BY`, `ORDER BY`, `INSERT INTO t (...)`, and `UPDATE t SET ...`.
+- Table aliases: `SELECT u.| FROM users u` resolves `u` to `users`'s columns, including old-style comma joins (`FROM a, b`). With more than one table in scope, unqualified columns are offered from every table, each annotated with its source alias.
+- The alias/table scope is limited to the statement your cursor is in; other statements in the same buffer (separated by `;`) never leak into it. CTEs and derived tables (`FROM (SELECT ...) sub`) are recognized so they don't break parsing, but don't offer column completion.
 
-Selecting a profile preloads tables and views in the background; expanding it in the Workspace schema browser fills more of the cache. Completion never runs the CLI while you type. SQL keywords, CTE aliases, formatting, and highlighting remain the responsibility of your existing SQL tooling.
+Selecting a profile preloads tables and views in the background; expanding it in the Workspace schema browser fills more of the cache. Completion never runs the CLI while you type. SQL keywords and functions, formatting, and highlighting remain the responsibility of your existing SQL tooling.
+
+### blink.cmp
+
+Orbit also ships an optional [blink.cmp](https://github.com/Saghen/blink.cmp) source (`orbit.blink`) with the same clause-aware suggestions. blink.cmp has no API for a plugin to register itself as a source at runtime, so add it to your own blink.cmp config:
+
+```lua
+{
+  "saghen/blink.cmp",
+  opts = {
+    sources = {
+      default = { "lsp", "path", "snippets", "buffer", "orbit" },
+      providers = {
+        orbit = { name = "orbit", module = "orbit.blink" },
+      },
+    },
+  },
+}
+```
+
+Set `completion = false` in Orbit's `setup()` to disable both the native omnifunc attachment and the blink source.
 
 ## Execution And Results
 
@@ -317,6 +348,7 @@ Result grids are reused per tabpage. They show up to `result_limit` rows and tru
 
 ```lua
 require("orbit").setup({
+  completion = true,
   confirm_mutations = true,
   focus_results = false,
   profile_path = vim.fn.expand("~/.local/share/orbit.nvim/profiles.json"),
@@ -351,6 +383,7 @@ require("orbit").setup({
 
 | Option                    | Default                                   | Description                                                                                                                                          |
 | ------------------------- | ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `completion`              | `true`                                    | Enable clause-aware completion: both the native omnifunc attachment and the optional blink.cmp source's `enabled()`.                                  |
 | `confirm_mutations`       | `true`                                    | Ask before statements that are not recognised as read-only. A profile can override this with `options.confirm_mutations`.                            |
 | `focus_results`           | `false`                                   | Focus a completed standalone result grid instead of keeping focus in the query buffer.                                                               |
 | `profile_path`            | `~/.local/share/orbit.nvim/profiles.json` | Location of the profile file.                                                                                                                        |

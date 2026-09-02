@@ -69,8 +69,10 @@ end
 
 function M.bind_profile(buffer, profile)
 	vim.b[buffer].orbit_profile = profile.name
-	require("orbit.completion").attach(buffer)
-	require("orbit.completion").prewarm(profile)
+	if require("orbit").config.completion then
+		require("orbit.completion").attach(buffer)
+		require("orbit.completion").prewarm(profile)
+	end
 	vim.notify("Orbit profile: " .. profile.name)
 end
 

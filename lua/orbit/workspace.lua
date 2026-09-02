@@ -724,7 +724,6 @@ function M.open(config)
       name = location.name,
       path = location.path,
     })
-    state.expanded_saved_dirs[location.path .. "\0" .. location.path] = true
   end
   workspaces[tabpage] = state
   configure_query_buffer(state, vim.api.nvim_win_get_buf(query_window))
