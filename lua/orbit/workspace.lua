@@ -40,7 +40,8 @@ end
 
 local object_name = schema_tree.object_name
 
-local function discover_saved_queries(directory)
+local function discover_saved_queries(directory, root_path)
+  root_path = root_path or directory
   local function scan(path)
     local handle = vim.uv.fs_scandir(path)
     if not handle then
@@ -58,7 +59,7 @@ local function discover_saved_queries(directory)
         local children = scan(entry_path)
         -- Empty directories add no actionable node, while directories sort before SQL files.
         if #children > 0 then
-          table.insert(entries, { kind = "saved_directory", name = name, path = entry_path, children = children })
+          table.insert(entries, { kind = "saved_directory", name = name, path = entry_path, root_path = root_path, children = children })
         end
       elseif kind == "file" and name:lower():sub(-4) == ".sql" then
         table.insert(entries, { kind = "saved_query", name = name, path = entry_path })
@@ -86,6 +87,10 @@ local function saved_query_matches(node, filter)
     end
   end
   return false
+end
+
+local function saved_directory_key(node)
+  return node.root_path .. "\0" .. node.path
 end
 
 local function render(state)
@@ -125,21 +130,15 @@ local function render(state)
       end
     end
   end
-  if state.saved_query_dir then
+  if #state.saved_query_locations > 0 then
     table.insert(lines, "")
     table.insert(lines, "Saved queries:")
-    local root = {
-      children = state.saved_queries,
-      kind = "saved_directory",
-      name = vim.fn.fnamemodify(state.saved_query_dir, ":t"),
-      path = state.saved_query_dir,
-    }
     local function render_saved(node, depth)
       if not saved_query_matches(node, state.filter) then
         return
       end
       if node.kind == "saved_directory" then
-        local expanded = state.expanded_saved_dirs[node.path] or state.filter ~= ""
+        local expanded = state.expanded_saved_dirs[saved_directory_key(node)] or state.filter ~= ""
         table.insert(lines, string.format("%s%s %s %s", string.rep("  ", depth), expanded and icons.expanded or icons.collapsed, icons.folder, node.name))
         state.nodes[#lines] = node
         if expanded then
@@ -156,7 +155,15 @@ local function render(state)
         state.nodes[#lines] = node
       end
     end
-    render_saved(root, 1)
+    for _, location in ipairs(state.saved_query_locations) do
+      render_saved({
+        children = location.children,
+        kind = "saved_directory",
+        name = location.name,
+        path = location.path,
+        root_path = location.path,
+      }, 1)
+    end
   end
   set_content(state, vim.list_slice(lines, 3, #lines))
   vim.api.nvim_buf_clear_namespace(state.sidebar, -1, 0, -1)
@@ -492,7 +499,7 @@ local function configure_sidebar(state)
       return state.schema_profile == node.profile.name
     end
     if node.kind == "saved_directory" then
-      return state.expanded_saved_dirs[node.path]
+      return state.expanded_saved_dirs[saved_directory_key(node)]
     end
     return schema_tree.is_expanded(state.tree, node)
   end
@@ -505,8 +512,8 @@ local function configure_sidebar(state)
       state.schema_profile = nil
       schema_tree.reset(state.tree)
       render(state)
-    elseif node.kind == "saved_directory" and state.expanded_saved_dirs[node.path] then
-      state.expanded_saved_dirs[node.path] = nil
+    elseif node.kind == "saved_directory" and state.expanded_saved_dirs[saved_directory_key(node)] then
+      state.expanded_saved_dirs[saved_directory_key(node)] = nil
       render(state)
     elseif schema_tree.is_expanded(state.tree, node) then
       schema_tree.toggle(state.tree, node)
@@ -520,8 +527,8 @@ local function configure_sidebar(state)
     end
     if node.kind == "profile" and state.schema_profile ~= node.profile.name then
       load_schema(state, node.profile)
-    elseif node.kind == "saved_directory" and not state.expanded_saved_dirs[node.path] then
-      state.expanded_saved_dirs[node.path] = true
+    elseif node.kind == "saved_directory" and not state.expanded_saved_dirs[saved_directory_key(node)] then
+      state.expanded_saved_dirs[saved_directory_key(node)] = true
       render(state)
     elseif node.kind == "table" and not schema_tree.is_expanded(state.tree, node) then
       schema_tree.toggle(state.tree, node)
@@ -583,7 +590,12 @@ local function configure_sidebar(state)
         render(state)
       end
     elseif node and node.kind == "saved_directory" then
-      state.saved_queries = discover_saved_queries(state.saved_query_dir)
+      for _, location in ipairs(state.saved_query_locations) do
+        if location.path == node.root_path then
+          location.children = discover_saved_queries(location.path)
+          break
+        end
+      end
       render(state)
     end
   end, { buffer = state.sidebar, silent = true, nowait = true, desc = "Refresh Orbit profile" })
@@ -698,7 +710,7 @@ function M.open(config)
     nodes = {},
     profiles = document and document.profiles or {},
     query_window = query_window,
-    saved_queries = {},
+    saved_query_locations = {},
     schema_profile = nil,
     selected = nil,
     sidebar = sidebar,
@@ -706,10 +718,13 @@ function M.open(config)
     tabpage = tabpage,
     tree = schema_tree.new(),
   }
-  if type(config.saved_query_dir) == "string" and config.saved_query_dir ~= "" then
-    state.saved_query_dir = vim.fn.fnamemodify(vim.fn.expand(config.saved_query_dir), ":p")
-    state.saved_queries = discover_saved_queries(state.saved_query_dir)
-    state.expanded_saved_dirs[state.saved_query_dir] = true
+  for _, location in ipairs(config.saved_query_dirs or {}) do
+    table.insert(state.saved_query_locations, {
+      children = discover_saved_queries(location.path),
+      name = location.name,
+      path = location.path,
+    })
+    state.expanded_saved_dirs[location.path .. "\0" .. location.path] = true
   end
   workspaces[tabpage] = state
   configure_query_buffer(state, vim.api.nvim_win_get_buf(query_window))

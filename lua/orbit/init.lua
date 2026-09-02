@@ -29,7 +29,7 @@ M.config = {
 	profile_path = vim.fn.expand("~/.local/share/orbit.nvim/profiles.json"),
 	result_height = 15,
 	result_limit = 200,
-	saved_query_dir = nil,
+	saved_query_dirs = {},
 	winbar = false,
 	workspace_result_ratio = 0.30,
 	workspace_sidebar_width = 32,
@@ -38,6 +38,41 @@ M.config = {
 local configured = false
 local default_profile_warned = false
 local workspace_mapping = nil
+
+local function normalize_saved_query_dirs(value)
+	if type(value) ~= "table" or not vim.islist(value) then
+		error("saved_query_dirs must be an array", 3)
+	end
+
+	local locations = {}
+	local names = {}
+	local paths = {}
+	for index, entry in ipairs(value) do
+		if type(entry) ~= "table" then
+			error(string.format("saved_query_dirs[%d] must be an object with one name and path", index), 3)
+		end
+		local name, path
+		local count = 0
+		for key, entry_path in pairs(entry) do
+			name, path = key, entry_path
+			count = count + 1
+		end
+		if count ~= 1 or type(name) ~= "string" or name == "" or type(path) ~= "string" or path == "" then
+			error(string.format("saved_query_dirs[%d] must contain one non-empty string name and path", index), 3)
+		end
+		path = vim.fs.normalize(vim.fn.fnamemodify(vim.fn.expand(path), ":p"))
+		if names[name] then
+			error("saved_query_dirs contains duplicate name: " .. name, 3)
+		end
+		if paths[path] then
+			error("saved_query_dirs contains duplicate path: " .. path, 3)
+		end
+		names[name] = true
+		paths[path] = true
+		table.insert(locations, { name = name, path = path })
+	end
+	return locations
+end
 
 local function visual_selection(command)
 	-- Ex command ranges are inclusive, 1-based buffer rows, matching statements.target's contract.
@@ -196,6 +231,9 @@ local function apply_workspace_keymap()
 end
 
 function M.setup(options)
+	if options and options.saved_query_dir ~= nil then
+		error("saved_query_dir was removed; use saved_query_dirs", 2)
+	end
 	if options and options.default_profile and not default_profile_warned then
 		vim.notify(
 			"Orbit removed default_profile; bind each query buffer explicitly",
@@ -204,7 +242,17 @@ function M.setup(options)
 		)
 		default_profile_warned = true
 	end
-	M.config = vim.tbl_deep_extend("force", M.config, options or {})
+	options = vim.deepcopy(options or {})
+	local saved_query_dirs
+	if options.saved_query_dirs ~= nil then
+		saved_query_dirs = normalize_saved_query_dirs(options.saved_query_dirs)
+		options.saved_query_dirs = nil
+	end
+	M.config = vim.tbl_deep_extend("force", M.config, options)
+	if saved_query_dirs then
+		-- Lists replace previous setup values instead of being merged index by index.
+		M.config.saved_query_dirs = saved_query_dirs
+	end
 	M.config.default_profile = nil
 	if not configured then
 		-- Commands and autocommands are registered once; current SQL buffers are updated below.

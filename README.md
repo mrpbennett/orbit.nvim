@@ -190,7 +190,7 @@ Orbit passes profile values to the CLI as literal arguments. It does **not** exp
 3. Press `n` to open a new SQL buffer already bound to the selected profile.
 4. Execute a statement. Results appear in the reusable bottom result grid.
 
-Set `saved_query_dir` to add a recursive tree of `.sql` files to the sidebar. Select a profile, then press `<CR>` on a saved query to open it in the Workspace query window bound to that profile; loading the schema is not required. Press `r` on the saved-query directory to rescan it.
+Set `saved_query_dirs` to add ordered, named recursive trees of `.sql` files to the sidebar. Each array entry maps its displayed top-level name to a directory. Select a profile, then press `<CR>` on a saved query to open it in the Workspace query window bound to that profile; loading the schema is not required. Press `r` on any saved-query directory to rescan its top-level location.
 
 From a workspace query buffer, `/` focuses the workspace filter. Elsewhere, `/` retains normal Neovim search behavior.
 
@@ -322,7 +322,10 @@ require("orbit").setup({
   profile_path = vim.fn.expand("~/.local/share/orbit.nvim/profiles.json"),
   result_limit = 200,
   result_height = 15,
-  saved_query_dir = vim.fn.expand("~/queries"),
+  saved_query_dirs = {
+    { Work = "~/queries/work" },
+    { Personal = "~/queries/personal" },
+  },
   max_cell_width = 48,
   workspace_sidebar_width = 32,
   workspace_result_ratio = 0.30,
@@ -353,7 +356,7 @@ require("orbit").setup({
 | `profile_path`            | `~/.local/share/orbit.nvim/profiles.json` | Location of the profile file.                                                                                                                        |
 | `result_limit`            | `200`                                     | Maximum returned rows displayed in the result grid.                                                                                                  |
 | `result_height`           | `15`                                      | Height of a standalone result grid.                                                                                                                  |
-| `saved_query_dir`         | `nil`                                     | Directory of recursively discovered `.sql` files shown in the Workspace sidebar.                                                                     |
+| `saved_query_dirs`        | `{}`                                      | Ordered named directories of recursively discovered `.sql` files shown in the Workspace sidebar.                                                      |
 | `max_cell_width`          | `48`                                      | Maximum displayed width of a result cell.                                                                                                            |
 | `workspace_sidebar_width` | `32`                                      | Width of the workspace sidebar.                                                                                                                      |
 | `workspace_result_ratio`  | `0.30`                                    | Fraction of editor height used by workspace results, with a six-line minimum.                                                                        |

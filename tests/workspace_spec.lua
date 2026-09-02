@@ -10,6 +10,16 @@ local function line_number(buffer, text)
   end
 end
 
+local function line_count(buffer, text)
+  local count = 0
+  for _, line in ipairs(vim.api.nvim_buf_get_lines(buffer, 0, -1, false)) do
+    if line:find(text, 1, true) then
+      count = count + 1
+    end
+  end
+  return count
+end
+
 return {
   ["workspace.open creates a dedicated tabpage"] = function()
     local original = vim.api.nvim_get_current_tabpage()
@@ -357,7 +367,7 @@ return {
     local ok, err = xpcall(function()
       state = workspace.open({
         profile_path = profile_path,
-        saved_query_dir = directory,
+        saved_query_dirs = { { name = "Team queries", path = directory } },
         workspace_result_ratio = 0.30,
         workspace_sidebar_width = 32,
        })
@@ -583,7 +593,10 @@ return {
     vim.fn.writefile({ "SELECT 'preview';" }, directory .. "/preview.sql")
     local state
     local ok, err = xpcall(function()
-      state = workspace.open({ profile_path = vim.fn.tempname(), saved_query_dir = directory })
+      state = workspace.open({
+        profile_path = vim.fn.tempname(),
+        saved_query_dirs = { { name = "Preview queries", path = directory } },
+      })
       vim.api.nvim_set_current_win(state.sidebar_window)
       vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "preview.sql")), 0 })
       vim.api.nvim_feedkeys("P", "mx", false)
@@ -592,6 +605,62 @@ return {
       assert(vim.b[buffer].orbit_profile == nil)
       assert(vim.api.nvim_buf_get_lines(buffer, 0, 1, false)[1] == "SELECT 'preview';")
       vim.api.nvim_feedkeys("q", "mx", false)
+    end, debug.traceback)
+    if state and vim.api.nvim_tabpage_is_valid(state.tabpage) then
+      workspace.close(state.tabpage)
+    end
+    vim.api.nvim_set_current_tabpage(original)
+    assert(ok, err)
+  end,
+
+  ["workspace renders named saved query locations in order and refreshes one root"] = function()
+    local original = vim.api.nvim_get_current_tabpage()
+    local first = vim.fn.tempname()
+    local second = vim.fn.tempname()
+    local unavailable = vim.fn.tempname()
+    local nested = first .. "/nested"
+    assert(vim.fn.mkdir(nested, "p") == 1)
+    assert(vim.uv.fs_mkdir(second, 448))
+    vim.fn.writefile({ "SELECT 1;" }, nested .. "/first.sql")
+    vim.fn.writefile({ "SELECT 2;" }, second .. "/second.sql")
+    assert(vim.uv.fs_symlink(second .. "/second.sql", first .. "/linked.sql"))
+    assert(vim.uv.fs_symlink(second, first .. "/linked-directory"))
+    local state
+    local ok, err = xpcall(function()
+      state = workspace.open({
+        profile_path = vim.fn.tempname(),
+        saved_query_dirs = {
+          { name = "Work SQL", path = first },
+          { name = "Personal SQL", path = second },
+          { name = "Nested SQL", path = nested },
+          { name = "Offline SQL", path = unavailable },
+        },
+      })
+      local work_line = assert(line_number(state.sidebar, "Work SQL"))
+      local personal_line = assert(line_number(state.sidebar, "Personal SQL"))
+      local nested_root_line = assert(line_number(state.sidebar, "Nested SQL"))
+      assert(work_line < personal_line)
+      local offline_line = assert(line_number(state.sidebar, "Offline SQL"))
+      assert(personal_line < nested_root_line and nested_root_line < offline_line)
+      assert(vim.api.nvim_buf_get_lines(state.sidebar, offline_line, offline_line + 1, false)[1]:find("No saved SQL files", 1, true))
+      assert(line_number(state.sidebar, "nested"))
+      assert(line_number(state.sidebar, "second.sql"))
+      assert(line_count(state.sidebar, "first.sql") == 1)
+      assert(not line_number(state.sidebar, "linked.sql"))
+      assert(not line_number(state.sidebar, "linked-directory"))
+
+      vim.fn.writefile({ "SELECT 3;" }, nested .. "/added-work.sql")
+      vim.fn.writefile({ "SELECT 4;" }, second .. "/added-personal.sql")
+      vim.api.nvim_set_current_win(state.sidebar_window)
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "nested")), 0 })
+      vim.api.nvim_feedkeys("r", "mx", false)
+
+      vim.api.nvim_feedkeys("l", "mx", false)
+      assert(line_number(state.sidebar, "added-work.sql"))
+      assert(not line_number(state.sidebar, "added-personal.sql"))
+      assert(line_count(state.sidebar, "first.sql") == 2)
+      vim.api.nvim_feedkeys("h", "mx", false)
+      assert(line_count(state.sidebar, "first.sql") == 1)
     end, debug.traceback)
     if state and vim.api.nvim_tabpage_is_valid(state.tabpage) then
       workspace.close(state.tabpage)

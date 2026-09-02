@@ -30,6 +30,7 @@ for _, module in ipairs(modules) do
 end
 
 local specs = {
+  require("tests.config_spec"),
   require("tests.profile_spec"),
   require("tests.feedback_spec"),
   require("tests.keymaps_spec"),

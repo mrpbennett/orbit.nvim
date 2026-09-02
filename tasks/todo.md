@@ -675,3 +675,28 @@ Files: `lua/orbit/adapters.lua` (148 lines, 13 functions).
 
 - `i` and `<CR>` enter Insert mode directly in the focused cell. Leaving Insert mode commits the cell to the local model and restores the formatted grid for continued navigation.
 - Verification: `nvim --headless -u NONE -l tests/run.lua` and `git diff --check` passed. `stylua` is not installed in this environment.
+
+## Multiple Saved Query Locations
+
+- [x] Confirm the public configuration shape, terminology, validation, ordering, expansion, and refresh behavior.
+- [x] Record the saved-query location term and configuration-shape rationale.
+- [x] Replace `saved_query_dir` with validated, normalized `saved_query_dirs` configuration.
+- [x] Render and independently refresh multiple named saved-query roots.
+- [x] Add focused configuration and Workspace regression coverage.
+- [x] Update public documentation and run complete verification.
+
+### Settled Design
+
+- `saved_query_dirs = { { Work = "~/sql/work" }, { Personal = "~/sql/personal" } }` replaces `saved_query_dir`; each key is displayed exactly and array order controls root order.
+- Setup rejects malformed entries, duplicate names, and duplicate normalized paths. Paths are expanded and made absolute during setup.
+- Every top-level root starts expanded. Unavailable and empty roots remain visible, overlapping roots are allowed, and symbolic links remain ignored.
+- Refreshing any saved-query directory rescans only its containing top-level root.
+
+### Review
+
+- [x] Record implementation outcomes and verification.
+
+- `setup()` now converts the public singleton-map array into ordered `{ name, path }` records, rejects malformed or duplicate locations, and reports the removed singular option instead of silently ignoring it.
+- Workspace roots preserve configured labels and order, remain visible when unavailable, carry root-scoped expansion identity for overlapping paths, and refresh only the selected directory's containing root.
+- Coverage includes replacement during repeated setup, lexical path normalization, invalid entries, unavailable and overlapping roots, independent refresh and expansion, and ignored file and directory symlinks.
+- Verification: `nvim --headless -u NONE -l tests/run.lua` and `git diff --check` passed. A follow-up code review found no remaining correctness or specification issues. `stylua` is not installed in this environment.
