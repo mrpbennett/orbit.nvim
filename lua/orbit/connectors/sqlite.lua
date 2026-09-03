@@ -16,7 +16,7 @@
 -- editable query results):
 --   * validate_options   - checks the profile's options table is well-formed.
 --   * prepare             - builds argv for a one-shot `sqlite3` invocation.
---   * qualified_name / completion_word / schema_of - naming helpers used by
+--   * qualified_name / completion_word - naming helpers used by
 --     the sidebar and SQL completion engine.
 --   * session_command     - builds argv for a *persistent* `sqlite3` process
 --     that lua/orbit/session.lua keeps running and feeds multiple statements
@@ -122,14 +122,6 @@ end
 -- Returns: the text to insert (prefix .. row.name).
 function M.completion_word(_, row, prefix)
   return prefix .. row.name
-end
-
--- SQLite has no schema/catalog qualifiers to parse out of a completion
--- prefix (there is effectively only one implicit "main" schema), so this
--- always returns nil - there is nothing to report as "the schema being
--- typed into".
-function M.schema_of()
-  return nil
 end
 
 -- Builds the argv for a *long-lived* `sqlite3` process that

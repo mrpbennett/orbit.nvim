@@ -270,7 +270,7 @@ end
 --   raw      - the literal typed text of the completed segments including
 --              their original quoting and trailing dot (e.g. `o.customer.`
 --              or `"My Alias".`), for passing through unchanged to a
---              connector's schema_of/completion_word functions, which need
+--              connector's completion_word function, which needs
 --              the dialect's real quoting rather than a normalized form.
 local function extract_qualifier(tokens, cursor_index, touching)
 	local idx = cursor_index

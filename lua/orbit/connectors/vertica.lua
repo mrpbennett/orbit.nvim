@@ -109,16 +109,8 @@ function M.qualified_name(_, row)
   return qualified(row)
 end
 
-function M.completion_word(_, row, prefix)
-  return prefix ~= "" and prefix .. identifier(row.name) or qualified(row)
-end
-
-function M.schema_of(_, qualifier)
-  local value = qualifier:gsub("%.$", "")
-  if value:sub(1, 1) == '"' and value:sub(-1) == '"' then
-    return value:sub(2, -2):gsub('""', '"')
-  end
-  return value
+function M.completion_word(_, row)
+  return qualified(row)
 end
 
 function M.schema_statement(options, node)

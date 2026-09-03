@@ -27,9 +27,6 @@
 --   * completion_word(options, row, prefix) -> string
 --       Produces the text that should be inserted when a user is completing
 --       a table/column name in the SQL editor.
---   * schema_of(options, qualifier) -> string
---       Strips a trailing "." from a partially-typed qualifier, used by the
---       completion engine to know which schema/catalog is being typed into.
 --   * schema_statement(options, node) -> statement (string) | nil, err
 --       Given a description of what metadata is wanted (all tables, or the
 --       columns of one table), returns the SQL to run against Trino's
@@ -204,16 +201,6 @@ function M.completion_word(options, row, prefix)
     table.insert(parts, 1, row.catalog)
   end
   return table.concat(parts, ".")
-end
-
--- Given the text the user has typed so far before the cursor (`qualifier`,
--- e.g. "myschema." or "mycatalog.myschema."), strips a single trailing "."
--- so the completion engine can look up which schema/catalog to list members
--- of. The first argument (options) is unused here - Trino doesn't need
--- profile context to do this string trim.
--- Returns: the qualifier with any trailing "." removed.
-function M.schema_of(_, qualifier)
-  return qualifier:gsub("%.$", "")
 end
 
 -- Builds the SQL statement used to discover schema metadata for the sidebar

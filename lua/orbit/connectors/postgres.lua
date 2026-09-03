@@ -28,7 +28,7 @@
 --   * M.session_output        - pull one statement's output out of the session's stream
 --   * M.environment           - environment variables (e.g. PGPASSWORD) for the psql process
 --   * M.schema_statement      - SQL to list schemas/tables/columns/keys/indexes
---   * M.qualified_name / M.completion_word / M.schema_of - identifier formatting helpers
+--   * M.qualified_name / M.completion_word - identifier formatting helpers
 --   * M.metadata_categories / M.object_actions - sidebar UI metadata for a database object
 --   * M.editable_table / M.mutation_statement  - support for editing grid results in place
 --   * M.parse                 - turn psql's CSV output into Lua row tables
@@ -83,20 +83,6 @@ end
 -- Returns: a string such as '"public"."users"'.
 local function qualified(row)
   return table.concat({ identifier(row.schema or "public"), identifier(row.name) }, ".")
-end
-
--- Reverses the double-quoting done by `identifier()`: if `value` is wrapped
--- in double quotes, strips them and un-escapes any doubled "" back to a
--- single ". If `value` isn't quoted at all, it's returned unchanged. This is
--- used when we've been handed a quoted identifier (e.g. typed by the user or
--- produced by the tokenizer) and need the bare name back.
--- Params: value - a string that may or may not be a double-quoted identifier.
--- Returns: the unquoted identifier text.
-local function unquote_identifier(value)
-  if value:sub(1, 1) == '"' and value:sub(-1) == '"' then
-    return value:sub(2, -2):gsub('""', '"')
-  end
-  return value
 end
 
 local schema_pattern = require("orbit.connectors.schema_pattern")
@@ -213,18 +199,6 @@ end
 -- Returns: a string like '"public"."users"'.
 function M.completion_word(_, row)
   return qualified(row)
-end
-
--- Given a "qualifier" string the user has typed before a dot while
--- completing (e.g. the tokenizer/completion source hands us something like
--- `"my schema".` when the cursor is right after that trailing dot), strips
--- the trailing "." and un-quotes it, returning the bare schema name so it
--- can be looked up.
--- Params: _ (options, unused), qualifier - the raw qualifier text including
---   its trailing dot.
--- Returns: the unquoted schema name string.
-function M.schema_of(_, qualifier)
-  return unquote_identifier(qualifier:gsub("%.$", ""))
 end
 
 -- Builds the argv for a long-lived, interactive `psql` process (as opposed

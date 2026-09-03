@@ -194,18 +194,14 @@ return {
 
     assert(sqlite.qualified_name({}, { name = 'a"b' }) == '"a""b"')
     assert(sqlite.completion_word({}, { name = "sessions" }, "") == "sessions")
-    assert(sqlite.schema_of({}, "main.") == nil)
 
     assert(postgres.qualified_name({}, { schema = "Sales", name = 'Order"Item' }) == '"Sales"."Order""Item"')
     assert(postgres.completion_word({}, { schema = "Sales", name = "Order" }, '"Sales".') == '"Sales"."Order"')
-    assert(postgres.schema_of({}, "Sales.") == "Sales")
-    assert(postgres.schema_of({}, '"Sales".') == "Sales")
 
     assert(trino.qualified_name({}, { catalog = "iceberg", schema = "cleanroom", name = "events" }) == '"iceberg"."cleanroom"."events"')
     assert(trino.completion_word({ catalog = "hive", schema = "default" }, { catalog = "hive", schema = "default", name = "events" }, "") == "default.events")
     assert(trino.completion_word({ catalog = "hive" }, { catalog = "iceberg", schema = "cleanroom", name = "events" }, "") == "iceberg.cleanroom.events")
     assert(trino.completion_word({}, { name = "events" }, "cleanroom.") == "cleanroom.events")
-    assert(trino.schema_of({}, "cleanroom.") == "cleanroom")
   end,
 
 	["SQLite connector builds a JSON command"] = function()

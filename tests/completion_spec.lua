@@ -81,6 +81,38 @@ return {
     end)
   end,
 
+  ["PostgreSQL completion narrows to the typed schema across multiple schemas"] = function()
+    local profile = { name = "completion-postgres-schemas", kind = "postgres", options = { database = "orbit" } }
+    local rows = {
+      { schema = "sales", name = "orders", type = "table" },
+      { schema = "reporting", name = "orders_summary", type = "table" },
+    }
+    with_acquisition(profile, rows, function(done)
+      cache.load_tables(profile, {}, done)
+    end, function()
+      local sales_tables = completion.items(profile, { "SELECT * FROM sales." }, 1, #"SELECT * FROM sales.")
+      assert(#sales_tables == 1)
+      assert(sales_tables[1].word == '"sales"."orders"')
+    end)
+  end,
+
+  ["Vertica completion always inserts the canonical quoted name, ignoring the typed prefix"] = function()
+    local profile = { name = "completion-vertica", kind = "vertica", options = { database = "warehouse" } }
+    local rows = { { schema = "Sales", name = "Order", type = "table" } }
+    with_acquisition(profile, rows, function(done)
+      cache.load_tables(profile, {}, done)
+    end, function()
+      local tables = completion.items(profile, { "SELECT * FROM " }, 1, #"SELECT * FROM ")
+      local unquoted_schema_tables =
+        completion.items(profile, { "SELECT * FROM Sales." }, 1, #"SELECT * FROM Sales.")
+
+      assert(tables[1].word == '"Sales"."Order"')
+      -- Must not mix the user's unquoted typed prefix with a quoted name
+      -- (e.g. `Sales."Order"`) -- the canonical quoted form replaces it.
+      assert(unquoted_schema_tables[1].word == '"Sales"."Order"')
+    end)
+  end,
+
   ["aliased column completion resolves the alias to its table"] = function()
     local profile = { name = "completion-alias", kind = "sqlite", options = { path = "orbit.db" } }
     local columns = {
