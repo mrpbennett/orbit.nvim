@@ -30,6 +30,7 @@ Orbit runs statements through your existing database CLI, retains one connection
 | `trino`      | [`trino`](https://trino.io/docs/current/client/cli.html)        | Orbit requests JSON output.               |
 | `sqlite`     | `sqlite3`                                                       | Requires a build that supports `-json`.   |
 | `postgres`   | [`psql`](https://www.postgresql.org/docs/current/app-psql.html) | Requires a version that supports `--csv`. |
+| `vertica`    | [`vsql`](https://docs.vertica.com/24.3.x/en/connecting-to/using-vsql/) | Uses HTML table output. |
 
 ## Installation
 
@@ -65,12 +66,13 @@ If a query buffer has no profile, executing it opens profile selection and retri
 | `trino`    | `server`, `user`, `catalog` | `schema`, `schema_patterns`, `executable`, `arguments`, `confirm_mutations`                                      | Tables, views, and columns from `information_schema`. Omitting `schema` browses the catalog except `information_schema`. |
 | `sqlite`   | `path`                      | `schema_patterns`, `executable`, `arguments`, `confirm_mutations`                                                | Tables and views from `sqlite_master`, plus columns from `PRAGMA table_info`, under `main`.                              |
 | `postgres` | `database`                  | `schema_patterns`, `host`, `port`, `user`, `password`, `sslmode`, `executable`, `arguments`, `confirm_mutations` | Tables and views outside PostgreSQL system schemas, plus columns, primary keys, foreign keys, and indexes.               |
+| `vertica`  | `host`, `user`, `database`  | `schema_patterns`, `port`, `password`, `sslmode`, `executable`, `arguments`, `confirm_mutations`                | User tables and views, plus columns, primary keys, foreign keys, projections, and view definitions.                      |
 
-`executable` replaces the CLI binary and `arguments` adds an array of string arguments before Orbit's generated arguments. This is useful for wrappers or CLI-specific authentication flags. For SQLite and PostgreSQL, Orbit retains one interactive CLI connection per profile; statements, schema browsing, and completion prewarming share it and are serialized per profile. A changed profile definition, failed CLI, `:OrbitDisconnect`, or Neovim exit closes the connection; the next request reconnects automatically. Trino statements instead run one `trino` CLI invocation per statement, serialized per profile, because the `trino` CLI does not flush its output while held open on a retained connection.
+`executable` replaces the CLI binary and `arguments` adds an array of string arguments before Orbit's generated arguments. This is useful for wrappers or CLI-specific authentication flags. For SQLite, PostgreSQL, and Vertica, Orbit retains one interactive CLI connection per profile; statements, schema browsing, and completion prewarming share it and are serialized per profile. A changed profile definition, failed CLI, `:OrbitDisconnect`, or Neovim exit closes the connection; the next request reconnects automatically. Trino statements instead run one `trino` CLI invocation per statement, serialized per profile, because the `trino` CLI does not flush its output while held open on a retained connection.
 
 Schema browsing and completion cache rows only while the connection profile's kind and options are unchanged. Updating a profile clears its prior schema rows before Orbit acquires replacements. Connector metadata that is unavailable for an object, such as Trino primary keys, is shown as unavailable rather than treated as a statement failure. Explicit Workspace refreshes run after pending acquisitions and coalesce with other refresh requests.
 
-`schema_patterns` restricts the tables and views shown by Orbit's Workspace schema browser, but does not change database permissions or restrict statements you run manually. For Trino, it maps each catalog to an array of exact schema names; use an empty array to include every non-system schema from that catalog. PostgreSQL and SQLite use a non-empty array of exact schema names instead. SQLite's only available schema is `main`.
+`schema_patterns` restricts the tables and views shown by Orbit's Workspace schema browser, but does not change database permissions or restrict statements you run manually. For Trino, it maps each catalog to an array of exact schema names; use an empty array to include every non-system schema from that catalog. PostgreSQL, SQLite, and Vertica use a non-empty array of exact schema names instead. SQLite's only available schema is `main`.
 
 ## Connection Profiles
 
@@ -93,6 +95,31 @@ Profiles are JSON, versioned at `1`, and names must be unique:
         "host": "postgres.example.com",
         "port": 5432,
         "user": "postr",
+        "password": "somePassword",
+        "sslmode": "require"
+      }
+    }
+  ]
+}
+```
+
+</details>
+
+<details>
+<summary>Vertica</summary>
+
+```json
+{
+  "version": 1,
+  "profiles": [
+    {
+      "name": "warehouse",
+      "kind": "vertica",
+      "options": {
+        "host": "vertica.example.com",
+        "port": 5433,
+        "database": "warehouse",
+        "user": "alice",
         "password": "somePassword",
         "sslmode": "require"
       }
@@ -174,6 +201,8 @@ An empty array, such as `"catalog_1": []`, includes every non-system schema from
 ### Authentication
 
 PostgreSQL profiles may include `options.password`. Orbit passes it only to `psql` as `PGPASSWORD`, never as a command-line argument. The profile file is owner-protected (`0600`), but a password remains sensitive; use your system's credential management or a `~/.pgpass` file if you prefer not to store it in JSON.
+
+Vertica profiles may include `options.password`. Orbit passes it only to `vsql` as `VSQL_PASSWORD`, never as a command-line argument.
 
 Configure Trino authentication exactly as you do for the Trino CLI, including its `--password` flag, environment variables, tokens, keyrings, or credential providers it uses.
 
@@ -265,7 +294,7 @@ require("orbit").setup({
 | `?`    | Show help.                                                                                                  |
 | `q`    | Close the workspace.                                                                                        |
 
-Expanding a table reveals its available metadata folders. SQLite provides columns, primary keys, foreign keys, and indexes; each folder loads on demand. Views remain under the schema's `views` group and expose their columns.
+Expanding a table reveals its available metadata folders. SQLite provides columns, primary keys, foreign keys, and indexes; Vertica provides columns, primary keys, foreign keys, and projections. Each folder loads on demand. Views remain under the schema's `views` group and expose their columns.
 
 ### Result Grid
 
@@ -301,6 +330,7 @@ Press `a` on a table or view in the Workspace schema browser to select an action
 
 - SQLite: sample statement, columns, primary keys, indexes, foreign keys, and object definition.
 - PostgreSQL: sample statement, columns, primary keys, indexes, foreign keys, and view definition.
+- Vertica: sample statement, columns, primary keys, foreign keys, projections, and view definition.
 - Trino: sample statement and columns.
 
 Available actions are intentionally connector-specific. Orbit does not present metadata actions that the selected CLI or database cannot support reliably.
@@ -337,7 +367,7 @@ Set `completion = false` in Orbit's `setup()` to disable the blink source's `ena
 
 ## Execution And Results
 
-Orbit runs statements asynchronously through the selected profile's CLI. For SQLite and PostgreSQL, schema work and statements share one retained connection and execute one at a time; failures notify you and open a diagnostic window, and the next request starts a new connection. Trino statements each run their own `trino` CLI invocation, still serialized per profile. One running statement is allowed per query buffer; `:OrbitCancel` terminates the current CLI invocation (and, for SQLite/PostgreSQL, the retained connection) and pending work fails rather than running against an uncertain session.
+Orbit runs statements asynchronously through the selected profile's CLI. For SQLite, PostgreSQL, and Vertica, schema work and statements share one retained connection and execute one at a time; failures notify you and open a diagnostic window, and the next request starts a new connection. Trino statements each run their own `trino` CLI invocation, still serialized per profile. One running statement is allowed per query buffer; `:OrbitCancel` terminates the current CLI invocation (and, for SQLite, PostgreSQL, and Vertica, the retained connection) and pending work fails rather than running against an uncertain session.
 
 Potentially mutating statements require confirmation by default. A single `SELECT`, `SHOW`, `DESCRIBE`, `EXPLAIN`, `USE`, or `VALUES` statement runs without confirmation; everything else requires it. This is a convenience guardrail, not a security boundary.
 

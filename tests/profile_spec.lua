@@ -52,6 +52,7 @@ return {
     assert(adapters.connector({ kind = "sqlite" }) == connector("sqlite"))
     assert(adapters.connector({ kind = "postgres" }) == connector("postgres"))
     assert(adapters.connector({ kind = "trino" }) == connector("trino"))
+    assert(adapters.connector({ kind = "vertica" }) == connector("vertica"))
     local unknown, err = adapters.connector({ kind = "unknown" })
     assert(unknown == nil)
     assert(err == "unsupported profile kind: unknown")
@@ -257,6 +258,60 @@ return {
 
     assert_equal(array, { { id = 1 } })
     assert_equal(lines, { { id = 1 }, { id = 2 } })
+  end,
+
+  ["Vertica connector builds secure vsql commands and parses HTML output"] = function()
+    local vertica = connector("vertica")
+    local options = {
+      database = "warehouse",
+      host = "vertica.example.test",
+      port = 5433,
+      user = "alice",
+      password = "secret",
+      sslmode = "require",
+    }
+
+    assert_equal(vertica.prepare(options, "SELECT 1"), {
+      "vsql", "--dbname", "warehouse", "--host", "vertica.example.test", "--username", "alice",
+      "--port", "5433", "--sslmode", "require", "--html", "--quiet", "--pset", "footer=off",
+      "--pset", "null=__ORBIT_NULL__", "--command", "SELECT 1",
+    })
+    assert_equal(vertica.environment(options), { VSQL_PASSWORD = "secret" })
+    assert(not vim.inspect(vertica.prepare(options, "SELECT 1")):match("secret"))
+    assert_equal(vertica.parse([[<table border="1">
+<tr><th>name</th><th>note</th><th>missing</th></tr>
+<tr><td>Ada &amp; Bob</td><td>&lt;line&gt;&#10;next</td><td>__ORBIT_NULL__</td></tr>
+</table>]]), {
+      { name = "Ada & Bob", note = "<line>\nnext", missing = vim.NIL },
+    })
+    assert(vertica.session_output("<table><tr><td>one</td></tr></table><table><tr><td>__orbit_marker__</td></tr></table>", "__orbit_marker__") == "<table><tr><td>one</td></tr></table>")
+  end,
+
+  ["Vertica profiles require connection coordinates and expose catalog metadata"] = function()
+    local missing = write_profiles({
+      version = 1,
+      profiles = { { name = "warehouse", kind = "vertica", options = { database = "warehouse", host = "vertica.example.test" } } },
+    })
+    local loaded, err = profiles.load(missing)
+    assert(loaded == nil)
+    assert(err:match("options.user"))
+
+    local vertica = connector("vertica")
+    local options = { database = "warehouse", host = "vertica.example.test", user = "alice" }
+    local tables = vertica.schema_statement(vim.tbl_extend("force", options, { schema_patterns = { "sales" } }), { type = "tables" })
+    assert(select(2, tables:gsub("table_schema IN", "")) == 2)
+    assert(vertica.schema_statement(options, { type = "primary_keys", name = "orders", schema = "sales" }):match("v_catalog%.primary_keys"))
+    assert(vertica.schema_statement(options, { type = "foreign_keys", name = "orders", schema = "sales" }):match("reference_column_name AS \"to\""))
+    assert(vertica.schema_statement(options, { type = "projections", name = "orders", schema = "sales" }):match("v_catalog%.projections"))
+    assert(vim.deep_equal(vertica.metadata_categories(options, { type = "table" }), {
+      { id = "columns", label = "columns" },
+      { id = "primary_keys", label = "primary keys" },
+      { id = "foreign_keys", label = "foreign keys" },
+      { id = "projections", label = "projections" },
+    }))
+    local actions = vertica.object_actions(options, { type = "view", schema = "sales", name = "monthly_orders" }, 25)
+    assert(actions[#actions].id == "definition")
+    assert(actions[#actions].statement:match("v_catalog%.views"))
   end,
 
   ["Trino connector builds schema statements"] = function()

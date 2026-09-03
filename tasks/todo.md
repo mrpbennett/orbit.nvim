@@ -654,6 +654,27 @@ Files: `lua/orbit/adapters.lua` (148 lines, 13 functions).
 
 - [x] Record verification and review findings.
 
+## Vertica Connector Plan
+
+- [x] Implement the `vsql` connector with required host, user, and database profile options; optional password, port, sslmode, schema_patterns, executable, and arguments.
+- [x] Use secure `VSQL_PASSWORD` environment handoff, persistent `vsql` sessions, and strict HTML-table parsing for lossless result rows and session markers.
+- [x] Acquire Vertica tables, views, columns, primary keys, foreign keys, and projections; add view-definition and schema-object actions.
+- [x] Register and validate `kind: "vertica"`, document the connection profile, add focused regression coverage, and run the full test suite and available formatter.
+
+### Review
+
+- Vertica profiles require host, user, and database. Optional passwords are supplied through `VSQL_PASSWORD`; `vsql` arguments never contain them.
+- The connector parses `vsql --html` tables, preserving HTML-encoded values and a configured NULL marker. Persistent-session responses are delimited by a marker table.
+- Schema acquisition lists user tables and views, with columns, primary keys, foreign keys, and projections for tables, plus view definitions through object actions.
+- Verification: `nvim --headless -u NONE -l tests/run.lua` and `git diff --check` passed. `vsql` and `stylua` are not installed, so live Vertica and formatter verification could not run.
+
+### Settled Design
+
+- Vertica is a complete registered connector. Its connection profiles require `host`, `user`, and `database`.
+- Passwords are optional, stored only in the owner-protected profile file, and passed exclusively through `VSQL_PASSWORD`; they never enter command arguments.
+- `vsql` persistent sessions emit HTML tables. The connector strictly parses those tables and decodes entities so result values containing delimiters or line breaks remain intact.
+- Schema acquisition excludes Vertica administrative system catalog objects. User tables expose columns, primary keys, foreign keys, and projections; views expose columns and a definition action.
+
 - Review fixes: cancelling a local insert now removes it rather than generating an invalid delete; reused read-only grids remove editable mappings and autocommands; generated SQL must remain unchanged before its result can be editable; a successful transaction clears local changes even if reload fails; stale schema callbacks cannot replace a newer result; and `NULL` input preserves SQL null semantics.
 - Verification: `nvim --headless -u NONE -l tests/run.lua` and `git diff --check` passed.
 

@@ -22,7 +22,7 @@
 --   .tables   - cached array of table/view rows, or nil if never loaded.
 --   .columns  - map of "catalog.schema.table" -> cached array of column rows.
 --   .metadata - map of "catalog.schema.table\0category" -> cached array of
---               rows for a metadata category (primary_keys/foreign_keys/indexes).
+--               rows for a metadata category (primary_keys/foreign_keys/indexes/projections).
 --   .requests - map of cache key -> in-flight request bookkeeping (see
 --               `acquire`), so concurrent callers asking for the same thing
 --               share one underlying query instead of firing duplicates.
@@ -46,6 +46,7 @@ local metadata_categories = {
   foreign_keys = true,
   indexes = true,
   primary_keys = true,
+  projections = true,
 }
 
 -- Looks up (creating if necessary) the cache state for one connection
@@ -379,7 +380,7 @@ end
 --   profile  - the connection profile to query.
 --   row      - the table/view row the metadata belongs to.
 --   category - one of the keys in the module-level `metadata_categories`
---              table: "columns", "primary_keys", "foreign_keys", "indexes".
+--              table: "columns", "primary_keys", "foreign_keys", "indexes", "projections".
 --   options  - optional table; `options.refresh = true` forces a reload.
 --   callback - optional function(rows, err), called asynchronously.
 -- Side effects: may run a real schema query. Calls back with an error if

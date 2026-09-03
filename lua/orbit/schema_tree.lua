@@ -191,7 +191,7 @@ end
 -- Format a single metadata entry (e.g. one column, one foreign key) as a
 -- human-readable label for display in the tree.
 -- Parameters: category - the metadata category id string (e.g. "columns",
--- "primary_keys", "foreign_keys", "indexes"); row - the metadata entry's
+-- "primary_keys", "foreign_keys", "indexes", "projections"); row - the metadata entry's
 -- own data (shape depends on category, as returned by the connector's
 -- metadata-fetching query).
 -- Returns: a display string. Falls back to vim.inspect(row) (a generic
@@ -208,6 +208,9 @@ local function metadata_label(category, row)
     return string.format("foreign key #%s (%s) -> %s (%s)", row.id, row["from"], row.table, row.to)
   end
   if category == "indexes" then
+    return row.name
+  end
+  if category == "projections" then
     return row.name
   end
   return vim.inspect(row)
