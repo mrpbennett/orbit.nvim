@@ -81,14 +81,6 @@ return {
     end)
   end,
 
-  ["PostgreSQL omnifunc replaces quoted qualified identifiers"] = function()
-    local line = 'SELECT * FROM "Sales".'
-    vim.api.nvim_buf_set_lines(0, 0, -1, false, { line })
-    vim.api.nvim_win_set_cursor(0, { 1, #line })
-
-    assert(completion.omnifunc(1, "") == #"SELECT * FROM ")
-  end,
-
   ["aliased column completion resolves the alias to its table"] = function()
     local profile = { name = "completion-alias", kind = "sqlite", options = { path = "orbit.db" } }
     local columns = {
@@ -274,8 +266,8 @@ return {
     end)
   end,
 
-  ["omnifunc's prefix-first sort puts exact-prefix matches before other candidates"] = function()
-    local profile = { name = "completion-sort", kind = "sqlite", options = { path = "orbit.db" } }
+  ["completion narrows FROM suggestions to the typed prefix, case-insensitively"] = function()
+    local profile = { name = "completion-prefix", kind = "sqlite", options = { path = "orbit.db" } }
     local rows = {
       { name = "archive", type = "table" },
       { name = "order_items", type = "table" },
@@ -284,22 +276,11 @@ return {
     with_acquisition(profile, rows, function(done)
       cache.load_tables(profile, {}, done)
     end, function()
-      local line = "SELECT * FROM or"
-      vim.api.nvim_buf_set_lines(0, 0, -1, false, { line })
-      vim.api.nvim_win_set_cursor(0, { 1, #line })
-
-      local original = completion._profile_for_buffer
-      completion._profile_for_buffer = function()
-        return profile
-      end
-      local ok, items = pcall(completion.omnifunc, 0, "or")
-      completion._profile_for_buffer = original
-      assert(ok, items)
-
-      assert(#items >= 3)
-      assert(items[1].word == "order_items")
-      assert(items[2].word == "orders")
-      assert(items[3].word == "archive")
+      local line = "SELECT * FROM OR"
+      assert(vim.deep_equal(words(completion.items(profile, { line }, 1, #line)), {
+        "order_items",
+        "orders",
+      }))
     end)
   end,
 }

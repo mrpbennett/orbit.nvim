@@ -599,19 +599,20 @@ end
 -- Wire up a query buffer (any buffer meant to hold/run SQL inside this
 -- workspace, whether newly created or opened from a saved file) so it
 -- participates correctly in the workspace: results know which tabpage to
--- return to, completion is available, and "/" jumps to the filter box
--- instead of doing a normal Neovim search.
+-- return to, and "/" jumps to the filter box instead of doing a normal
+-- Neovim search. (SQL completion itself comes from orbit.blink, once the
+-- user has wired it into their own blink.cmp config — it activates for any
+-- buffer with `orbit_profile` set, which happens elsewhere when a profile
+-- is bound; nothing further is needed here.)
 --   state: workspace state table.
 --   buffer: the buffer number to configure.
 -- Returns: nothing.
 -- Side effects: sets the buffer-local variable orbit_workspace_tab
--- (vim.b[buffer] is how you get/set buffer-local vim variables from
--- Lua); calls orbit.completion.attach(buffer) to enable SQL completion;
+-- (vim.b[buffer] is how you get/set buffer-local vim variables from Lua);
 -- adds a buffer-local normal-mode "/" keymap.
 local function configure_query_buffer(state, buffer)
   -- Workspace tagging routes later results back here and makes / target the sidebar filter.
   vim.b[buffer].orbit_workspace_tab = state.tabpage
-  require("orbit.completion").attach(buffer)
   vim.keymap.set("n", "/", function()
     M.focus_filter()
   end, { buffer = buffer, silent = true, nowait = true, desc = "Filter Orbit workspace" })

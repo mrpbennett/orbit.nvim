@@ -44,7 +44,7 @@ This backlog prioritizes a fast, native Neovim database workspace over exhaustiv
 ## Query Productivity
 
 - [ ] Complete CTE names, aliases, qualified columns, functions, and SQL keywords.
-- [ ] Provide an optional completion source for installed Neovim completion frameworks while retaining omnifunc support.
+- [x] Provide a completion source for blink.cmp (native omnifunc support was removed in favor of this).
 - [ ] Integrate optional external formatting and linting rather than owning SQL dialect formatting.
 - [ ] Add searchable connection-profile query history with rerun, copy, delete, and favorite actions.
 - [ ] Add query-buffer templates and configurable SQL snippets.

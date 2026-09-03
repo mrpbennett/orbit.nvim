@@ -1,8 +1,10 @@
 -- orbit/blink.lua
 --
--- Optional blink.cmp source. blink.cmp has no runtime provider-registration
--- API (github.com/Saghen/blink.cmp/issues/475 is still open), so this module
--- is never auto-registered; wiring it in is one line in the user's own
+-- blink.cmp source — Orbit's only completion engine integration (there is
+-- no native/omnifunc fallback; without this wired up, Orbit offers no SQL
+-- completion at all). blink.cmp has no runtime provider-registration API
+-- (github.com/Saghen/blink.cmp/issues/475 is still open), so this module is
+-- never auto-registered; wiring it in is one line in the user's own
 -- blink.cmp config (see README). This file has no require-time dependency
 -- on blink.cmp itself, so it's safe to load and test even without it.
 --
@@ -21,19 +23,6 @@
 --   `__index`). Call `source.new()` to construct an instance; that's what
 --   the user's blink.cmp config passes in as their SQL completion provider.
 local completion = require("orbit.completion")
-
--- blink.cmp's own fuzzy engine re-matches every source's items against the
--- typed keyword with typo tolerance and subsequence (non-contiguous)
--- matching (see blink.cmp/lua/blink/cmp/fuzzy/init.lua's fuzzy.fuzzy). If
--- Orbit hands it every table/column in the schema cache unfiltered (which
--- is what completion.items returns by default -- see its `opts` docs), that
--- loose matching lets completely unrelated names "pollute" the menu just
--- because their letters happen to appear, in order, somewhere in the typed
--- text. Passing filter_partial=true has completion.items narrow the
--- candidates itself (case-insensitive prefix match) before blink ever sees
--- them, so blink's own fuzzy pass only has genuinely relevant candidates
--- left to score/sort.
-local ITEMS_OPTS = { filter_partial = true }
 
 -- Maps Orbit's own generic candidate `kind` strings (see orbit/completion.lua's
 -- `item` helper) to blink.cmp's numeric LSP CompletionItemKind, so blink
@@ -154,15 +143,18 @@ function source:get_completions(ctx, callback)
 
 	-- Grab the full buffer text as a list of lines (0 to -1 = start to end)
 	-- and the cursor position blink.cmp gave us, then hand both to Orbit's
-	-- shared completion engine (the same one used by the omnifunc path) to
-	-- compute suggestions appropriate for where the cursor currently sits.
+	-- completion engine (lua/orbit/completion.lua) to compute suggestions
+	-- appropriate for where the cursor currently sits. completion.items
+	-- already narrows results to the in-progress word typed before the
+	-- cursor, so blink's own fuzzy pass only has genuinely relevant
+	-- candidates left to score/sort, rather than every table/column in the
+	-- schema cache.
 	local lines = vim.api.nvim_buf_get_lines(buffer, 0, -1, false)
 	local row, col = ctx.cursor[1], ctx.cursor[2]
-	local items = completion.items(profile, lines, row, col, ITEMS_OPTS)
+	local items = completion.items(profile, lines, row, col)
 
 	-- Translate Orbit's generic completion item shape (`word`, `kind`,
-	-- `menu`, as used by Neovim's classic omnifunc completion) into the
-	-- field names blink.cmp expects (`label`, `insertText`, `kind`,
+	-- `menu`) into the field names blink.cmp expects (`label`, `insertText`,
 	-- `detail`). `kind_name`/`kind_icon` are blink.cmp's own per-item
 	-- override fields (see blink.cmp/lua/blink/cmp/completion/windows/render/context.lua),
 	-- used here to get correct highlighting despite `kind` needing to be

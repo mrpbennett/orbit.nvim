@@ -32,13 +32,17 @@
 --                          queries) shown by `:OrbitWorkspace`.
 --   * orbit.profiles    - reads/writes/validates the profiles.json file that
 --                          stores saved database connection profiles.
---   * orbit.completion  - SQL omnifunc/completion-source logic, attached to
---                          SQL buffers when `M.config.completion` is enabled.
+--   * orbit.completion  - SQL completion-candidate logic (tables/columns/
+--                          aliases), consumed only through the blink.cmp
+--                          source in orbit.blink — see orbit.blink for the
+--                          plugin's one supported completion engine.
 --
 -- M.config fields (all of these have defaults below and can be overridden by
 -- the table passed to `setup()`):
---   completion              - boolean; whether to attach orbit's completion
---                              source to SQL buffers.
+--   completion              - boolean; whether orbit.blink's blink.cmp
+--                              source is enabled (see orbit.blink:enabled()).
+--                              Has no effect unless the user has also wired
+--                              orbit.blink into their own blink.cmp config.
 --   confirm_mutations       - boolean; whether statements that look like they
 --                              mutate data (INSERT/UPDATE/DELETE/etc.) should
 --                              prompt for confirmation before running.
@@ -358,23 +362,6 @@ local function apply_keymaps(buffer)
 	vim.b[buffer].orbit_keymaps = true
 end
 
--- Attaches orbit's SQL completion source to a buffer, if completion is
--- enabled and the buffer already has a profile bound to it.
--- Parameters:
---   buffer - the buffer number to attach completion to.
--- Returns: nothing.
--- Side effects: delegates to `require("orbit.completion").attach(buffer)`,
--- which is responsible for actually wiring up the buffer's completion
--- source/omnifunc. `vim.b[buffer].orbit_profile` is set elsewhere (by
--- `orbit.query`) once a connection profile has been bound to the buffer;
--- until then completion is skipped since there is no schema to complete
--- against.
-local function apply_completion(buffer)
-	if M.config.completion and vim.b[buffer].orbit_profile then
-		require("orbit.completion").attach(buffer)
-	end
-end
-
 -- One-time initialization of orbit's "ambient" editor UX: highlight groups
 -- plus the autocommands that keep keymaps/completion/winbar applied to SQL
 -- buffers as the user opens new ones or switches colorschemes.
@@ -411,7 +398,6 @@ local function configure_ux()
 		pattern = "sql",
 		callback = function(event)
 			apply_keymaps(event.buf)
-			apply_completion(event.buf)
 			if M.config.winbar then
 				-- `vim.wo` is the window-local options table for the
 				-- *current* window; since this callback runs for the
@@ -440,15 +426,14 @@ end
 -- Parameters: none.
 -- Returns: nothing.
 -- Side effects: for each loaded buffer whose filetype is `sql`, calls
--- `apply_keymaps` and `apply_completion`; if `M.config.winbar` is enabled,
--- also sets `winbar` on every window currently displaying that buffer via
+-- `apply_keymaps`; if `M.config.winbar` is enabled, also sets `winbar` on
+-- every window currently displaying that buffer via
 -- `vim.fn.win_findbuf(buffer)` (a Vim function that returns the list of
 -- window IDs showing a given buffer).
 local function apply_ux_to_buffers()
 	for _, buffer in ipairs(vim.api.nvim_list_bufs()) do
 		if vim.bo[buffer].filetype == "sql" then
 			apply_keymaps(buffer)
-			apply_completion(buffer)
 			if M.config.winbar then
 				for _, window in ipairs(vim.fn.win_findbuf(buffer)) do
 					vim.wo[window].winbar = status_winbar
@@ -509,14 +494,10 @@ end
 --   * May show a one-time `vim.notify` warning for another removed option.
 --   * Merges `options` into `M.config` (mutating the module's shared config
 --     table that every other orbit module reads).
---   * On the first call only: defines the global `_G.OrbitComplete`
---     function (Vim's classic `omnifunc`/completion mechanism looks up
---     completion functions by *global* function name, so orbit has to
---     expose one even though the actual logic lives in `orbit.completion`),
---     registers all `:Orbit*` user commands, and sets up highlight groups +
---     autocommands.
---   * On every call: re-applies keymaps/completion/winbar to already-open
---     SQL buffers, and (re)applies the global workspace keymap.
+--   * On the first call only: registers all `:Orbit*` user commands, and
+--     sets up highlight groups + autocommands.
+--   * On every call: re-applies keymaps/winbar to already-open SQL
+--     buffers, and (re)applies the global workspace keymap.
 function M.setup(options)
 	-- `saved_query_dir` (singular) was replaced by `saved_query_dirs`
 	-- (plural, supports multiple named directories). Rather than silently
@@ -567,9 +548,6 @@ function M.setup(options)
 	M.config.default_profile = nil
 	if not configured then
 		-- Commands and autocommands are registered once; current SQL buffers are updated below.
-		_G.OrbitComplete = function(findstart, base)
-			return require("orbit.completion").omnifunc(findstart, base)
-		end
 		create_commands()
 		configure_ux()
 		configured = true

@@ -16,7 +16,7 @@ Orbit runs statements through your existing database CLI, retains one connection
 - Browse tables, views, and columns; run connector-specific object actions; create a bound sample statement; copy qualified object names.
 - Inspect and copy raw result values, including structured JSON values.
 - Confirm potentially mutating statements before they run.
-- Complete cached tables, views, columns, and table aliases, clause-aware, with Neovim's built-in omnifunc or an optional blink.cmp source.
+- Complete cached tables, views, columns, and table aliases, clause-aware, through a blink.cmp source.
 - Browse reusable SQL files from multiple named saved-query locations.
 
 ## Requirements
@@ -307,18 +307,7 @@ Available actions are intentionally connector-specific. Orbit does not present m
 
 ## Completion
 
-Binding a connection profile attaches Orbit's native omnifunc to the query buffer. Use `<C-x><C-o>` in Insert mode for cached schema objects. Completion is clause-aware: it parses the statement around your cursor (not just the current line) with a small dependency-free SQL tokenizer, so suggestions depend on where you are:
-
-- Tables and views after any `FROM`-family clause (`FROM`, `JOIN`, `UPDATE`, `INTO`), and after `schema.`/`catalog.schema.` qualifiers on connectors that support them (PostgreSQL, Trino).
-- Columns in the `SELECT` list, `WHERE`, `ON`, `GROUP BY`, `ORDER BY`, `INSERT INTO t (...)`, and `UPDATE t SET ...`.
-- Table aliases: `SELECT u.| FROM users u` resolves `u` to `users`'s columns, including old-style comma joins (`FROM a, b`). With more than one table in scope, unqualified columns are offered from every table, each annotated with its source alias.
-- The alias/table scope is limited to the statement your cursor is in; other statements in the same buffer (separated by `;`) never leak into it. CTEs and derived tables (`FROM (SELECT ...) sub`) are recognized so they don't break parsing, but don't offer column completion.
-
-Selecting a profile preloads tables and views in the background; expanding it in the Workspace schema browser fills more of the cache. Completion never runs the CLI while you type. SQL keywords and functions, formatting, and highlighting remain the responsibility of your existing SQL tooling.
-
-### blink.cmp
-
-Orbit also ships an optional [blink.cmp](https://github.com/Saghen/blink.cmp) source (`orbit.blink`) with the same clause-aware suggestions. blink.cmp has no API for a plugin to register itself as a source at runtime, so add it to your own blink.cmp config:
+Orbit's schema-aware completion (tables, views, columns, table aliases) is provided entirely through a [blink.cmp](https://github.com/Saghen/blink.cmp) source — there is no native/omnifunc fallback, so blink.cmp is required to get any Orbit completion suggestions. blink.cmp has no API for a plugin to register itself as a source at runtime, so add it to your own blink.cmp config:
 
 ```lua
 {
@@ -334,7 +323,17 @@ Orbit also ships an optional [blink.cmp](https://github.com/Saghen/blink.cmp) so
 }
 ```
 
-Set `completion = false` in Orbit's `setup()` to disable both the native omnifunc attachment and the blink source.
+Once wired up, suggestions appear automatically as you type, no manual trigger needed. Completion is clause-aware: it parses the statement around your cursor (not just the current line) with a small dependency-free SQL tokenizer, so suggestions depend on where you are:
+
+- Tables and views after any `FROM`-family clause (`FROM`, `JOIN`, `UPDATE`, `INTO`), and after `schema.`/`catalog.schema.` qualifiers on connectors that support them (PostgreSQL, Trino).
+- Columns in the `SELECT` list, `WHERE`, `ON`, `GROUP BY`, `ORDER BY`, `INSERT INTO t (...)`, and `UPDATE t SET ...`.
+- Table aliases: `SELECT u.| FROM users u` resolves `u` to `users`'s columns, including old-style comma joins (`FROM a, b`). With more than one table in scope, unqualified columns are offered from every table, each annotated with its source alias.
+- The alias/table scope is limited to the statement your cursor is in; other statements in the same buffer (separated by `;`) never leak into it. CTEs and derived tables (`FROM (SELECT ...) sub`) are recognized so they don't break parsing, but don't offer column completion.
+- Suggestions are narrowed to whatever you've already typed (case-insensitive prefix match) before being handed to blink.cmp, so its own fuzzy scoring only ever sees genuinely relevant candidates.
+
+Selecting a profile preloads tables and views in the background; expanding it in the Workspace schema browser fills more of the cache. Completion never runs the CLI while you type. SQL keywords and functions, formatting, and highlighting remain the responsibility of your existing SQL tooling.
+
+Set `completion = false` in Orbit's `setup()` to disable the blink source's `enabled()` check.
 
 ## Execution And Results
 
@@ -383,7 +382,7 @@ require("orbit").setup({
 
 | Option                    | Default                                   | Description                                                                                                                                          |
 | ------------------------- | ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `completion`              | `true`                                    | Enable clause-aware completion: both the native omnifunc attachment and the optional blink.cmp source's `enabled()`.                                  |
+| `completion`              | `true`                                    | Enable clause-aware completion via the blink.cmp source's `enabled()` (requires wiring `orbit.blink` into your own blink.cmp config; see [Completion](#completion)).                                  |
 | `confirm_mutations`       | `true`                                    | Ask before statements that are not recognised as read-only. A profile can override this with `options.confirm_mutations`.                            |
 | `focus_results`           | `false`                                   | Focus a completed standalone result grid instead of keeping focus in the query buffer.                                                               |
 | `profile_path`            | `~/.local/share/orbit.nvim/profiles.json` | Location of the profile file.                                                                                                                        |

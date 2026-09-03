@@ -23,18 +23,15 @@
 -- What it returns / how it plugs into a completion engine:
 --   - M.items(profile, lines, row, col) returns a plain list of candidate
 --     tables, shaped like { abbr, kind, menu, word } (see the `item` helper
---     below). This shape is intentionally generic/engine-agnostic.
---   - M.omnifunc adapts M.items to Neovim's built-in 'omnifunc' completion
---     mechanism (see :help complete-functions) — the format Vim's native
---     insert-mode completion (i_CTRL-X_CTRL-O) expects, with `abbr`/`word`/
---     `kind`/`menu` fields understood directly by Vim's popup menu.
---   - orbit.blink.lua wraps M.items (and M._profile_for_buffer) again to
---     adapt these candidates to the blink.cmp completion-engine plugin's
---     own item shape ({ label, insertText, kind, detail }). See
---     lua/orbit/blink.lua for that adapter.
---   So this module itself has no dependency on any particular completion
---   engine (no nvim-cmp/blink.cmp requires here) — it only knows Neovim's
---   buffer/cursor APIs and orbit's own modules.
+--     below), already narrowed to whatever partial word is typed before the
+--     cursor. This shape is intentionally generic/engine-agnostic.
+--   - orbit.blink.lua wraps M.items (and M._profile_for_buffer) to adapt
+--     these candidates to the blink.cmp completion-engine plugin's own item
+--     shape ({ label, insertText, kind, detail }). See lua/orbit/blink.lua
+--     for that adapter — it is currently the only supported completion
+--     engine; this module itself has no dependency on it (no blink.cmp
+--     require here), only on Neovim's buffer/cursor APIs and orbit's own
+--     modules.
 local cache = require("orbit.schema_cache")
 local profiles = require("orbit.profiles")
 local adapters = require("orbit.adapters")
@@ -50,11 +47,10 @@ local M = {}
 --            e.g. "Table", "View", "Column", "Schema", "Alias".
 --   detail - extra context shown alongside the candidate (e.g. the
 --            profile/connection name, or a column's data type).
--- Returns a table shaped for both Vim's omnifunc (`abbr`/`word`) and, via
--- orbit.blink.lua's translation, blink.cmp's item shape.
+-- Returns Orbit's generic candidate shape, translated by orbit.blink.lua
+-- into blink.cmp's own item shape.
 local function item(word, kind, detail)
 	return {
-		abbr = word,
 		kind = kind,
 		menu = detail,
 		word = word,
@@ -62,9 +58,7 @@ local function item(word, kind, detail)
 end
 
 -- Sorts a list of candidates alphabetically by their inserted text, in
--- place, and returns it (for chaining). Plain alphabetical order is the
--- default; prefix_first (below) is used instead when the user has already
--- typed a partial word to match against.
+-- place, and returns it (for chaining).
 local function sorted(items)
 	table.sort(items, function(left, right)
 		return left.word < right.word
@@ -72,43 +66,9 @@ local function sorted(items)
 	return items
 end
 
--- Alphabetical, but candidates that exactly prefix-match what's already
--- typed sort first; omnifunc is the only caller that knows `base`.
---
--- Params:
---   items - the candidate list to sort (mutated in place, then returned).
---   base  - the partial word Vim's omnifunc says the user has already
---           typed (e.g. "cu" if they've typed "cu" before invoking
---           completion). Vim's own completion popup does its own
---           filtering by this prefix too, but ordering the list so exact
---           prefix matches come first makes the most relevant items appear
---           at the top even before any additional filtering narrows things
---           down, and helps if the popup is displaying unfiltered.
-local function prefix_first(items, base)
-	if base == "" then
-		return sorted(items)
-	end
-	local lower_base = base:lower()
-	table.sort(items, function(left, right)
-		local left_match = left.word:sub(1, #base):lower() == lower_base
-		local right_match = right.word:sub(1, #base):lower() == lower_base
-		if left_match ~= right_match then
-			-- Exactly one of the two is a prefix match: it should sort
-			-- first regardless of alphabetical order.
-			return left_match
-		end
-		-- Both (or neither) match the prefix: fall back to plain
-		-- alphabetical order between them.
-		return left.word < right.word
-	end)
-	return items
-end
-
 -- Case-insensitive prefix test used to narrow candidates down to whatever
 -- partial word the user has already typed (e.g. "gr" typed after `FROM `).
--- An empty `partial` always matches, so callers can pass "" to mean "no
--- filtering" (the historical, unfiltered behavior that omnifunc still
--- relies on — see M.items' `opts.filter_partial`).
+-- An empty `partial` always matches (nothing typed yet).
 local function partial_matches(name, partial)
 	if partial == "" then
 		return true
@@ -388,8 +348,8 @@ local function single_target_column_items(profile, alias_scope, partial)
 end
 
 -- Main entry point: computes the full list of completion candidates for a
--- cursor position in a SQL buffer. This is what both M.omnifunc (Vim's
--- native completion) and orbit.blink.lua (the blink.cmp adapter) call.
+-- cursor position in a SQL buffer. This is what orbit.blink.lua (the
+-- blink.cmp adapter) calls.
 --
 -- Params:
 --   profile - the connection profile to complete against (determines which
@@ -400,22 +360,11 @@ end
 --             and it keeps this module stateless between completions.
 --   row     - 1-indexed cursor line number.
 --   col     - 0-indexed byte column of the cursor on that line.
---   opts    - optional table. `opts.filter_partial = true` narrows results
---             to candidates matching (case-insensitive prefix) the
---             in-progress word already typed before the cursor. Default
---             (nil/false) returns every candidate for the clause, unfiltered
---             — the historical behavior that M.omnifunc relies on, since
---             Vim's own popup does its own filtering/narrowing as the user
---             keeps typing. Completion engines that apply their own fuzzy
---             matching over the *unfiltered* universe (e.g. blink.cmp, see
---             orbit.blink) should pass `filter_partial = true` so that
---             fuzzy/typo-tolerant matching doesn't pull in irrelevant
---             candidates that merely share scattered letters with what was
---             typed.
--- Returns a flat list of candidates (see the `item` helper), or {} if
--- there's no connector for this profile or nothing sensible to suggest at
--- this position (e.g. clause is "unknown").
-function M.items(profile, lines, row, col, opts)
+-- Returns a flat list of candidates (see the `item` helper), already
+-- narrowed (case-insensitive prefix) to whatever partial word is typed
+-- before the cursor, or {} if there's no connector for this profile or
+-- nothing sensible to suggest at this position (e.g. clause is "unknown").
+function M.items(profile, lines, row, col)
 	local connector = adapters.connector(profile)
 	if not connector then
 		return {}
@@ -430,7 +379,7 @@ function M.items(profile, lines, row, col, opts)
 	local statement_tokens, cursor_index, touching = scope.statement_at(tokens, row, col)
 	local analysis = scope.analyze(statement_tokens, cursor_index, touching)
 	local qualifier = analysis.qualifier
-	local partial = (opts and opts.filter_partial) and qualifier.partial or ""
+	local partial = qualifier.partial
 
 	if analysis.clause == "from_family" then
 		-- Right after FROM/JOIN/INTO/UPDATE: suggest tables/views (and
@@ -481,53 +430,9 @@ local function profile_for_buffer(buffer)
 	return profiles.find(document, name)
 end
 
--- Exposed so other completion-engine adapters (currently orbit.blink.lua)
--- can reuse the same buffer -> profile resolution logic instead of
--- duplicating it.
+-- Exposed for orbit.blink.lua to reuse the same buffer -> profile
+-- resolution logic instead of duplicating it.
 M._profile_for_buffer = profile_for_buffer
-
--- Implements Neovim's 'omnifunc' completion function contract (see :help
--- complete-functions and :help i_CTRL-X_CTRL-O). Neovim calls this twice
--- per completion request:
---   1. With findstart == 1: this function must return the byte column
---      where the word being completed starts (so Vim knows how much of the
---      current line to replace with whatever candidate the user picks).
---   2. With findstart == 0 (and `base` set to the text between that column
---      and the cursor): this function must return the actual list of
---      completion candidates.
--- This function is wired up as `v:lua.OrbitComplete`'s Lua half; see
--- M.attach for where 'omnifunc' is pointed at it.
-function M.omnifunc(findstart, base)
-	local position = vim.api.nvim_win_get_cursor(0)
-	local row, cursor = position[1], position[2]
-	local line = vim.api.nvim_get_current_line()
-	if findstart == 1 then
-		-- Neovim supplies a byte column; Lua's byte-oriented string indexing matches it here.
-		-- Match the run of identifier/dot/quote characters immediately
-		-- before the cursor to find where the current word starts; this is
-		-- intentionally a simple regex rather than using the tokenizer,
-		-- since Vim only needs a start column here, not full SQL structure.
-		local word = line:sub(1, cursor):match("[%w_%.\"]*$") or ""
-		return cursor - #word
-	end
-	local profile = M._profile_for_buffer(vim.api.nvim_get_current_buf())
-	if not profile then
-		return {}
-	end
-	local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
-	local items = M.items(profile, lines, row, cursor)
-	return prefix_first(items, base)
-end
-
--- Turns on omni-completion for a buffer by pointing Neovim's 'omnifunc'
--- option at M.omnifunc. `v:lua.OrbitComplete` is expected to be a global
--- Lua function (set up elsewhere in the plugin, likely in orbit/init.lua)
--- that simply forwards to M.omnifunc — 'omnifunc' must name a Vim-callable
--- function, not a Lua table field directly, hence the indirection.
--- Side effect: sets the buffer-local 'omnifunc' option.
-function M.attach(buffer)
-	vim.bo[buffer].omnifunc = "v:lua.OrbitComplete"
-end
 
 -- Kicks off loading (and caching) this profile's table list ahead of time,
 -- so the first real completion request doesn't have to wait on a live

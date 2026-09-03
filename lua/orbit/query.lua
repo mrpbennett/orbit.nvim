@@ -207,15 +207,14 @@ end
 --   * Sets vim.b[buffer].orbit_profile = profile.name -- a buffer-local
 --     variable that M.profile_for_buffer (and other Orbit code) reads later
 --     to know which profile this buffer is connected to.
---   * If completion is enabled in the global config, attaches SQL completion
---     to the buffer and "prewarms" it (likely pre-fetches schema info in the
---     background) for the new profile.
+--   * If completion is enabled in the global config, "prewarms" the new
+--     profile (pre-fetches its schema info in the background) so the first
+--     completion request through orbit.blink doesn't have to wait on it.
 --   * Calls vim.notify to show the user a short message confirming which
 --     profile got bound.
 function M.bind_profile(buffer, profile)
 	vim.b[buffer].orbit_profile = profile.name
 	if require("orbit").config.completion then
-		require("orbit.completion").attach(buffer)
 		require("orbit.completion").prewarm(profile)
 	end
 	vim.notify("Orbit profile: " .. profile.name)
