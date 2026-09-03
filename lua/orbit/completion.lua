@@ -88,9 +88,10 @@ local function prefix_first(items, base)
 	if base == "" then
 		return sorted(items)
 	end
+	local lower_base = base:lower()
 	table.sort(items, function(left, right)
-		local left_match = left.word:sub(1, #base) == base
-		local right_match = right.word:sub(1, #base) == base
+		local left_match = left.word:sub(1, #base):lower() == lower_base
+		local right_match = right.word:sub(1, #base):lower() == lower_base
 		if left_match ~= right_match then
 			-- Exactly one of the two is a prefix match: it should sort
 			-- first regardless of alphabetical order.
@@ -113,6 +114,23 @@ local function partial_matches(name, partial)
 		return true
 	end
 	return name:sub(1, #partial):lower() == partial:lower()
+end
+
+-- Case-insensitive equality for unquoted SQL identifiers (schema/table/
+-- catalog/alias names) so that one person typing `FROM orders o` and
+-- another typing `FROM ORDERS O` (or any mix) both resolve against the same
+-- schema-cache rows and the same alias -- unquoted identifiers are
+-- case-insensitive by SQL convention, and this codebase's own database
+-- connections are the only source of "canonical" casing anyway (identifiers
+-- typed by the user are compared against schema-cache rows/each other here,
+-- never used to build the final inserted text, so folding case for the
+-- comparison doesn't change what gets inserted). nil is only ever equal to
+-- nil, matching the exact-equality behavior this replaces.
+local function ci_equals(a, b)
+	if a == nil or b == nil then
+		return a == b
+	end
+	return a:lower() == b:lower()
 end
 
 -- Table/view/schema completion for a `FROM`-family position. `raw_prefix` is
@@ -166,7 +184,7 @@ local function table_items(profile, connector, qualifier_segments, raw_prefix, p
 		-- `myschema.` should only match rows whose schema is "myschema".
 		local matches = #qualifier_segments <= #canonical
 		for index, segment in ipairs(qualifier_segments) do
-			if canonical[index] ~= segment then
+			if not ci_equals(canonical[index], segment) then
 				matches = false
 				break
 			end
@@ -260,9 +278,9 @@ end
 local function resolve_table_row(profile, entry)
 	for _, row in ipairs(cache.tables(profile)) do
 		if
-			row.name == entry.name
-			and (entry.schema == nil or row.schema == entry.schema)
-			and (entry.catalog == nil or row.catalog == entry.catalog)
+			ci_equals(row.name, entry.name)
+			and (entry.schema == nil or ci_equals(row.schema, entry.schema))
+			and (entry.catalog == nil or ci_equals(row.catalog, entry.catalog))
 		then
 			return row
 		end
@@ -281,12 +299,12 @@ end
 -- scope.
 local function find_scope_entry(alias_scope, name)
 	for _, entry in ipairs(alias_scope) do
-		if entry.alias and entry.alias == name then
+		if entry.alias and ci_equals(entry.alias, name) then
 			return entry
 		end
 	end
 	for _, entry in ipairs(alias_scope) do
-		if not entry.alias and entry.name == name then
+		if not entry.alias and ci_equals(entry.name, name) then
 			return entry
 		end
 	end

@@ -73,6 +73,25 @@ local JOIN_NOISE_WORDS = {
 	NATURAL = true,
 }
 
+-- Keywords that end a statement's clause region without introducing a new
+-- one this module knows how to offer completions for (LIMIT/OFFSET/FETCH's
+-- row count, HAVING's aggregate filter, or a UNION/INTERSECT/EXCEPT
+-- boundary between SELECTs). Without this, classify_clause's backward scan
+-- (below) would skip straight past one of these and match an earlier,
+-- no-longer-relevant clause keyword instead -- e.g. a cursor sitting right
+-- after `LIMIT 10` would otherwise still resolve to that same statement's
+-- `FROM` clause, offering table names in a position where nothing should be
+-- suggested at all.
+local CLAUSE_TERMINATORS = {
+	LIMIT = true,
+	OFFSET = true,
+	FETCH = true,
+	HAVING = true,
+	UNION = true,
+	INTERSECT = true,
+	EXCEPT = true,
+}
+
 -- Keywords that can never legally be a table alias. Without this list, code
 -- that guesses "the next bare identifier after a table name is its alias"
 -- (no AS keyword) would wrongly swallow the start of the next clause, e.g.
@@ -375,7 +394,14 @@ local function classify_clause(tokens, cursor_index)
 		if tok.depth < depth then
 			depth = tok.depth
 		elseif tok.depth == depth and is_ident(tok) then
-			local mapped = CLAUSE_KEYWORDS[upper(tok)]
+			local word_upper = upper(tok)
+			if CLAUSE_TERMINATORS[word_upper] then
+				-- The cursor is past this clause's terminator (e.g. after
+				-- `LIMIT 10`): stop here rather than matching an earlier
+				-- clause keyword that no longer applies to the cursor.
+				return "unknown", depth
+			end
+			local mapped = CLAUSE_KEYWORDS[word_upper]
 			if mapped then
 				return mapped, depth
 			end
