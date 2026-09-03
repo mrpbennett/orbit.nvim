@@ -25,12 +25,12 @@ Orbit runs statements through your existing database CLI, retains one connection
 - No required third-party Neovim plugins.
 - The CLI required by each connection profile:
 
-| Profile kind | CLI                                                             | Notes                                     |
-| ------------ | --------------------------------------------------------------- | ----------------------------------------- |
-| `trino`      | [`trino`](https://trino.io/docs/current/client/cli.html)        | Orbit requests JSON output.               |
-| `sqlite`     | `sqlite3`                                                       | Requires a build that supports `-json`.   |
-| `postgres`   | [`psql`](https://www.postgresql.org/docs/current/app-psql.html) | Requires a version that supports `--csv`. |
-| `vertica`    | [`vsql`](https://docs.vertica.com/24.3.x/en/connecting-to/using-vsql/) | Uses HTML table output. |
+| Profile kind | CLI                                                                    | Notes                                     |
+| ------------ | ---------------------------------------------------------------------- | ----------------------------------------- |
+| `trino`      | [`trino`](https://trino.io/docs/current/client/cli.html)               | Orbit requests JSON output.               |
+| `sqlite`     | `sqlite3`                                                              | Requires a build that supports `-json`.   |
+| `postgres`   | [`psql`](https://www.postgresql.org/docs/current/app-psql.html)        | Requires a version that supports `--csv`. |
+| `vertica`    | [`vsql`](https://docs.vertica.com/24.3.x/en/connecting-to/using-vsql/) | Uses HTML table output.                   |
 
 ## Installation
 
@@ -66,7 +66,7 @@ If a query buffer has no profile, executing it opens profile selection and retri
 | `trino`    | `server`, `user`, `catalog` | `schema`, `schema_patterns`, `executable`, `arguments`, `confirm_mutations`                                      | Tables, views, and columns from `information_schema`. Omitting `schema` browses the catalog except `information_schema`. |
 | `sqlite`   | `path`                      | `schema_patterns`, `executable`, `arguments`, `confirm_mutations`                                                | Tables and views from `sqlite_master`, plus columns from `PRAGMA table_info`, under `main`.                              |
 | `postgres` | `database`                  | `schema_patterns`, `host`, `port`, `user`, `password`, `sslmode`, `executable`, `arguments`, `confirm_mutations` | Tables and views outside PostgreSQL system schemas, plus columns, primary keys, foreign keys, and indexes.               |
-| `vertica`  | `host`, `user`, `database`  | `schema_patterns`, `port`, `password`, `sslmode`, `executable`, `arguments`, `confirm_mutations`                | User tables and views, plus columns, primary keys, foreign keys, projections, and view definitions.                      |
+| `vertica`  | `host`, `user`, `database`  | `schema_patterns`, `port`, `password`, `sslmode`, `executable`, `arguments`, `confirm_mutations`                 | User tables and views, plus columns, primary keys, foreign keys, projections, and view definitions.                      |
 
 `executable` replaces the CLI binary and `arguments` adds an array of string arguments before Orbit's generated arguments. This is useful for wrappers or CLI-specific authentication flags. For SQLite, PostgreSQL, and Vertica, Orbit retains one interactive CLI connection per profile; statements, schema browsing, and completion prewarming share it and are serialized per profile. A changed profile definition, failed CLI, `:OrbitDisconnect`, or Neovim exit closes the connection; the next request reconnects automatically. Trino statements instead run one `trino` CLI invocation per statement, serialized per profile, because the `trino` CLI does not flush its output while held open on a retained connection.
 
@@ -235,17 +235,17 @@ From a workspace query buffer, `/` focuses the workspace filter. Elsewhere, `/` 
 
 ## Commands
 
-| Command                   | Description                                                                               |
-| ------------------------- | ----------------------------------------------------------------------------------------- |
-| `:OrbitProfiles`          | Create, protect, and edit the profile file.                                               |
-| `:OrbitProfile`           | Search profiles and bind one to the current query buffer.                                 |
-| `:OrbitSelectProfile`     | Alias for `:OrbitProfile`.                                                                |
-| `:OrbitExecute`           | Execute the single unambiguous statement in the current buffer.                           |
-| `:'<,'>OrbitExecute`      | Execute the selected line range.                                                          |
-| `:OrbitCancel`            | Cancel the statement running in the current buffer.                                       |
-| `:OrbitDisconnect`        | Close the connection for the current buffer's profile.                                    |
-| `:OrbitWorkspace`         | Open the workspace or toggle its profile/schema browser.                                  |
-| `:OrbitWorkspaceClose`    | Close the Orbit workspace tabpage.                                                        |
+| Command                | Description                                                     |
+| ---------------------- | --------------------------------------------------------------- |
+| `:OrbitProfiles`       | Create, protect, and edit the profile file.                     |
+| `:OrbitProfile`        | Search profiles and bind one to the current query buffer.       |
+| `:OrbitSelectProfile`  | Alias for `:OrbitProfile`.                                      |
+| `:OrbitExecute`        | Execute the single unambiguous statement in the current buffer. |
+| `:'<,'>OrbitExecute`   | Execute the selected line range.                                |
+| `:OrbitCancel`         | Cancel the statement running in the current buffer.             |
+| `:OrbitDisconnect`     | Close the connection for the current buffer's profile.          |
+| `:OrbitWorkspace`      | Open the workspace or toggle its profile/schema browser.        |
+| `:OrbitWorkspaceClose` | Close the Orbit workspace tabpage.                              |
 
 Whole-buffer execution rejects ambiguous multi-statement content. Select the exact statement in Visual mode, then run `:OrbitExecute` or `<leader>E`.
 
@@ -307,17 +307,17 @@ Expanding a table reveals its available metadata folders. SQLite provides column
 
 Workspace sample statements for PostgreSQL and SQLite base tables become editable when Orbit can load a primary key. Ad-hoc statements, views, Trino, and tables without a primary key remain read-only.
 
-| Key / command | Action |
-| --- | --- |
-| `o`, `O` | Insert a local row below or above the current row. |
-| `i`, `<CR>` | Enter Insert mode in the focused cell; press `Esc` to keep the local edit. |
-| `dd` | Mark the current row for local deletion. |
-| `V`, `j` / `k`, `d` | Select complete rows and delete the selection. |
-| `u` | Undo the most recent local edit. |
-| `:w` | Confirm, transactionally save, and reload pending changes. |
-| `:wq` | Save successfully, then close the Result grid. |
-| `:q!` | Discard local changes and close. |
-| `:e!` | Discard local changes and reload the table. |
+| Key / command       | Action                                                                     |
+| ------------------- | -------------------------------------------------------------------------- |
+| `o`, `O`            | Insert a local row below or above the current row.                         |
+| `i`, `<CR>`         | Enter Insert mode in the focused cell; press `Esc` to keep the local edit. |
+| `dd`                | Mark the current row for local deletion.                                   |
+| `V`, `j` / `k`, `d` | Select complete rows and delete the selection.                             |
+| `u`                 | Undo the most recent local edit.                                           |
+| `:w`                | Confirm, transactionally save, and reload pending changes.                 |
+| `:wq`               | Save successfully, then close the Result grid.                             |
+| `:q!`               | Discard local changes and close.                                           |
+| `:e!`               | Discard local changes and reload the table.                                |
 
 Edits are never sent to the database until `:w`. A failed write leaves the local Result grid unchanged.
 Type `NULL` as the complete cell value to write a SQL `NULL` value.
@@ -410,20 +410,20 @@ require("orbit").setup({
 })
 ```
 
-| Option                    | Default                                   | Description                                                                                                                                          |
-| ------------------------- | ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `completion`              | `true`                                    | Enable clause-aware completion via the blink.cmp source's `enabled()` (requires wiring `orbit.blink` into your own blink.cmp config; see [Completion](#completion)).                                  |
-| `confirm_mutations`       | `true`                                    | Ask before statements that are not recognised as read-only. A profile can override this with `options.confirm_mutations`.                            |
-| `focus_results`           | `false`                                   | Focus a completed standalone result grid instead of keeping focus in the query buffer.                                                               |
-| `profile_path`            | `~/.local/share/orbit.nvim/profiles.json` | Location of the profile file.                                                                                                                        |
-| `result_limit`            | `200`                                     | Maximum returned rows displayed in the result grid.                                                                                                  |
-| `result_height`           | `15`                                      | Height of a standalone result grid.                                                                                                                  |
-| `saved_query_dirs`        | `{}`                                      | Ordered named directories of recursively discovered `.sql` files shown in the Workspace sidebar.                                                      |
-| `max_cell_width`          | `48`                                      | Maximum displayed width of a result cell.                                                                                                            |
-| `workspace_sidebar_width` | `32`                                      | Width of the workspace sidebar.                                                                                                                      |
-| `workspace_result_ratio`  | `0.30`                                    | Fraction of editor height used by workspace results, with a six-line minimum.                                                                        |
-| `winbar`                  | `false`                                   | Show Orbit status in SQL-window winbars.                                                                                                             |
-| `keymaps`                 | See above                                 | Configurable action mappings.                                                                                                                        |
-| `icons`                   | Nerd Font glyphs                          | Override `collapsed`, `expanded`, `folder`, `index`, `key`, `profile`, `query`, `result`, `saved_query`, `table`, `view`, `column`, and `workspace`. |
+| Option                    | Default                                   | Description                                                                                                                                                          |
+| ------------------------- | ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `completion`              | `true`                                    | Enable clause-aware completion via the blink.cmp source's `enabled()` (requires wiring `orbit.blink` into your own blink.cmp config; see [Completion](#completion)). |
+| `confirm_mutations`       | `true`                                    | Ask before statements that are not recognised as read-only. A profile can override this with `options.confirm_mutations`.                                            |
+| `focus_results`           | `false`                                   | Focus a completed standalone result grid instead of keeping focus in the query buffer.                                                                               |
+| `profile_path`            | `~/.local/share/orbit.nvim/profiles.json` | Location of the profile file.                                                                                                                                        |
+| `result_limit`            | `200`                                     | Maximum returned rows displayed in the result grid.                                                                                                                  |
+| `result_height`           | `15`                                      | Height of a standalone result grid.                                                                                                                                  |
+| `saved_query_dirs`        | `{}`                                      | Ordered named directories of recursively discovered `.sql` files shown in the Workspace sidebar.                                                                     |
+| `max_cell_width`          | `48`                                      | Maximum displayed width of a result cell.                                                                                                                            |
+| `workspace_sidebar_width` | `32`                                      | Width of the workspace sidebar.                                                                                                                                      |
+| `workspace_result_ratio`  | `0.30`                                    | Fraction of editor height used by workspace results, with a six-line minimum.                                                                                        |
+| `winbar`                  | `false`                                   | Show Orbit status in SQL-window winbars.                                                                                                                             |
+| `keymaps`                 | See above                                 | Configurable action mappings.                                                                                                                                        |
+| `icons`                   | Nerd Font glyphs                          | Override `collapsed`, `expanded`, `folder`, `index`, `key`, `profile`, `query`, `result`, `saved_query`, `table`, `view`, `column`, and `workspace`.                 |
 
 For a custom statusline, call `require("orbit").status()`. It reports the bound profile and shows elapsed time while a statement is running.
