@@ -41,7 +41,12 @@ return {
 			assert(#payload.items == 1)
 			assert(payload.items[1].label == "orders")
 			assert(payload.items[1].insertText == "orders")
-			assert(payload.items[1].kind == "Table")
+			-- kind must be blink.cmp's numeric CompletionItemKind (Class = 7)
+			-- for blink to render the right highlight group; kind_name/
+			-- kind_icon carry Orbit's own label and icon override.
+			assert(payload.items[1].kind == 7)
+			assert(payload.items[1].kind_name == "Table")
+			assert(payload.items[1].kind_icon == "󰆼")
 		end, debug.traceback)
 
 		runner.run = original_run

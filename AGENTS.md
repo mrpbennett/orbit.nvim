@@ -11,3 +11,7 @@ Canonical triage roles use the default label vocabulary. See `docs/agents/triage
 ### Domain docs
 
 This is a single-context layout. See `docs/agents/domain.md`.
+
+### CONTEXT.md
+
+Now lives in `/docs/agents/CONTEXT.md`
