@@ -63,6 +63,8 @@ local function append(arguments, values)
   end
 end
 
+local schema_pattern = require("orbit.connectors.schema_pattern")
+
 -- Formats a Lua value as a single-quoted SQL *string literal*, escaping any
 -- embedded single quotes by doubling them (the standard SQL escaping rule).
 -- Use this for values that go where SQL expects a string/constant, e.g.
@@ -246,14 +248,12 @@ function M.schema_statement(options, node)
           "FROM " .. identifier(catalog) .. ".information_schema.tables",
           "WHERE table_schema <> 'information_schema'",
         }
-        if #schemas > 0 then
-          -- An empty schema list for a catalog means "all schemas in this
-          -- catalog"; a non-empty list restricts to just those schemas.
-          local values = {}
-          for _, schema in ipairs(schemas) do
-            table.insert(values, literal(schema))
-          end
-          table.insert(clauses, "AND table_schema IN (" .. table.concat(values, ", ") .. ")")
+        -- An empty schema list for a catalog means "all schemas in this
+        -- catalog"; a non-empty list restricts to just those schemas
+        -- (entries may be exact names or `*`/`?` glob patterns).
+        local schema_clause = schema_pattern.sql_clause("table_schema", schemas)
+        if schema_clause then
+          table.insert(clauses, "AND " .. schema_clause)
         end
         table.insert(statements, table.concat(clauses, " "))
       end

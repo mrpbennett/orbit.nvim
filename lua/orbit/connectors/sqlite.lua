@@ -42,6 +42,7 @@
 -- variables/credentials the way postgres.lua sets PGPASSWORD, since a
 -- SQLite "connection" is just a local file path).
 local M = {}
+local schema_pattern = require("orbit.connectors.schema_pattern")
 
 -- Appends every item of `values` onto the end of `arguments`, in place.
 -- Small helper for building up CLI argument lists piece by piece.
@@ -150,128 +151,25 @@ function M.session_command(options)
   return command
 end
 
--- Decides whether a row from a query result can be edited (i.e. the results
--- grid UI lets the user change/delete/insert rows and have those changes
--- written back to the database). Editing is only possible when we know
--- which real database table the row came from *and* have a primary key to
--- uniquely identify that row again later.
--- Parameters:
---   row          - metadata describing the schema object the result came
---                  from (must be a "table", not a view, computed result, etc).
---   primary_keys - list of column names making up the primary key, as
---                  discovered separately via the "primary_keys" schema_statement.
--- Returns: a small "target" table { name, schema, primary_keys } describing
--- what to write mutations against, or `nil, "error message"` if the result
--- isn't editable (e.g. it's a view, or the table has no primary key).
-function M.editable_table(_, row, primary_keys)
-  if row.type ~= "table" or #primary_keys == 0 then
-    return nil, "Result is read-only: unable to determine a unique database row."
-  end
-  return { name = row.name, schema = row.schema, primary_keys = primary_keys }
+local mutation_sql = require("orbit.connectors.mutation_sql")
+
+-- Decides whether a row from a query result can be edited; see
+-- mutation_sql.editable_table for the shared logic (identical across every
+-- connector that supports editable results).
+M.editable_table = function(_, row, primary_keys)
+  return mutation_sql.editable_table(row, primary_keys)
 end
 
 -- Translates the results grid's pending row edits into one SQL script
 -- (wrapped in a transaction) that applies them to the real database table.
 -- This is what actually persists edits a user makes in the query results UI
--- back to SQLite.
--- Parameters:
---   target  - the editable-table descriptor returned by editable_table
---             above (table name/schema + primary key column names).
---   changes - a table with three lists describing what the user changed:
---     .deleted  - rows the user deleted (only original values needed, to
---                 build the WHERE clause matching them by primary key).
---     .modified - rows the user edited: `.values` (all current column
---                 values) and `.original` (the values as loaded, used to
---                 detect which columns actually changed and to build the
---                 WHERE clause).
---     .inserted - brand new rows the user added, keyed by column name.
--- Returns: a single string containing "BEGIN IMMEDIATE; ...; COMMIT;" (all
--- statements needed to apply every change), or `nil, "error message"` if a
--- change can't be expressed safely (e.g. editing a primary key column, or a
--- delete/update whose row no longer has a known primary key value).
--- No side effects itself - it only builds SQL text; running it against the
--- persistent session process happens elsewhere (lua/orbit/session.lua).
+-- back to SQLite. See mutation_sql.build for the shared generation logic;
+-- SQLite supplies its own quoting functions, its unqualified table name (no
+-- schema concept), and "BEGIN IMMEDIATE" rather than plain "BEGIN" so the
+-- write lock is grabbed eagerly and this batch fails fast if another writer
+-- is already using the file.
 function M.mutation_statement(_, target, changes)
-  local name = identifier(target.name)
-  local primary_keys = target.primary_keys
-  -- vim.NIL is Neovim's stand-in for a real SQL NULL (Lua's own `nil` can't
-  -- be stored in a table value), so it must be translated to the literal
-  -- SQL keyword NULL rather than being treated as a normal string value.
-  local function value_sql(value)
-    return value == vim.NIL and "NULL" or literal(value)
-  end
-  -- BEGIN IMMEDIATE (rather than plain BEGIN) grabs SQLite's write lock
-  -- right away, so this whole batch of deletes/updates/inserts is applied
-  -- atomically and fails fast if another writer is already using the file.
-  local statements = { "BEGIN IMMEDIATE" }
-  for _, row in ipairs(changes.deleted) do
-    local conditions = {}
-    for _, column in ipairs(primary_keys) do
-      local value = row.original[column]
-      if value == nil or value == vim.NIL then
-        return nil, "Cannot delete a row with a NULL primary key."
-      end
-      conditions[#conditions + 1] = identifier(column) .. " = " .. value_sql(value)
-    end
-    statements[#statements + 1] = "DELETE FROM " .. name .. " WHERE " .. table.concat(conditions, " AND ")
-  end
-  for _, row in ipairs(changes.modified) do
-    local assignments, conditions = {}, {}
-    for column, value in pairs(row.values) do
-      -- Only emit SET clauses for columns that actually changed - comparing
-      -- the current value against the originally-loaded value avoids
-      -- rewriting every column on every edited row.
-      if not vim.deep_equal(value, row.original[column]) then
-        for _, primary_key in ipairs(primary_keys) do
-          if column == primary_key then
-            return nil, "Editing primary key values is not supported."
-          end
-        end
-        assignments[#assignments + 1] = identifier(column) .. " = " .. value_sql(value)
-      end
-    end
-    for _, column in ipairs(primary_keys) do
-      local value = row.original[column]
-      if value == nil or value == vim.NIL then
-        return nil, "Cannot update a row with a NULL primary key."
-      end
-      conditions[#conditions + 1] = identifier(column) .. " = " .. value_sql(value)
-    end
-    if #assignments > 0 then
-      statements[#statements + 1] = "UPDATE " .. name .. " SET " .. table.concat(assignments, ", ") .. " WHERE " .. table.concat(conditions, " AND ")
-    end
-  end
-  for _, row in ipairs(changes.inserted) do
-    local columns, values = {}, {}
-    -- Skip columns the user left as `nil` (as opposed to explicitly setting
-    -- them to SQL NULL via vim.NIL) so the database applies its own default
-    -- value/DEFAULT clause for anything untouched.
-    for column, value in pairs(row.values) do
-      if value ~= nil then
-        columns[#columns + 1] = identifier(column)
-        values[#values + 1] = value_sql(value)
-      end
-    end
-    -- Sorting gives a deterministic column order (Lua's `pairs` iteration
-    -- order over row.values is otherwise unspecified), which matters
-    -- because `columns` and `ordered_values` below must line up positionally.
-    table.sort(columns)
-    if #columns == 0 then
-      statements[#statements + 1] = "INSERT INTO " .. name .. " DEFAULT VALUES"
-    else
-      local ordered_values = {}
-      for _, column in ipairs(columns) do
-        -- `columns` entries are already-quoted identifiers (e.g. `"col""name"`),
-        -- but row.values is keyed by the original unquoted column name, so
-        -- each entry must be unquoted again here to look its value back up.
-        local raw = column:sub(2, -2):gsub('""', '"')
-        ordered_values[#ordered_values + 1] = value_sql(row.values[raw])
-      end
-      statements[#statements + 1] = "INSERT INTO " .. name .. " (" .. table.concat(columns, ", ") .. ") VALUES (" .. table.concat(ordered_values, ", ") .. ")"
-    end
-  end
-  statements[#statements + 1] = "COMMIT"
-  return table.concat(statements, ";\n") .. ";"
+  return mutation_sql.build(identifier(target.name), identifier, literal, "BEGIN IMMEDIATE", target.primary_keys, changes)
 end
 
 -- Encodes one SQL `statement` to write to the persistent sqlite3 session's
@@ -327,9 +225,10 @@ end
 function M.schema_statement(options, node)
   if node.type == "tables" then
     if options.schema_patterns then
-      -- SQLite exposes only main here; filters without it intentionally acquire no rows.
+      -- SQLite exposes only main here; filters without it (or without a
+      -- pattern matching it, e.g. "m*") intentionally acquire no rows.
       for _, schema in ipairs(options.schema_patterns) do
-        if schema == "main" then
+        if schema_pattern.matches(schema, "main") then
           return "SELECT 'main' AS schema, name, type FROM sqlite_master WHERE type IN ('table', 'view') ORDER BY name"
         end
       end

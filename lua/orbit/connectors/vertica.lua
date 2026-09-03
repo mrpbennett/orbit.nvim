@@ -20,15 +20,11 @@ local function qualified(row)
   return table.concat({ identifier(row.schema or "public"), identifier(row.name) }, ".")
 end
 
+local schema_pattern = require("orbit.connectors.schema_pattern")
+
 local function schema_filter(schemas)
-  if not schemas then
-    return nil
-  end
-  local values = {}
-  for _, schema in ipairs(schemas) do
-    table.insert(values, literal(schema))
-  end
-  return "AND table_schema IN (" .. table.concat(values, ", ") .. ")"
+  local clause = schema_pattern.sql_clause("table_schema", schemas)
+  return clause and ("AND " .. clause) or nil
 end
 
 local function command(options)
@@ -129,17 +125,17 @@ function M.schema_statement(options, node)
   if node.type == "tables" then
     local filter = schema_filter(options.schema_patterns)
     local clauses = {
-      "SELECT table_schema AS schema, table_name AS name, 'table' AS type FROM v_catalog.tables",
+      'SELECT table_schema AS "schema", table_name AS name, \'table\' AS type FROM v_catalog.tables',
       "WHERE NOT is_system_table",
     }
     if filter then
       table.insert(clauses, filter)
     end
-    table.insert(clauses, "UNION ALL SELECT table_schema AS schema, table_name AS name, 'view' AS type FROM v_catalog.views WHERE 1 = 1")
+    table.insert(clauses, 'UNION ALL SELECT table_schema AS "schema", table_name AS name, \'view\' AS type FROM v_catalog.views WHERE 1 = 1')
     if filter then
       table.insert(clauses, filter)
     end
-    table.insert(clauses, "ORDER BY schema, name")
+    table.insert(clauses, 'ORDER BY "schema", name')
     return table.concat(clauses, " ")
   end
   if node.type == "columns" and node.name then

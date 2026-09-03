@@ -45,6 +45,10 @@ _Avoid_: query, command
 A statement that can change data or database structure and requires confirmation by default before Orbit.nvim executes it.
 _Avoid_: write query, destructive query
 
+**Editable target**:
+The table name, schema, and primary key columns identifying which real database row a result grid edit writes back to, as decided by a connector from a result row's origin and its primary keys.
+_Avoid_: target (bare)
+
 **Active profile**:
 The default connection profile used only when a query buffer has not selected its own profile.
 _Avoid_: active database, current connection
