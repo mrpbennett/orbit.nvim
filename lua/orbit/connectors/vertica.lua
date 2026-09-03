@@ -20,7 +20,7 @@ local function qualified(row)
   return table.concat({ identifier(row.schema or "public"), identifier(row.name) }, ".")
 end
 
-local schema_pattern = require("orbit.connectors.schema_pattern")
+local schema_pattern = require("orbit.connectors.utils.schema_pattern")
 
 local function schema_filter(schemas)
   local clause = schema_pattern.sql_clause("table_schema", schemas)

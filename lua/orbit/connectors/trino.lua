@@ -60,7 +60,7 @@ local function append(arguments, values)
   end
 end
 
-local schema_pattern = require("orbit.connectors.schema_pattern")
+local schema_pattern = require("orbit.connectors.utils.schema_pattern")
 
 -- Formats a Lua value as a single-quoted SQL *string literal*, escaping any
 -- embedded single quotes by doubling them (the standard SQL escaping rule).

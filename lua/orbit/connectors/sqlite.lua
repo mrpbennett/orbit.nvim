@@ -42,22 +42,22 @@
 -- variables/credentials the way postgres.lua sets PGPASSWORD, since a
 -- SQLite "connection" is just a local file path).
 local M = {}
-local schema_pattern = require("orbit.connectors.schema_pattern")
+local schema_pattern = require("orbit.connectors.utils.schema_pattern")
 
 -- Appends every item of `values` onto the end of `arguments`, in place.
 -- Small helper for building up CLI argument lists piece by piece.
 -- Side effect: mutates `arguments`.
 local function append(arguments, values)
-  for _, value in ipairs(values) do
-    table.insert(arguments, value)
-  end
+	for _, value in ipairs(values) do
+		table.insert(arguments, value)
+	end
 end
 
 -- Formats a Lua value as a single-quoted SQL *string literal*, doubling any
 -- embedded single quotes (the standard SQL escaping rule). Use this for
 -- values, not names - e.g. the string argument to PRAGMA table_info(...).
 local function literal(value)
-  return "'" .. tostring(value):gsub("'", "''") .. "'"
+	return "'" .. tostring(value):gsub("'", "''") .. "'"
 end
 
 -- Formats a Lua value as a double-quoted SQL *identifier* (table/column
@@ -65,7 +65,7 @@ end
 -- to appear as SQL identifiers, e.g. in generated UPDATE/INSERT statements,
 -- so that unusual table/column names (spaces, reserved words) still work.
 local function identifier(value)
-  return '"' .. tostring(value):gsub('"', '""') .. '"'
+	return '"' .. tostring(value):gsub('"', '""') .. '"'
 end
 
 -- Checks a connection profile's `options` table only contains keys this
@@ -74,19 +74,19 @@ end
 -- Parameters: profile_name (for error messages), options (user config table).
 -- Returns: `true` on success, or `nil, "error message"` on failure.
 function M.validate_options(profile_name, options)
-  local allowed = {
-    arguments = true,
-    confirm_mutations = true,
-    executable = true,
-    path = true,
-    schema_patterns = true,
-  }
-  for name in pairs(options) do
-    if not allowed[name] then
-      return nil, string.format("profile %q has unsupported SQLite option %q", profile_name, name)
-    end
-  end
-  return true
+	local allowed = {
+		arguments = true,
+		confirm_mutations = true,
+		executable = true,
+		path = true,
+		schema_patterns = true,
+	}
+	for name in pairs(options) do
+		if not allowed[name] then
+			return nil, string.format("profile %q has unsupported SQLite option %q", profile_name, name)
+		end
+	end
+	return true
 end
 
 -- Builds the argv for running one `statement` through the `sqlite3` CLI as a
@@ -100,10 +100,10 @@ end
 -- which lua/orbit/adapters.lua's generic JSON parser then decodes (this
 -- module defines no M.parse of its own).
 function M.prepare(options, statement)
-  local command = { options.executable or "sqlite3" }
-  append(command, options.arguments or {})
-  append(command, { "-json", options.path, statement })
-  return command
+	local command = { options.executable or "sqlite3" }
+	append(command, options.arguments or {})
+	append(command, { "-json", options.path, statement })
+	return command
 end
 
 -- Renders a schema object's fully-qualified name for use in generated SQL.
@@ -112,7 +112,7 @@ end
 -- the table/view name as an identifier.
 -- Returns: a string like `"my_table"`.
 function M.qualified_name(_, row)
-  return identifier(row.name)
+	return identifier(row.name)
 end
 
 -- Decides what text to insert into the SQL buffer when a completion
@@ -121,7 +121,7 @@ end
 -- SQLite objects aren't schema-qualified the way Postgres/Trino ones are.
 -- Returns: the text to insert (prefix .. row.name).
 function M.completion_word(_, row, prefix)
-  return prefix .. row.name
+	return prefix .. row.name
 end
 
 -- Builds the argv for a *long-lived* `sqlite3` process that
@@ -136,20 +136,20 @@ end
 -- file `path`).
 -- Returns: an argv array for the persistent process.
 function M.session_command(options)
-  local command = { options.executable or "sqlite3" }
-  append(command, options.arguments or {})
-  -- Abort the CLI on SQL errors so an uncommitted transaction rolls back on disconnect.
-  append(command, { "-bail", "-json", options.path })
-  return command
+	local command = { options.executable or "sqlite3" }
+	append(command, options.arguments or {})
+	-- Abort the CLI on SQL errors so an uncommitted transaction rolls back on disconnect.
+	append(command, { "-bail", "-json", options.path })
+	return command
 end
 
-local mutation_sql = require("orbit.connectors.mutation_sql")
+local mutation_sql = require("orbit.connectors.utils.mutation_sql")
 
 -- Decides whether a row from a query result can be edited; see
 -- mutation_sql.editable_table for the shared logic (identical across every
 -- connector that supports editable results).
 M.editable_table = function(_, row, primary_keys)
-  return mutation_sql.editable_table(row, primary_keys)
+	return mutation_sql.editable_table(row, primary_keys)
 end
 
 -- Translates the results grid's pending row edits into one SQL script
@@ -161,7 +161,14 @@ end
 -- write lock is grabbed eagerly and this batch fails fast if another writer
 -- is already using the file.
 function M.mutation_statement(_, target, changes)
-  return mutation_sql.build(identifier(target.name), identifier, literal, "BEGIN IMMEDIATE", target.primary_keys, changes)
+	return mutation_sql.build(
+		identifier(target.name),
+		identifier,
+		literal,
+		"BEGIN IMMEDIATE",
+		target.primary_keys,
+		changes
+	)
 end
 
 -- Encodes one SQL `statement` to write to the persistent sqlite3 session's
@@ -174,8 +181,8 @@ end
 -- request, generated by lua/orbit/session.lua).
 -- Returns: the exact bytes to write to the process's stdin.
 function M.session_request(statement, marker)
-  -- The marker query delimits one JSON response in SQLite's persistent stdout stream.
-  return statement .. ";\nSELECT '" .. marker .. "' AS __orbit_marker;\n"
+	-- The marker query delimits one JSON response in SQLite's persistent stdout stream.
+	return statement .. ";\nSELECT '" .. marker .. "' AS __orbit_marker;\n"
 end
 
 -- Given everything the persistent session process has printed to stdout so
@@ -187,20 +194,20 @@ end
 -- `nil` if the marker hasn't shown up in `output` yet (caller should keep
 -- waiting for more stdout data).
 function M.session_output(output, marker)
-  local marker_at = output:find(marker, 1, true)
-  if not marker_at then
-    -- Marker hasn't printed yet - this request's output isn't complete.
-    return nil
-  end
-  -- Walk backwards from the marker to the start of the JSON array ("[") that
-  -- sqlite3's `-json` mode wraps every result set in, so the returned slice
-  -- is exactly the JSON for this statement and excludes the marker query's
-  -- own (irrelevant) JSON output.
-  local start = output:sub(1, marker_at):match(".*()%[")
-  if not start then
-    return nil
-  end
-  return output:sub(1, start - 1)
+	local marker_at = output:find(marker, 1, true)
+	if not marker_at then
+		-- Marker hasn't printed yet - this request's output isn't complete.
+		return nil
+	end
+	-- Walk backwards from the marker to the start of the JSON array ("[") that
+	-- sqlite3's `-json` mode wraps every result set in, so the returned slice
+	-- is exactly the JSON for this statement and excludes the marker query's
+	-- own (irrelevant) JSON output.
+	local start = output:sub(1, marker_at):match(".*()%[")
+	if not start then
+		return nil
+	end
+	return output:sub(1, start - 1)
 end
 
 -- Builds the SQL/PRAGMA statement used to discover schema metadata for the
@@ -215,39 +222,39 @@ end
 -- Returns: a SQL/PRAGMA string to execute, or `nil, "error message"` for an
 -- unrecognized node type.
 function M.schema_statement(options, node)
-  if node.type == "tables" then
-    if options.schema_patterns then
-      -- SQLite exposes only main here; filters without it (or without a
-      -- pattern matching it, e.g. "m*") intentionally acquire no rows.
-      for _, schema in ipairs(options.schema_patterns) do
-        if schema_pattern.matches(schema, "main") then
-          return "SELECT 'main' AS schema, name, type FROM sqlite_master WHERE type IN ('table', 'view') ORDER BY name"
-        end
-      end
-      return "SELECT 'main' AS schema, name, type FROM sqlite_master WHERE 1 = 0"
-    end
-    return "SELECT 'main' AS schema, name, type FROM sqlite_master WHERE type IN ('table', 'view') ORDER BY name"
-  end
-  if node.type == "columns" and node.name then
-    -- PRAGMA table_info is SQLite's built-in way to describe a table's
-    -- columns (name, declared type, whether it's part of the primary key,
-    -- etc) - there is no information_schema in SQLite to query instead.
-    return "PRAGMA table_info(" .. literal(node.name) .. ")"
-  end
-  if node.type == "primary_keys" and node.name then
-    -- pragma_table_info() is the "table-valued function" form of the same
-    -- PRAGMA, usable inside a normal SELECT so it can be filtered/ordered;
-    -- `pk > 0` selects only columns that are part of the primary key, and
-    -- the value is that column's 1-based position within a composite key.
-    return "SELECT name, type, pk FROM pragma_table_info(" .. literal(node.name) .. ") WHERE pk > 0 ORDER BY pk"
-  end
-  if node.type == "foreign_keys" and node.name then
-    return "PRAGMA foreign_key_list(" .. literal(node.name) .. ")"
-  end
-  if node.type == "indexes" and node.name then
-    return "PRAGMA index_list(" .. literal(node.name) .. ")"
-  end
-  return nil, "unsupported schema node"
+	if node.type == "tables" then
+		if options.schema_patterns then
+			-- SQLite exposes only main here; filters without it (or without a
+			-- pattern matching it, e.g. "m*") intentionally acquire no rows.
+			for _, schema in ipairs(options.schema_patterns) do
+				if schema_pattern.matches(schema, "main") then
+					return "SELECT 'main' AS schema, name, type FROM sqlite_master WHERE type IN ('table', 'view') ORDER BY name"
+				end
+			end
+			return "SELECT 'main' AS schema, name, type FROM sqlite_master WHERE 1 = 0"
+		end
+		return "SELECT 'main' AS schema, name, type FROM sqlite_master WHERE type IN ('table', 'view') ORDER BY name"
+	end
+	if node.type == "columns" and node.name then
+		-- PRAGMA table_info is SQLite's built-in way to describe a table's
+		-- columns (name, declared type, whether it's part of the primary key,
+		-- etc) - there is no information_schema in SQLite to query instead.
+		return "PRAGMA table_info(" .. literal(node.name) .. ")"
+	end
+	if node.type == "primary_keys" and node.name then
+		-- pragma_table_info() is the "table-valued function" form of the same
+		-- PRAGMA, usable inside a normal SELECT so it can be filtered/ordered;
+		-- `pk > 0` selects only columns that are part of the primary key, and
+		-- the value is that column's 1-based position within a composite key.
+		return "SELECT name, type, pk FROM pragma_table_info(" .. literal(node.name) .. ") WHERE pk > 0 ORDER BY pk"
+	end
+	if node.type == "foreign_keys" and node.name then
+		return "PRAGMA foreign_key_list(" .. literal(node.name) .. ")"
+	end
+	if node.type == "indexes" and node.name then
+		return "PRAGMA index_list(" .. literal(node.name) .. ")"
+	end
+	return nil, "unsupported schema node"
 end
 
 -- Reports which extra detail "categories" the sidebar UI can offer for a
@@ -256,15 +263,15 @@ end
 -- since those PRAGMAs are meaningful only for tables.
 -- Returns: a list of { id = string, label = string } tables.
 function M.metadata_categories(_, row)
-  local categories = {
-    { id = "columns", label = "columns" },
-  }
-  if row.type == "table" then
-    table.insert(categories, { id = "primary_keys", label = "primary keys" })
-    table.insert(categories, { id = "foreign_keys", label = "foreign keys" })
-    table.insert(categories, { id = "indexes", label = "indexes" })
-  end
-  return categories
+	local categories = {
+		{ id = "columns", label = "columns" },
+	}
+	if row.type == "table" then
+		table.insert(categories, { id = "primary_keys", label = "primary keys" })
+		table.insert(categories, { id = "foreign_keys", label = "foreign keys" })
+		table.insert(categories, { id = "indexes", label = "indexes" })
+	end
+	return categories
 end
 
 -- Builds the list of context-menu actions the sidebar offers for a
@@ -278,46 +285,46 @@ end
 -- view, the primary_keys/foreign_keys/indexes PRAGMAs are harmless, they
 -- simply return no rows.
 function M.object_actions(_, row, limit)
-  local name = literal(row.name)
-  -- PRAGMAs take string literals, while generated sample SQL needs an escaped identifier.
-  return {
-    {
-      id = "sample",
-      kind = "query_buffer",
-      label = "Open sample statement",
-      statement = string.format("SELECT *\nFROM %s\nLIMIT %d;", identifier(row.name), limit),
-    },
-    {
-      id = "columns",
-      kind = "statement",
-      label = "Columns",
-      statement = "PRAGMA table_info(" .. name .. ");",
-    },
-    {
-      id = "primary_keys",
-      kind = "statement",
-      label = "Primary keys",
-      statement = "SELECT name, type, pk FROM pragma_table_info(" .. name .. ") WHERE pk > 0 ORDER BY pk;",
-    },
-    {
-      id = "indexes",
-      kind = "statement",
-      label = "Indexes",
-      statement = "PRAGMA index_list(" .. name .. ");",
-    },
-    {
-      id = "foreign_keys",
-      kind = "statement",
-      label = "Foreign keys",
-      statement = "PRAGMA foreign_key_list(" .. name .. ");",
-    },
-    {
-      id = "definition",
-      kind = "statement",
-      label = "Definition",
-      statement = "SELECT sql FROM sqlite_master WHERE name = " .. name .. " AND type IN ('table', 'view');",
-    },
-  }
+	local name = literal(row.name)
+	-- PRAGMAs take string literals, while generated sample SQL needs an escaped identifier.
+	return {
+		{
+			id = "sample",
+			kind = "query_buffer",
+			label = "Open sample statement",
+			statement = string.format("SELECT *\nFROM %s\nLIMIT %d;", identifier(row.name), limit),
+		},
+		{
+			id = "columns",
+			kind = "statement",
+			label = "Columns",
+			statement = "PRAGMA table_info(" .. name .. ");",
+		},
+		{
+			id = "primary_keys",
+			kind = "statement",
+			label = "Primary keys",
+			statement = "SELECT name, type, pk FROM pragma_table_info(" .. name .. ") WHERE pk > 0 ORDER BY pk;",
+		},
+		{
+			id = "indexes",
+			kind = "statement",
+			label = "Indexes",
+			statement = "PRAGMA index_list(" .. name .. ");",
+		},
+		{
+			id = "foreign_keys",
+			kind = "statement",
+			label = "Foreign keys",
+			statement = "PRAGMA foreign_key_list(" .. name .. ");",
+		},
+		{
+			id = "definition",
+			kind = "statement",
+			label = "Definition",
+			statement = "SELECT sql FROM sqlite_master WHERE name = " .. name .. " AND type IN ('table', 'view');",
+		},
+	}
 end
 
 return M

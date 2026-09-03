@@ -1,4 +1,4 @@
-local mutation_sql = require("orbit.connectors.mutation_sql")
+local mutation_sql = require("orbit.connectors.utils.mutation_sql")
 
 local function identifier(value)
   return '"' .. value:gsub('"', '""') .. '"'

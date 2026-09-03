@@ -10,7 +10,7 @@ local modules = {
   "orbit.adapters",
 	"orbit.completion",
 	"orbit.connectors.postgres",
-	"orbit.connectors.mutation_sql",
+	"orbit.connectors.utils.mutation_sql",
    "orbit.diagnostics",
    "orbit.editable_result",
   "orbit.feedback",
