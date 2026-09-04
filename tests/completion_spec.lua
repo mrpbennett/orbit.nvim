@@ -42,6 +42,7 @@ return {
       local line = "SELECT * FROM "
       assert(vim.deep_equal(words(completion.items(profile, { line }, 1, #line)), {
         "active_users",
+        "hive.",
         "orders",
       }))
     end)
@@ -276,7 +277,15 @@ return {
   end,
 
   ["Trino qualifier depth is connector-driven across catalogs"] = function()
-    local profile = { name = "completion-trino-catalog", kind = "trino", options = { catalog = "hive", schema = "public" } }
+    local profile = {
+      name = "completion-trino-catalog",
+      kind = "trino",
+      options = {
+        catalog = "hive",
+        schema = "public",
+        schema_patterns = { hive = { "public" }, kafka = { "public" } },
+      },
+    }
     local rows = {
       { name = "orders", type = "table", schema = "public", catalog = "hive" },
       { name = "events", type = "table", schema = "public", catalog = "kafka" },
@@ -292,9 +301,89 @@ return {
       end
       -- Same-catalog table completes to its 2-part name directly.
       assert(by_word["public.orders"] and by_word["public.orders"].kind == "Table")
-      -- Cross-catalog table needs its catalog; with two distinct catalogs
-      -- present, the catalog itself is offered as a Schema-kind bonus item.
-      assert(by_word["kafka"] and by_word["kafka"].kind == "Schema")
+      -- Configured catalogs are progressive namespace entries alongside the
+      -- existing direct relation suggestions.
+      assert(by_word["hive."] and by_word["hive."].kind == "Catalog")
+      assert(by_word["kafka."] and by_word["kafka."].kind == "Catalog")
+
+      local schema_line = "SELECT * FROM public."
+      assert(vim.deep_equal(words(completion.items(profile, { schema_line }, 1, #schema_line)), {
+        "public.orders",
+      }))
+    end)
+  end,
+
+  ["Trino completion traverses configured catalogs, schemas, and relations"] = function()
+    local profile = {
+      name = "completion-trino-hierarchy",
+      kind = "trino",
+      options = {
+        catalog = "gridhive",
+        schema_patterns = {
+          gridhive = { "sales", "empty" },
+          iceberg = {},
+        },
+      },
+    }
+    local rows = {
+      { name = "orders", type = "table", schema = "sales", catalog = "gridhive" },
+      { name = "events", type = "view", schema = "cleanroom", catalog = "iceberg" },
+    }
+    with_acquisition(profile, rows, function(done)
+      cache.load_tables(profile, {}, done)
+    end, function()
+      local unqualified = completion.items(profile, { "SELECT * FROM " }, 1, #"SELECT * FROM ")
+      local by_word = {}
+      for _, it in ipairs(unqualified) do
+        by_word[it.word] = it
+      end
+      assert(by_word["sales.orders"] and by_word["sales.orders"].kind == "Table")
+      assert(by_word["iceberg.cleanroom.events"] and by_word["iceberg.cleanroom.events"].kind == "View")
+      assert(by_word["gridhive."] and by_word["gridhive."].kind == "Catalog")
+      assert(by_word["iceberg."] and by_word["iceberg."].kind == "Catalog")
+
+      local catalog_line = "SELECT * FROM gridhive."
+      assert(vim.deep_equal(words(completion.items(profile, { catalog_line }, 1, #catalog_line)), {
+        "gridhive.empty.",
+        "gridhive.sales.",
+      }))
+
+      local partial_schema_line = "SELECT * FROM gridhive.sa"
+      assert(vim.deep_equal(words(completion.items(profile, { partial_schema_line }, 1, #partial_schema_line)), {
+        "gridhive.sales.",
+      }))
+
+      local schema_line = "SELECT * FROM gridhive.sales."
+      assert(vim.deep_equal(words(completion.items(profile, { schema_line }, 1, #schema_line)), {
+        "gridhive.sales.orders",
+      }))
+
+      local derived_schema_line = "SELECT * FROM iceberg."
+      assert(vim.deep_equal(words(completion.items(profile, { derived_schema_line }, 1, #derived_schema_line)), {
+        "iceberg.cleanroom.",
+      }))
+    end)
+  end,
+
+  ["Trino completion falls back to the profile's default catalog and schema"] = function()
+    local profile = {
+      name = "completion-trino-fallback",
+      kind = "trino",
+      options = { catalog = "gridhive", schema = "public" },
+    }
+    with_acquisition(profile, {}, function(done)
+      cache.load_tables(profile, {}, done)
+    end, function()
+      local from_line = "SELECT * FROM "
+      assert(vim.deep_equal(words(completion.items(profile, { from_line }, 1, #from_line)), { "gridhive." }))
+
+      local catalog_line = "SELECT * FROM gridhive."
+      assert(vim.deep_equal(words(completion.items(profile, { catalog_line }, 1, #catalog_line)), {
+        "gridhive.public.",
+      }))
+
+      local unknown_line = "SELECT * FROM iceberg."
+      assert(vim.deep_equal(words(completion.items(profile, { unknown_line }, 1, #unknown_line)), {}))
     end)
   end,
 

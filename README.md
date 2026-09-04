@@ -356,6 +356,7 @@ Orbit's schema-aware completion (tables, views, columns, table aliases) is provi
 Once wired up, suggestions appear automatically as you type, no manual trigger needed. Completion is clause-aware: it parses the statement around your cursor (not just the current line) with a small dependency-free SQL tokenizer, so suggestions depend on where you are:
 
 - Tables and views after any `FROM`-family clause (`FROM`, `JOIN`, `UPDATE`, `INTO`), and after `schema.`/`catalog.schema.` qualifiers on connectors that support them (PostgreSQL, Trino).
+- Trino catalogs configured as top-level `schema_patterns` keys are offered alongside direct relation suggestions. Selecting a catalog and schema completes progressively (`catalog.` → `catalog.schema.` → `catalog.schema.table`); without `schema_patterns`, only the profile's default `catalog` is offered.
 - Columns in the `SELECT` list, `WHERE`, `ON`, `GROUP BY`, `ORDER BY`, `INSERT INTO t (...)`, and `UPDATE t SET ...`.
 - Table aliases: `SELECT u.| FROM users u` resolves `u` to `users`'s columns, including old-style comma joins (`FROM a, b`). With more than one table in scope, unqualified columns are offered from every table, each annotated with its source alias.
 - The alias/table scope is limited to the statement your cursor is in; other statements in the same buffer (separated by `;`) never leak into it. CTEs and derived tables (`FROM (SELECT ...) sub`) are recognized so they don't break parsing, but don't offer column completion.

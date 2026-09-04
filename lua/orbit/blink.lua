@@ -36,6 +36,7 @@ local KIND_TO_LSP = {
 	Table = 7,
 	View = 7,
 	Column = 5,
+	Catalog = 9,
 	Schema = 9,
 	Alias = 6,
 }
@@ -154,8 +155,10 @@ function source:get_completions(ctx, callback)
 	local items = completion.items(profile, lines, row, col)
 
 	-- Translate Orbit's generic completion item shape (`word`, `kind`,
-	-- `menu`) into the field names blink.cmp expects (`label`, `insertText`,
-	-- `detail`). `kind_name`/`kind_icon` are blink.cmp's own per-item
+	-- `menu`) into the field names blink.cmp expects. An explicit text edit is
+	-- required because Blink only recommends inferred insertText ranges for
+	-- exclusively alphanumeric text; SQL qualifiers contain dots and quotes.
+	-- `kind_name`/`kind_icon` are blink.cmp's own per-item
 	-- override fields (see blink.cmp/lua/blink/cmp/completion/windows/render/context.lua),
 	-- used here to get correct highlighting despite `kind` needing to be
 	-- blink's numeric CompletionItemKind rather than Orbit's descriptive
@@ -164,7 +167,13 @@ function source:get_completions(ctx, callback)
 	for _, entry in ipairs(items) do
 		table.insert(blink_items, {
 			label = entry.word,
-			insertText = entry.word,
+			textEdit = {
+				newText = entry.word,
+				range = {
+					start = { line = entry.replace_start_row - 1, character = entry.replace_start_col },
+					["end"] = { line = row - 1, character = col },
+				},
+			},
 			kind = KIND_TO_LSP[entry.kind],
 			kind_name = entry.kind,
 			kind_icon = DATABASE_ICON,

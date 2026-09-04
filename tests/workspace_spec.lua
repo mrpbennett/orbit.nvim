@@ -65,7 +65,7 @@ return {
     local state = workspace.open({ profile_path = path, workspace_result_ratio = 0.30, workspace_sidebar_width = 32 })
 
     vim.api.nvim_set_current_win(state.sidebar_window)
-    vim.api.nvim_win_set_cursor(state.sidebar_window, { 6, 0 })
+    vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "profile-binding")), 0 })
     vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<CR>", true, false, true), "mx", false)
 
     assert(vim.b[vim.api.nvim_win_get_buf(state.query_window)].orbit_profile == "profile-binding")
@@ -89,12 +89,12 @@ return {
     local ok, err = xpcall(function()
       state = workspace.open({ profile_path = path, workspace_result_ratio = 0.30, workspace_sidebar_width = 32 })
       vim.api.nvim_set_current_win(state.sidebar_window)
-      vim.api.nvim_win_set_cursor(state.sidebar_window, { 6, 0 })
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "selected-then-expanded")), 0 })
       vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<CR>", true, false, true), "mx", false)
       vim.api.nvim_feedkeys("l", "mx", false)
 
       assert(vim.wait(100, function()
-        return (vim.api.nvim_buf_get_lines(state.sidebar, 6, 7, false)[1] or ""):match("main")
+        return line_number(state.sidebar, "main") ~= nil
       end))
     end, debug.traceback)
     if state and vim.api.nvim_tabpage_is_valid(state.tabpage) then
@@ -121,7 +121,7 @@ return {
     local state
     local getmousepos = vim.fn.getmousepos
     vim.fn.getmousepos = function()
-      return { winid = state and state.sidebar_window or 0, line = 6 }
+      return { winid = state and state.sidebar_window or 0, line = state and line_number(state.sidebar, "double-click") or 0 }
     end
 
     local ok, err = xpcall(function()
@@ -131,7 +131,7 @@ return {
 
     assert(vim.b[vim.api.nvim_win_get_buf(state.query_window)].orbit_profile == "double-click")
       assert(vim.wait(100, function()
-        return (vim.api.nvim_buf_get_lines(state.sidebar, 6, 7, false)[1] or ""):match("main")
+        return line_number(state.sidebar, "main") ~= nil
       end))
     end, debug.traceback)
     vim.fn.getmousepos = getmousepos
@@ -175,7 +175,7 @@ return {
     local ok, err = xpcall(function()
       state = workspace.open({ profile_path = path })
       vim.api.nvim_set_current_win(state.sidebar_window)
-      mouse_line = 6
+      mouse_line = assert(line_number(state.sidebar, "double-click-tree"))
       vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<2-LeftMouse>", true, false, true), "mx", false)
       assert(vim.wait(100, function()
         return line_number(state.sidebar, "main") ~= nil
@@ -221,8 +221,9 @@ return {
     local ok, err = xpcall(function()
       local state = workspace.open({ profile_path = path, workspace_result_ratio = 0.30, workspace_sidebar_width = 32 })
       vim.api.nvim_set_current_win(state.sidebar_window)
-      vim.api.nvim_win_set_cursor(state.sidebar_window, { 6, 0 })
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "tree-structure")), 0 })
       vim.api.nvim_feedkeys("l", "mx", false)
+      assert(vim.api.nvim_buf_get_lines(state.sidebar, 3, 4, false)[1] == "* tree-structure")
       assert(vim.wait(100, function()
         return line_number(state.sidebar, "main") ~= nil
       end))
@@ -258,7 +259,7 @@ return {
     local ok, err = xpcall(function()
       state = workspace.open({ profile_path = path })
       vim.api.nvim_set_current_win(state.sidebar_window)
-      vim.api.nvim_win_set_cursor(state.sidebar_window, { 6, 0 })
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "metadata-tree")), 0 })
       vim.api.nvim_feedkeys("l", "mx", false)
       vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "main")), 0 })
       vim.api.nvim_feedkeys("l", "mx", false)
@@ -304,6 +305,55 @@ return {
     vim.api.nvim_set_current_tabpage(original)
   end,
 
+  ["workspace spaces its header and titles the selected profile"] = function()
+    local original = vim.api.nvim_get_current_tabpage()
+    local path = vim.fn.tempname()
+    assert(profiles.write(path, {
+      version = 1,
+      profiles = { { name = "local", kind = "sqlite", options = { path = "/tmp/orbit-test.db" } } },
+    }))
+    local state = workspace.open({ profile_path = path })
+
+    local lines = vim.api.nvim_buf_get_lines(state.sidebar, 0, 7, false)
+    assert(vim.deep_equal(lines, {
+      "press ? to toggle help",
+      "",
+      "Filter: ",
+      "* Orbit Workspace",
+      "",
+      "Profiles:",
+      "  > @ local (sqlite)",
+    }), vim.inspect(lines))
+
+    vim.api.nvim_set_current_win(state.sidebar_window)
+    vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "local")), 0 })
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<CR>", true, false, true), "mx", false)
+
+    assert(vim.api.nvim_buf_get_lines(state.sidebar, 3, 4, false)[1] == "* local")
+    workspace.close()
+    vim.api.nvim_set_current_tabpage(original)
+  end,
+
+  ["workspace restores its title when the selected profile is removed"] = function()
+    local original = vim.api.nvim_get_current_tabpage()
+    local path = vim.fn.tempname()
+    assert(profiles.write(path, {
+      version = 1,
+      profiles = { { name = "temporary", kind = "sqlite", options = { path = "/tmp/orbit-test.db" } } },
+    }))
+    local state = workspace.open({ profile_path = path })
+    vim.api.nvim_set_current_win(state.sidebar_window)
+    vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "temporary")), 0 })
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<CR>", true, false, true), "mx", false)
+    assert(profiles.write(path, { version = 1, profiles = {} }))
+
+    vim.api.nvim_feedkeys("r", "mx", false)
+
+    assert(vim.api.nvim_buf_get_lines(state.sidebar, 3, 4, false)[1] == "* Orbit Workspace")
+    workspace.close()
+    vim.api.nvim_set_current_tabpage(original)
+  end,
+
   ["workspace filter preserves the first typed character"] = function()
     local original = vim.api.nvim_get_current_tabpage()
     local state = workspace.open({ profile_path = vim.fn.tempname() })
@@ -312,7 +362,7 @@ return {
     vim.api.nvim_feedkeys("gridh", "xt", false)
     vim.wait(20)
 
-    local line = vim.api.nvim_buf_get_lines(state.sidebar, 1, 2, false)[1]
+    local line = vim.api.nvim_buf_get_lines(state.sidebar, 2, 3, false)[1]
     assert(line == "Filter: gridh", vim.inspect(line))
     workspace.close()
     vim.api.nvim_set_current_tabpage(original)
@@ -413,7 +463,7 @@ return {
     local ok, err = xpcall(function()
       state = workspace.open({ profile_path = path, result_limit = 25 })
       vim.api.nvim_set_current_win(state.sidebar_window)
-      vim.api.nvim_win_set_cursor(state.sidebar_window, { 6, 0 })
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "collapse-tree")), 0 })
       vim.api.nvim_feedkeys("l", "mx", false)
       assert(vim.wait(100, function()
         return state.schema_profile == "collapse-tree"
@@ -467,7 +517,7 @@ return {
     local ok, err = xpcall(function()
       state = workspace.open({ profile_path = path, result_limit = 25 })
       vim.api.nvim_set_current_win(state.sidebar_window)
-      vim.api.nvim_win_set_cursor(state.sidebar_window, { 6, 0 })
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "table-actions")), 0 })
       vim.api.nvim_feedkeys("l", "mx", false)
       assert(vim.wait(100, function()
         return line_number(state.sidebar, "main") ~= nil
@@ -550,7 +600,7 @@ return {
     local ok, err = xpcall(function()
       state = workspace.open({ profile_path = path, result_limit = 25 })
       vim.api.nvim_set_current_win(state.sidebar_window)
-      vim.api.nvim_win_set_cursor(state.sidebar_window, { 6, 0 })
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "action-tabpage")), 0 })
       vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<CR>", true, false, true), "mx", false)
       vim.api.nvim_feedkeys("l", "mx", false)
       assert(vim.wait(100, function()
@@ -715,7 +765,7 @@ return {
     local ok, err = xpcall(function()
       state = workspace.open({ profile_path = path, result_limit = 25 })
       vim.api.nvim_set_current_win(state.sidebar_window)
-      vim.api.nvim_win_set_cursor(state.sidebar_window, { 6, 0 })
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "discard-action")), 0 })
       vim.api.nvim_feedkeys("l", "mx", false)
       assert(vim.wait(100, function()
         return line_number(state.sidebar, "main") ~= nil

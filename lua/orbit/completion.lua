@@ -6,7 +6,7 @@
 -- (fetched from orbit.schema_cache, which caches table/column metadata
 -- pulled through a database connector — see orbit.adapters). Given those
 -- two things, it produces a flat list of completion candidates: table
--- names, column names, schema names, and alias names.
+-- names, column names, completion namespaces, and alias names.
 --
 -- High-level flow (see M.items, the main entry point):
 --   1. Tokenize the buffer's SQL (orbit.sql.tokenizer.tokenize).
@@ -22,9 +22,10 @@
 --
 -- What it returns / how it plugs into a completion engine:
 --   - M.items(profile, lines, row, col) returns a plain list of candidate
---     tables, shaped like { abbr, kind, menu, word } (see the `item` helper
---     below), already narrowed to whatever partial word is typed before the
---     cursor. This shape is intentionally generic/engine-agnostic.
+--     tables, shaped like { kind, menu, word, replace_start_row,
+--     replace_start_col } (see the `item` helper below), already narrowed to
+--     whatever partial word is typed before the cursor. This shape is
+--     intentionally generic/engine-agnostic.
 --   - orbit.blink.lua wraps M.items (and M._profile_for_buffer) to adapt
 --     these candidates to the blink.cmp completion-engine plugin's own item
 --     shape ({ label, insertText, kind, detail }). See lua/orbit/blink.lua
@@ -44,7 +45,7 @@ local M = {}
 -- Params:
 --   word   - the actual text to insert if this candidate is chosen.
 --   kind   - a short human-readable category shown in the completion menu,
---            e.g. "Table", "View", "Column", "Schema", "Alias".
+--            e.g. "Table", "View", "Column", "Catalog", "Schema", "Alias".
 --   detail - extra context shown alongside the candidate (e.g. the
 --            profile/connection name, or a column's data type).
 -- Returns Orbit's generic candidate shape, translated by orbit.blink.lua
@@ -93,12 +94,11 @@ local function ci_equals(a, b)
 	return a:lower() == b:lower()
 end
 
--- Table/view/schema completion for a `FROM`-family position. `raw_prefix` is
+-- Table/view/namespace completion for a `FROM`-family position. `raw_prefix` is
 -- the literal qualifier text the user typed (used to build the connector's
--- dialect-correct completion word); filtering against `qualifier_segments`
--- always uses each row's own unqualified (empty-prefix) canonical form, so
--- the depth/membership check stays generic instead of assuming a fixed
--- number of dialect-specific segments.
+-- dialect-correct completion word). Connectors may expose progressive
+-- namespaces and a complete metadata path for explicit qualification;
+-- otherwise filtering uses the connector's ordinary completion word.
 --
 -- Params:
 --   profile             - the connection profile (has .name, .options, etc;
@@ -128,17 +128,34 @@ end
 --                          table itself (e.g. typing `FROM grid` should only
 --                          match rows whose next segment starts with
 --                          "grid", whether that's a schema or a table).
--- Returns a sorted list of "Table"/"View" candidates (and, when
--- ambiguous, "Schema" candidates — see below), one per matching row in the
--- schema cache.
+-- Returns a sorted list of matching namespace and relation candidates.
 local function table_items(profile, connector, qualifier_segments, raw_prefix, partial)
 	local items = {}
 	local next_segments = {}
-	for _, row in ipairs(cache.tables(profile)) do
+	local rows = cache.tables(profile)
+	local namespaces, namespace_only
+	if connector.completion_namespaces then
+		namespaces, namespace_only = connector.completion_namespaces(profile.options, rows, qualifier_segments)
+		for _, namespace in ipairs(namespaces or {}) do
+			if partial_matches(namespace.name, partial) then
+				table.insert(items, item(raw_prefix .. namespace.name .. ".", namespace.kind, profile.name))
+			end
+		end
+		if namespace_only then
+			return sorted(items)
+		end
+	end
+
+	for _, row in ipairs(rows) do
 		-- Ask the connector for this row's fully-qualified name with an
 		-- empty prefix, then split it into segments, to get a normalized,
 		-- dialect-independent form to compare against what was typed.
-		local canonical = tokenizer.split_qualified(assert(connector.completion_word(profile.options, row, "")))
+		local canonical
+		if namespaces ~= nil and connector.completion_path then
+			canonical = connector.completion_path(profile.options, row)
+		else
+			canonical = tokenizer.split_qualified(assert(connector.completion_word(profile.options, row, "")))
+		end
 		-- The row is a candidate only if every already-typed qualifier
 		-- segment matches the row's own name at that position, e.g. typing
 		-- `myschema.` should only match rows whose schema is "myschema".
@@ -160,7 +177,7 @@ local function table_items(profile, connector, qualifier_segments, raw_prefix, p
 			-- was typed (e.g. user typed nothing, row is
 			-- catalog.schema.table), remember that next segment as a
 			-- candidate "schema name" suggestion too.
-			if #canonical > #qualifier_segments + 1 then
+			if namespaces == nil and #canonical > #qualifier_segments + 1 then
 				next_segments[canonical[#qualifier_segments + 1]] = true
 			end
 		end
@@ -380,11 +397,18 @@ function M.items(profile, lines, row, col)
 	local analysis = scope.analyze(statement_tokens, cursor_index, touching)
 	local qualifier = analysis.qualifier
 	local partial = qualifier.partial
+	local function with_replacement(items)
+		for _, entry in ipairs(items) do
+			entry.replace_start_row = qualifier.start_row or row
+			entry.replace_start_col = qualifier.start_col or col
+		end
+		return items
+	end
 
 	if analysis.clause == "from_family" then
-		-- Right after FROM/JOIN/INTO/UPDATE: suggest tables/views (and
-		-- schema names when a qualifier is ambiguous).
-		return table_items(profile, connector, qualifier.segments, qualifier.raw, partial)
+		-- Right after FROM/JOIN/INTO/UPDATE: suggest tables/views and any
+		-- progressive namespaces exposed by the connector.
+		return with_replacement(table_items(profile, connector, qualifier.segments, qualifier.raw, partial))
 	elseif
 		analysis.clause == "select_list"
 		or analysis.clause == "where"
@@ -398,14 +422,16 @@ function M.items(profile, lines, row, col)
 		-- otherwise offer columns from every table in scope plus the
 		-- aliases themselves.
 		if #qualifier.segments > 0 then
-			return qualified_column_items(profile, analysis.alias_scope, qualifier.segments, qualifier.raw, partial)
+			return with_replacement(
+				qualified_column_items(profile, analysis.alias_scope, qualifier.segments, qualifier.raw, partial)
+			)
 		end
-		return unqualified_column_items(profile, analysis.alias_scope, partial)
+		return with_replacement(unqualified_column_items(profile, analysis.alias_scope, partial))
 	elseif analysis.clause == "insert_columns" or analysis.clause == "update_set" then
 		-- Both of these clauses can only ever target one table, so use the
 		-- simpler single-table column lookup instead of scanning all
 		-- aliases in scope.
-		return single_target_column_items(profile, analysis.alias_scope, partial)
+		return with_replacement(single_target_column_items(profile, analysis.alias_scope, partial))
 	end
 	-- Cursor is somewhere this module doesn't have a specific completion
 	-- strategy for (e.g. clause "unknown", or mid-keyword) — offer nothing

@@ -1,5 +1,19 @@
 # Orbit.nvim v0.1 Plan
 
+## PostgreSQL Completion Edit Plan
+
+- [x] Add a Blink-level regression proving a PostgreSQL completion replaces the typed qualifier instead of appending quoted text to it.
+- [x] Carry the exact SQL completion replacement span from scope analysis through completion items.
+- [x] Emit Blink `textEdit` items for exact replacement while preserving labels, kinds, and existing Trino completion behavior.
+- [x] Run focused and complete tests, validate whitespace, and record the root cause and verification.
+
+### Review
+
+- Root cause: Orbit supplied quoted, dotted PostgreSQL names through Blink's inferred `insertText` path, which Blink documents for exclusively alphanumeric text; its guessed replacement range malformed the completion preview around a typed schema qualifier.
+- Scope analysis now carries the exact qualifier start position, and Blink receives an explicit `textEdit` replacing the typed target with the connector's canonical completion word.
+- Regression coverage verifies both `public` and `public.` become `"public"."orders"`; existing connector completion tests preserve Trino, SQLite, and Vertica behavior.
+- Verification: `nvim --headless -u NONE -l tests/run.lua` and `git diff --check` passed. `stylua` is not installed in this environment. Independent review found no actionable issues.
+
 ## Trino Schema Allowlist Plan
 
 - [x] Confirm whether a Trino profile's schema allowlist may include catalogs other than `options.catalog`.
@@ -752,3 +766,42 @@ Plan: `~/.claude/plans/sprightly-seeking-blanket.md`. Replaces the two single-li
 - A real bug was caught by the test suite, not by inspection: `object_name`'s `ipairs({row.catalog, row.schema, row.name})` silently stopped at the leading `nil` when catalog/schema were absent, so every alias-qualified/unqualified column lookup returned zero columns until it was rewritten as three individual field checks.
 - CONTEXT.md was corrected (PostgreSQL is a supported backend, not just Trino/SQLite) and gained **Table alias** and **Derived table** glossary entries; ADR `docs/adr/0002-hand-rolled-sql-tokenizer-for-completion.md` records the tokenizer-vs-regex decision.
 - Verification: `nvim --headless -u NONE -l tests/run.lua` (111 tests, all passing) and `git diff --check` passed. `stylua` is not installed in this environment.
+
+## Trino Catalog Autocomplete
+
+- [x] Separate Trino's full catalog/schema/table completion path from its shortened unqualified insertion text.
+- [x] Offer configured catalogs and progressively complete catalog, schema, then table/view segments.
+- [x] Preserve direct relation suggestions and autocomplete behavior for non-Trino connectors.
+- [x] Add focused catalog-qualified, configured-empty-namespace, fallback, and regression coverage.
+- [x] Run the complete headless test suite, available formatter, and whitespace validation.
+
+### Settled Design
+
+- At a `FROM`-family position, existing relation suggestions remain available alongside Trino catalogs.
+- With `schema_patterns`, only its top-level keys are catalog suggestions; without it, only `options.catalog` is suggested.
+- Completion traverses one namespace at a time: catalog, schema, then table/view. Catalog and schema selections include the trailing dot needed to continue traversal.
+- Exact configured schemas remain suggestible without cached relations. Empty or wildcard schema lists derive concrete schema names from cached metadata.
+- Explicit qualification and relation insertion are separate concerns, so explicitly typing the default catalog works without changing shortened unqualified relation suggestions.
+- PostgreSQL, SQLite, and Vertica behavior remains unchanged.
+
+### Review
+
+- [x] Record implementation outcomes and verification.
+
+- Trino's connector now exposes configured completion namespaces and a full metadata path independently of its shortened direct relation insertion text.
+- Catalog and schema candidates include trailing dots, exact configured schemas work without relation rows, and empty or wildcard schema lists use concrete cached schema names.
+- Legacy default-schema completion remains available when the first qualifier is not a configured catalog; other connectors retain their existing completion path.
+- The completion glossary and README describe progressive namespace traversal.
+- Verification: `nvim --headless -u NONE -l tests/run.lua` and `git diff --check` passed. `stylua` is not installed in this environment.
+
+## Workspace Header Spacing And Identity
+
+- [x] Add regression coverage for the agreed header spacing, selected-profile title, and filter editing.
+- [x] Render the selected profile in the Workspace title and preserve the agreed selection lifecycle.
+- [x] Run focused and complete tests, whitespace validation, and independent review.
+
+### Review
+
+- The header now separates help from Filter and content while preserving the existing Filter highlight and editable-filter behavior.
+- The title shows the selected profile after binding, schema expansion, refresh, or double-click, and falls back to Orbit Workspace when that profile is removed.
+- Verification: `nvim --headless -u NONE -l tests/run.lua` and `git diff --check` passed. Independent spec review found no mismatches. `stylua` is not installed.

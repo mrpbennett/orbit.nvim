@@ -85,6 +85,9 @@ return {
 		assert(vim.deep_equal(analysis.qualifier.segments, { "Sales" }))
 		assert(analysis.qualifier.raw == '"Sales".')
 		assert(analysis.qualifier.partial == "")
+		assert(analysis.qualifier.typed == '"Sales".')
+		assert(analysis.qualifier.start_row == 1)
+		assert(analysis.qualifier.start_col == #"SELECT ")
 	end,
 
 	["a multi-line statement resolves aliases across lines"] = function()

@@ -203,6 +203,83 @@ function M.completion_word(options, row, prefix)
   return table.concat(parts, ".")
 end
 
+-- Returns the complete metadata identity used when matching an explicitly
+-- typed qualifier. Unlike completion_word, this never shortens the default
+-- catalog, because `default_catalog.schema.` is still a valid prefix.
+function M.completion_path(options, row)
+  local parts = {}
+  local catalog = row.catalog or options.catalog
+  local schema = row.schema or options.schema
+  if catalog and catalog ~= "" then
+    table.insert(parts, catalog)
+  end
+  if schema and schema ~= "" then
+    table.insert(parts, schema)
+  end
+  table.insert(parts, row.name)
+  return parts
+end
+
+-- Returns the next configured Trino namespace level. The boolean marks a
+-- namespace-only level, where relations should wait until catalog and schema
+-- have both been selected.
+function M.completion_namespaces(options, rows, qualifier_segments)
+  local catalogs = {}
+  if options.schema_patterns then
+    for catalog in pairs(options.schema_patterns) do
+      table.insert(catalogs, catalog)
+    end
+  elseif options.catalog and options.catalog ~= "" then
+    table.insert(catalogs, options.catalog)
+  end
+
+  if #qualifier_segments == 0 then
+    local result = {}
+    for _, catalog in ipairs(catalogs) do
+      table.insert(result, { name = catalog, kind = "Catalog" })
+    end
+    return result, false
+  end
+  local requested = qualifier_segments[1]
+  local catalog
+  for _, candidate in ipairs(catalogs) do
+    if candidate:lower() == requested:lower() then
+      catalog = candidate
+      break
+    end
+  end
+  if not catalog then
+    return nil, false
+  end
+  if #qualifier_segments > 1 then
+    return {}, false
+  end
+
+  local schemas = {}
+  local configured = options.schema_patterns and options.schema_patterns[catalog]
+  if configured then
+    for _, pattern in ipairs(configured) do
+      if not pattern:find("[%*%?]") then
+        schemas[pattern] = true
+      end
+    end
+  elseif not options.schema_patterns and options.schema and options.schema ~= "" then
+    schemas[options.schema] = true
+  end
+  for _, row in ipairs(rows) do
+    local row_catalog = row.catalog or options.catalog
+    if row.schema and row.schema ~= "" and row_catalog and row_catalog:lower() == catalog:lower() then
+      schemas[row.schema] = true
+    end
+  end
+
+  local result = {}
+  for schema in pairs(schemas) do
+    table.insert(result, { name = schema, kind = "Schema" })
+  end
+  return result, true
+end
+
 -- Builds the SQL statement used to discover schema metadata for the sidebar
 -- and completion engine. `node` describes what is being asked for:
 --   { type = "tables" }                                     - list all tables/views

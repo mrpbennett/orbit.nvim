@@ -33,6 +33,9 @@ _Avoid_: table name, object path
 **Completion qualifier**:
 The identifier prefix before a completion target, resolved by the connection profile's connector. PostgreSQL accepts either its canonical quoted schema prefix or its ordinary unquoted schema prefix.
 
+**Completion namespace**:
+A catalog or schema offered as an intermediate completion target before a table or view. Selecting one continues completion at the next namespace level.
+
 **Result grid**:
 A configurable formatted window, shown at the bottom by default, that displays the rows and column headers produced by an executed statement.
 _Avoid_: result buffer, table window
@@ -52,6 +55,10 @@ _Avoid_: target (bare)
 **Active profile**:
 The default connection profile used only when a query buffer has not selected its own profile.
 _Avoid_: active database, current connection
+
+**Selected profile**:
+The connection profile currently chosen in the schema browser, independently of the profile associated with any query buffer.
+_Avoid_: selected connection, current connection
 
 **Query buffer**:
 A Neovim buffer containing statements and optionally associated with a specific connection profile.

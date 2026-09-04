@@ -272,9 +272,15 @@ end
 --              or `"My Alias".`), for passing through unchanged to a
 --              connector's completion_word function, which needs
 --              the dialect's real quoting rather than a normalized form.
+--   typed    - the complete literal completion target, including `raw` and
+--              the still-partial final token. Used to replace that exact
+--              text when a completion is accepted.
+--   start_row/start_col - buffer position where `typed` begins, or nil when
+--              there is no text to replace.
 local function extract_qualifier(tokens, cursor_index, touching)
 	local idx = cursor_index
-	local partial = ""
+	local partial, partial_raw = "", ""
+	local start_token
 
 	-- If the cursor is glued to the last token and that token is an
 	-- identifier, it's an in-progress word (the "na" in "u.na|"), not a
@@ -282,6 +288,8 @@ local function extract_qualifier(tokens, cursor_index, touching)
 	-- token before looking for dotted segments.
 	if touching and is_ident(tokens[idx]) then
 		partial = word(tokens[idx])
+		partial_raw = tokens[idx].text
+		start_token = tokens[idx]
 		idx = idx - 1
 	end
 
@@ -293,6 +301,7 @@ local function extract_qualifier(tokens, cursor_index, touching)
 	while tokens[idx] and tokens[idx].type == "punct" and tokens[idx].text == "." and is_ident(tokens[idx - 1]) do
 		table.insert(segments, 1, word(tokens[idx - 1]))
 		table.insert(raw_segments, 1, tokens[idx - 1].text)
+		start_token = tokens[idx - 1]
 		idx = idx - 2
 	end
 
@@ -303,7 +312,14 @@ local function extract_qualifier(tokens, cursor_index, touching)
 		raw = raw .. "."
 	end
 
-	return { segments = segments, partial = partial, raw = raw }
+	return {
+		segments = segments,
+		partial = partial,
+		raw = raw,
+		typed = raw .. partial_raw,
+		start_row = start_token and start_token.row or nil,
+		start_col = start_token and start_token.start_col or nil,
+	}
 end
 
 -- Walks backward from `from_index` to find the "(" that directly encloses
