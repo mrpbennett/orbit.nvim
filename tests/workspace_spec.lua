@@ -223,7 +223,7 @@ return {
       vim.api.nvim_set_current_win(state.sidebar_window)
       vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "tree-structure")), 0 })
       vim.api.nvim_feedkeys("l", "mx", false)
-      assert(vim.api.nvim_buf_get_lines(state.sidebar, 3, 4, false)[1] == "* tree-structure")
+		assert(vim.api.nvim_buf_get_lines(state.sidebar, 3, 4, false)[1] == "@ tree-structure")
       assert(vim.wait(100, function()
         return line_number(state.sidebar, "main") ~= nil
       end))
@@ -329,7 +329,7 @@ return {
     vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "local")), 0 })
     vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<CR>", true, false, true), "mx", false)
 
-    assert(vim.api.nvim_buf_get_lines(state.sidebar, 3, 4, false)[1] == "* local")
+		assert(vim.api.nvim_buf_get_lines(state.sidebar, 3, 4, false)[1] == "@ local")
     workspace.close()
     vim.api.nvim_set_current_tabpage(original)
   end,

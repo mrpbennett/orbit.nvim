@@ -1,59 +1,61 @@
--- orbit/workspace.lua
---
--- This module owns the "workspace" experience of Orbit: a dedicated Neovim
--- tabpage that pairs a sidebar tree (this file's UI) with a query-editing
--- split and a results split. Think of it as the glue layer that sits on
--- top of the lower-level pieces:
---   * orbit.profiles     -- loads/validates connection profiles from disk
---   * orbit.adapters     -- gives you a "connector" for a profile's database
---     kind (postgres/sqlite/trino/...), used to run schema-object actions
---   * orbit.schema_tree   -- pure data/rendering helpers for the "Profiles"
---     part of the tree (schemas -> tables/views -> columns/keys/indexes);
---     this module renders that tree but does not know how it is structured
---   * orbit.schema_cache  -- caches schema/metadata lookups so re-expanding
---     a node doesn't always re-hit the database
---   * orbit.runner        -- executes SQL and returns rows
---   * orbit.results       -- opens/manages the results grid split
---   * orbit.feedback      -- shows "loading..."/"done" style status messages
---
--- Responsibilities of THIS file specifically:
---   1. Window/buffer management: creating the workspace tabpage, the
---      sidebar buffer/window, and the query buffer/window; reopening an
---      existing workspace instead of creating duplicates.
---   2. Tree rendering: turning plugin state (which profiles exist, which
---      profile's schema is expanded, which saved-query directories are
---      expanded, the current filter text, etc.) into plain text lines
---      drawn into the sidebar buffer, plus highlight groups and a mapping
---      from buffer line number -> the "node" (profile/table/query/etc.)
---      that line represents.
---   3. Expand/collapse state and navigation: keeping track of which nodes
---      are open, and letting the cursor position in the sidebar resolve
---      back to a node via that line-number map.
---   4. Keymaps/actions bound to the sidebar buffer: opening queries,
---      binding a profile to a query buffer, running schema-object actions
---      (sample data, table actions), copying qualified object names,
---      previewing/opening saved .sql files, filtering the tree, and
---      showing a help popup.
---   5. Wiring results back to the right query split, and tracking a
---      generation counter so that async schema/metadata loads started by
---      a since-replaced request don't clobber newer state.
---
--- State shape: each open workspace tabpage gets one "state" table (see
--- M.open below for every field) stored in the module-local `workspaces`
--- table, keyed by tabpage handle. Nearly every local function in this file
--- takes that `state` table as its first argument and mutates it directly;
--- there is no other persistence layer.
---
--- What this module exports (see the `M.*` functions near the bottom):
---   M.open(config)                        -- open/reveal the workspace tab
---   M.open_results(rows, options)         -- open a results split for the
---                                             workspace's query window
---   M.close(tabpage)                      -- close a workspace tab
---   M.is_workspace(tabpage)               -- true if a tab is an Orbit workspace
---   M.focus_filter()                      -- jump cursor into the filter input
---   M.select_profile(config, buffer, on_select) -- open the workspace and
---                                             let the user pick a profile to
---                                             bind to `buffer` via <CR>
+--[[
+  orbit/workspace.lua
+
+  This module owns the "workspace" experience of Orbit: a dedicated Neovim
+  tabpage that pairs a sidebar tree (this file's UI) with a query-editing
+  split and a results split. Think of it as the glue layer that sits on
+  top of the lower-level pieces:
+    * orbit.profiles     -- loads/validates connection profiles from disk
+    * orbit.adapters     -- gives you a "connector" for a profile's database
+      kind (postgres/sqlite/trino/...), used to run schema-object actions
+    * orbit.schema_tree   -- pure data/rendering helpers for the "Profiles"
+      part of the tree (schemas -> tables/views -> columns/keys/indexes);
+      this module renders that tree but does not know how it is structured
+    * orbit.schema_cache  -- caches schema/metadata lookups so re-expanding
+      a node doesn't always re-hit the database
+    * orbit.runner        -- executes SQL and returns rows
+    * orbit.results       -- opens/manages the results grid split
+    * orbit.feedback      -- shows "loading..."/"done" style status messages
+
+  Responsibilities of THIS file specifically:
+    1. Window/buffer management: creating the workspace tabpage, the
+      sidebar buffer/window, and the query buffer/window; reopening an
+      existing workspace instead of creating duplicates.
+    2. Tree rendering: turning plugin state (which profiles exist, which
+      profile's schema is expanded, which saved-query directories are
+      expanded, the current filter text, etc.) into plain text lines
+      drawn into the sidebar buffer, plus highlight groups and a mapping
+      from buffer line number -> the "node" (profile/table/query/etc.)
+      that line represents.
+    3. Expand/collapse state and navigation: keeping track of which nodes
+      are open, and letting the cursor position in the sidebar resolve
+      back to a node via that line-number map.
+    4. Keymaps/actions bound to the sidebar buffer: opening queries,
+      binding a profile to a query buffer, running schema-object actions
+      (sample data, table actions), copying qualified object names,
+      previewing/opening saved .sql files, filtering the tree, and
+      showing a help popup.
+    5. Wiring results back to the right query split, and tracking a
+      generation counter so that async schema/metadata loads started by
+      a since-replaced request don't clobber newer state.
+
+  State shape: each open workspace tabpage gets one "state" table (see
+  M.open below for every field) stored in the module-local `workspaces`
+  table, keyed by tabpage handle. Nearly every local function in this file
+  takes that `state` table as its first argument and mutates it directly;
+  there is no other persistence layer.
+
+  What this module exports (see the `M.*` functions near the bottom):
+    M.open(config)                        -- open/reveal the workspace tab
+    M.open_results(rows, options)         -- open a results split for the
+                                              workspace's query window
+    M.close(tabpage)                      -- close a workspace tab
+    M.is_workspace(tabpage)               -- true if a tab is an Orbit workspace
+    M.focus_filter()                      -- jump cursor into the filter input
+    M.select_profile(config, buffer, on_select) -- open the workspace and
+                                              let the user pick a profile to
+                                              bind to `buffer` via <CR>
+--]]
 local profiles = require("orbit.profiles")
 local schema_tree = require("orbit.schema_tree")
 local cache = require("orbit.schema_cache")
@@ -158,16 +160,13 @@ local function discover_saved_queries(directory, root_path)
 				local children = scan(entry_path)
 				-- Empty directories add no actionable node, while directories sort before SQL files.
 				if #children > 0 then
-					table.insert(
-						entries,
-						{
-							kind = "saved_directory",
-							name = name,
-							path = entry_path,
-							root_path = root_path,
-							children = children,
-						}
-					)
+					table.insert(entries, {
+						kind = "saved_directory",
+						name = name,
+						path = entry_path,
+						root_path = root_path,
+						children = children,
+					})
 				end
 			elseif kind == "file" and name:lower():sub(-4) == ".sql" then
 				table.insert(entries, { kind = "saved_query", name = name, path = entry_path })
@@ -252,11 +251,12 @@ local function render(state)
 	-- b's keys over a's, so user icons win.
 	local icons = vim.tbl_extend("force", fallback_icons, state.config.icons or {})
 	local title = state.selected and state.selected.name or "Orbit Workspace"
+	local title_icon = state.selected and icons.profile or icons.workspace
 	local lines = {
 		"press ? to toggle help",
 		"",
 		"Filter: " .. state.filter,
-		icons.workspace .. "connected to:" .. " " .. title,
+		title_icon .. " " .. title,
 		"",
 		"Profiles:",
 	}
