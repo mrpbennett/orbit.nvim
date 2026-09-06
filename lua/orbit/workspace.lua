@@ -408,7 +408,11 @@ local function ensure_query_window(state)
 	-- sidebar and isn't showing an Orbit results buffer, and adopt it.
 	for _, window in ipairs(vim.api.nvim_tabpage_list_wins(state.tabpage)) do
 		local buffer = vim.api.nvim_win_get_buf(window)
-		if window ~= state.sidebar_window and vim.bo[buffer].filetype ~= "orbit-results" then
+		if
+			window ~= state.sidebar_window
+			and vim.bo[buffer].filetype ~= "orbit-results"
+			and vim.bo[buffer].filetype ~= "orbit-structure"
+		then
 			state.query_window = window
 			return window
 		end

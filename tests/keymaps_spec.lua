@@ -14,7 +14,7 @@ return {
     assert(vim.fn.maparg("<leader>P", "n", false, true).rhs == "<Cmd>OrbitSelectProfile<CR>")
     assert(vim.fn.maparg("<leader>D", "n", false, true).rhs == "<Cmd>OrbitWorkspace<CR>")
 
-    orbit.setup({ keymaps = { execute = "<leader>x", workspace = false } })
+    orbit.setup({ keymaps = { execute = "<leader>x", structure = "<leader>s", workspace = false } })
 
     local custom_buffer = vim.api.nvim_create_buf(false, true)
     vim.api.nvim_set_current_buf(custom_buffer)
@@ -22,6 +22,7 @@ return {
 
     assert(vim.fn.maparg("<leader>x", "n", false, true).rhs == "<Cmd>OrbitExecute<CR>")
     assert(vim.fn.maparg("<leader>x", "x", false, true).rhs == ":<C-u>'<,'>OrbitExecute<CR>")
+    assert(vim.fn.maparg("<leader>s", "n", false, true).rhs == "<Cmd>OrbitStructure<CR>")
     assert(not vim.fn.maparg("<leader>D", "n", false, true).rhs)
 
     vim.api.nvim_set_current_buf(original)

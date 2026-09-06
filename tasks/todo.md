@@ -649,6 +649,19 @@ Files: `lua/orbit/adapters.lua` (148 lines, 13 functions).
 
 - Verification: `nvim --headless -u NONE -l tests/run.lua` and `git diff --check` passed.
 
+## BigQuery Connector Research
+
+- [x] Map BigQuery requirements onto Orbit's connector, runner, schema acquisition, completion, and result seams.
+- [x] Compare first-party `bq`, REST, and client-library transports using official Google Cloud sources.
+- [x] Define an MVP, follow-up scope, risks, tests, and live release gates in `docs/bigquery-connector-research.md`.
+
+### Review
+
+- Recommended a one-shot `bq query` connector, conditional on live JSON fidelity and paging tests before release.
+- Identified required core work beyond a connector file: remote result-limit context and GoogleSQL backtick tokenization/completion.
+- No live verification was possible because `bq` is not installed in this environment.
+- Documentation verification: `git diff --check` passed.
+
 ## Editable Result Grid Plan
 
 - [x] Add a database-agnostic editable-result model with ordered rows, row states, row selection, and local undo.
@@ -805,3 +818,80 @@ Plan: `~/.claude/plans/sprightly-seeking-blanket.md`. Replaces the two single-li
 - The header now separates help from Filter and content while preserving the existing Filter highlight and editable-filter behavior.
 - The title shows the selected profile after binding, schema expansion, refresh, or double-click, and falls back to Orbit Workspace when that profile is removed.
 - Verification: `nvim --headless -u NONE -l tests/run.lua` and `git diff --check` passed. Independent spec review found no mismatches. `stylua` is not installed.
+
+## Structure Panel
+
+- [x] Extend SQL tokenization for PostgreSQL dollar-quoted bodies and cover statement-separator edge cases.
+- [x] Add a pure statement outline model with source ranges, DDL/DML/SELECT/Other classification, normalized labels, grouping, and filtering.
+- [x] Add a reusable far-right Structure panel per tabpage with live query-buffer tracking, current-statement selection, navigation, filtering, and toggle/close behavior.
+- [x] Register `:OrbitStructure`, `structure_width`, and the disabled-by-default `keymaps.structure`; prevent Workspace query-window discovery from selecting the panel.
+- [x] Document commands, configuration, keybindings, and best-effort procedural SQL behavior.
+- [x] Run focused and complete tests, formatting when available, whitespace validation, and independent review.
+
+### Settled Design
+
+- `:OrbitStructure` toggles a focused far-right panel in normal tabs and the Workspace; one panel is reused per tabpage.
+- The panel follows the active query buffer, highlights its current statement, refreshes after edits, and remains open with `No query buffer` if its source disappears.
+- Fixed non-collapsible DDL, DML, SELECT, and Other groups omit empty sections and preserve source order within each group.
+- Statement labels omit comments, normalize whitespace, and truncate to the configured `structure_width` (default 40).
+- `<CR>` navigates without closing, `/` starts case-insensitive substring filtering, `q` closes, and `<Esc>` clears a filter before closing.
+- Parsing is dependency-free and best-effort. Unsupported procedural constructs are represented conservatively rather than emitting known-false navigation targets.
+- `keymaps.structure` is configurable and disabled by default.
+
+### Review
+
+- [x] Record implementation outcomes and verification.
+
+- Added a pure SQL outline model and a tab-local Structure panel that tracks edits from both user input and buffer API changes.
+- Statement extraction ignores comments and quoted semicolons, supports PostgreSQL dollar quotes, keeps recognized compound bodies coarse, and avoids crossing completed definitions into later statements.
+- `:OrbitStructure`, `structure_width`, and `keymaps.structure` are documented and integrated without changing the existing default mappings.
+- Verification: `nvim --headless -u NONE -l tests/run.lua` and `git diff --check` passed. Independent standards and specification reviews found no remaining actionable issues. `stylua` is not installed in this environment.
+
+## Hierarchical Structure Panel
+
+- [x] Replace flat grouped entries with source-order statement trees.
+- [x] Parse leading WITH clauses into CTE declaration nodes, CTE body query nodes, and an outer query node.
+- [x] Preserve stable node identity, live refresh, filtering, current-source selection, and exact navigation ranges.
+- [x] Add expandable rendering with `l` to expand/enter, `h` to collapse/return to parent, and ordinary `j`/`k` movement.
+- [x] Update Structure panel documentation and run complete verification and independent review.
+
+### Settled Design
+
+- Each top-level statement is a root node labeled with its normalized SQL preview and rendered in source order without category headings.
+- A statement beginning with WITH contains a WITH node. Each CTE is a child of WITH and owns one body-query child; the outer query is a sibling of WITH.
+- Parent nodes start collapsed. Expansion state uses stable source-based node IDs and survives live redraws when those IDs remain valid.
+- `l` expands the selected node or moves to its first child; `h` collapses it or moves to its parent. `j` and `k` retain normal line movement.
+- `<CR>` navigates to the selected element's first meaningful token. Filtering retains matching nodes and their ancestors.
+
+### Review
+
+- [x] Record implementation outcomes and verification.
+
+- The Structure panel now renders source-order statement trees with WITH, CTE declaration, CTE body-query, and outer-query nodes.
+- Tree state starts expanded, survives compatible live redraws, filters through matching ancestors, and uses `h`/`l` for parent/collapse and child/expand traversal while preserving normal `j`/`k` movement.
+- Nested nodes carry exact source ranges for current-cursor highlighting and `<CR>` navigation. Malformed CTE syntax falls back atomically to its statement root.
+- The UI and SQL model now document their state, range, filtering, parsing, and lifecycle invariants in the repository's established comment style.
+- Verification: `nvim --headless -u NONE -l tests/run.lua`, the focused malformed-CTE test, and `git diff --check` passed. Independent standards and specification reviews found no remaining behavioral issues. `stylua` is not installed in this environment.
+
+## Collapsed Structure And Set Branches
+
+- [x] Start every parent node collapsed when a Structure panel first opens.
+- [x] Split CTE bodies at top-level UNION, INTERSECT, and EXCEPT operators into sibling query nodes.
+- [x] Keep nested parenthesized SELECT clauses inside their owning query branch.
+- [x] Preserve exact source highlighting/navigation and collapse state across live refreshes.
+- [x] Update documentation and comments; run complete verification and independent review.
+
+### Settled Design
+
+- A newly opened panel shows only collapsed statement roots. Each `l` action reveals exactly one additional level.
+- Set-operation modifiers (`ALL` or `DISTINCT`) belong to the separator, not either query label.
+- Only operators at the CTE body's own token depth split branches; nested SELECT clauses do not become siblings.
+
+### Review
+
+- [x] Record implementation outcomes and verification.
+
+- New panels register every parent as collapsed; user expansion survives compatible live refreshes while newly discovered parents still default collapsed.
+- CTE bodies now expose one query node per top-level UNION, INTERSECT, or EXCEPT branch. ALL/DISTINCT separators are omitted from labels and nested SELECT clauses remain in their owning branch.
+- Malformed set-operation and incomplete WITH structures fall back atomically to the statement root rather than exposing partial children.
+- Verification: `nvim --headless -u NONE -l tests/run.lua`, focused exact-label/ID coverage, and `git diff --check` passed. Independent reviews found no remaining behavioral issues. `stylua` is not installed in this environment.

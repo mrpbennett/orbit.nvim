@@ -21,6 +21,8 @@ local modules = {
   "orbit.session",
   "orbit.sql.tokenizer",
   "orbit.sql.scope",
+  "orbit.sql.structure",
+	"orbit.structure",
   "orbit.blink",
   "orbit.schema",
   "orbit.schema_cache",
@@ -49,7 +51,9 @@ local specs = {
    require("tests.completion_spec"),
    require("tests.editable_result_spec"),
    require("tests.sql_tokenizer_spec"),
-   require("tests.sql_scope_spec"),
+    require("tests.sql_scope_spec"),
+	 require("tests.sql_structure_spec"),
+	 require("tests.structure_spec"),
    require("tests.blink_spec"),
 }
 

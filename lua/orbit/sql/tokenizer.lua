@@ -153,6 +153,7 @@ function M.tokenize(lines)
 			text = text,
 			row = start_row,
 			start_col = start_col,
+			end_row = row,
 			end_col = col,
 			depth = depth,
 		})
@@ -209,6 +210,39 @@ function M.tokenize(lines)
 				table.insert(text, c)
 				advance()
 			end
+		end
+		return start_row, start_col, table.concat(text)
+	end
+
+	local function dollar_delimiter()
+		if char() ~= "$" then
+			return nil
+		end
+		local previous = char(-1)
+		if previous and previous:match("[%w_$]") then
+			return nil
+		end
+		local rest = content:sub(i)
+		return rest:match("^%$[%a_][%w_]*%$") or rest:match("^%$%$")
+	end
+
+	local function scan_dollar_quoted(delimiter)
+		local start_row, start_col = row, col
+		local text = {}
+		for _ = 1, #delimiter do
+			table.insert(text, char())
+			advance()
+		end
+		while char() do
+			if content:sub(i, i + #delimiter - 1) == delimiter then
+				for _ = 1, #delimiter do
+					table.insert(text, char())
+					advance()
+				end
+				break
+			end
+			table.insert(text, char())
+			advance()
 		end
 		return start_row, start_col, table.concat(text)
 	end
@@ -270,6 +304,9 @@ function M.tokenize(lines)
 			-- String literal, e.g. 'hello'. Same escaping rules as quoted
 			-- identifiers, just with a different delimiter character.
 			local start_row, start_col, text = scan_delimited("'")
+			emit("string", start_row, start_col, text)
+		elseif c == "$" and dollar_delimiter() then
+			local start_row, start_col, text = scan_dollar_quoted(dollar_delimiter())
 			emit("string", start_row, start_col, text)
 		elseif is_digit(c) then
 			-- Numeric literal: one or more digits, optionally followed by a

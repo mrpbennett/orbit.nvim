@@ -244,6 +244,7 @@ From a workspace query buffer, `/` focuses the workspace filter. Elsewhere, `/` 
 | `:'<,'>OrbitExecute`   | Execute the selected line range.                                |
 | `:OrbitCancel`         | Cancel the statement running in the current buffer.             |
 | `:OrbitDisconnect`     | Close the connection for the current buffer's profile.          |
+| `:OrbitStructure`      | Toggle the current query buffer's Structure panel.               |
 | `:OrbitWorkspace`      | Open the workspace or toggle its profile/schema browser.        |
 | `:OrbitWorkspaceClose` | Close the Orbit workspace tabpage.                              |
 
@@ -263,7 +264,7 @@ Orbit installs the following defaults:
 | Normal, SQL buffer | `<leader>P` | Select a connection profile.                             |
 | Normal, SQL buffer | `<leader>X` | Cancel the running statement.                            |
 
-Configure action mappings through `keymaps`. `execute`, `browse`, `cancel`, and `select_profile` are buffer-local in SQL buffers; `workspace` is global. Set an action to `false` to disable its default mapping.
+Configure action mappings through `keymaps`. `execute`, `cancel`, `select_profile`, and the disabled-by-default `structure` action are buffer-local in SQL buffers; `workspace` is global. Set an action to `false` to disable it.
 
 ```lua
 require("orbit").setup({
@@ -272,6 +273,7 @@ require("orbit").setup({
     workspace = "<leader>D",
     select_profile = "<leader>P",
     cancel = "<leader>X",
+    structure = false,
   },
 })
 ```
@@ -295,6 +297,24 @@ require("orbit").setup({
 | `q`    | Close the workspace.                                                                                        |
 
 Expanding a table reveals its available metadata folders. SQLite provides columns, primary keys, foreign keys, and indexes; Vertica provides columns, primary keys, foreign keys, and projections. Each folder loads on demand. Views remain under the schema's `views` group and expose their columns.
+
+### Structure Panel
+
+`:OrbitStructure` opens a fixed-width panel at the far-right edge of the current tabpage and focuses it. Running the command again closes the panel. The panel works in ordinary SQL tabs and in the Orbit Workspace, follows the active query buffer, and updates as statements are edited.
+
+Statements appear as source-order tree roots, with every parent collapsed when the panel first opens. A leading `WITH` clause expands into its named CTEs. Each CTE owns one query node per top-level `UNION`, `INTERSECT`, or `EXCEPT` branch, while nested parenthesized SELECT clauses remain inside their owning branch. The outer query appears beside the `WITH` branch. Orbit ignores comments in labels and highlights the deepest visible element containing the query-buffer cursor.
+
+| Key     | Action                                                        |
+| ------- | ------------------------------------------------------------- |
+| `h`     | Collapse the selected node, or move to its parent.             |
+| `l`     | Expand the selected node, or move to its first child.          |
+| `j`, `k` | Move through visible tree nodes.                              |
+| `<CR>`  | Return to the query buffer and navigate to the selected element. |
+| `/`     | Filter statement labels using case-insensitive substring matching. |
+| `<Esc>` | Clear the filter, or close the panel when no filter is active. |
+| `q`     | Close the panel and return to the query buffer.               |
+
+Structure parsing is dependency-free and tolerant of incomplete SQL. It outlines leading CTEs rather than attempting to expose every SQL expression. PostgreSQL dollar-quoted bodies and SQLite trigger bodies are kept together; other dialect-specific procedural constructs may appear as best-effort entries.
 
 ### Result Grid
 
@@ -384,6 +404,7 @@ require("orbit").setup({
   profile_path = vim.fn.expand("~/.local/share/orbit.nvim/profiles.json"),
   result_limit = 200,
   result_height = 15,
+  structure_width = 40,
   saved_query_dirs = {
     { Work = "~/queries/work" },
     { Personal = "~/queries/personal" },
@@ -421,6 +442,7 @@ require("orbit").setup({
 | `result_height`           | `15`                                      | Height of a standalone result grid.                                                                                                                                  |
 | `saved_query_dirs`        | `{}`                                      | Ordered named directories of recursively discovered `.sql` files shown in the Workspace sidebar.                                                                     |
 | `max_cell_width`          | `48`                                      | Maximum displayed width of a result cell.                                                                                                                            |
+| `structure_width`         | `40`                                      | Width of the right-side Structure panel.                                                                                                                             |
 | `workspace_sidebar_width` | `32`                                      | Width of the workspace sidebar.                                                                                                                                      |
 | `workspace_result_ratio`  | `0.30`                                    | Fraction of editor height used by workspace results, with a six-line minimum.                                                                                        |
 | `winbar`                  | `false`                                   | Show Orbit status in SQL-window winbars.                                                                                                                             |

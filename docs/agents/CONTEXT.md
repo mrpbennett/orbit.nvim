@@ -72,6 +72,10 @@ _Avoid_: save directory, save location
 A dedicated Neovim tabpage containing Orbit's profile/schema browser, query buffers, and persistent result grid.
 _Avoid_: IDE, dashboard
 
+**Structure panel**:
+A right-side tree of the statements and their significant query elements in the active query buffer, used to navigate that buffer.
+_Avoid_: structure popup, outline window
+
 **Table alias**:
 The short name introduced for a table, view, or derived table within a single statement's `FROM`/`JOIN` clauses, scoped to that statement, used to qualify column references within it.
 _Avoid_: alias (bare), table nickname

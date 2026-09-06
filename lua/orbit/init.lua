@@ -108,6 +108,7 @@ M.config = {
 		cancel = "<leader>X",
 		execute = "<leader>E",
 		select_profile = "<leader>P",
+		structure = false,
 		workspace = "<leader>D",
 	},
 	icons = {
@@ -129,6 +130,7 @@ M.config = {
 	result_height = 15,
 	result_limit = 200,
 	saved_query_dirs = {},
+	structure_width = 40,
 	winbar = false,
 	workspace_result_ratio = 0.30,
 	workspace_sidebar_width = 32,
@@ -247,6 +249,7 @@ end
 local function create_commands()
 	local query = require("orbit.query")
 	local workspace = require("orbit.workspace")
+	local structure = require("orbit.structure")
 
 	vim.api.nvim_create_user_command("OrbitExecute", function(command)
 		query.execute(vim.api.nvim_get_current_buf(), M.config, visual_selection(command))
@@ -272,6 +275,9 @@ local function create_commands()
 		end
 		vim.cmd.edit(M.config.profile_path)
 	end, { desc = "Edit Orbit connection profiles" })
+	vim.api.nvim_create_user_command("OrbitStructure", function()
+		structure.toggle(M.config)
+	end, { desc = "Toggle the Orbit Structure panel" })
 	vim.api.nvim_create_user_command("OrbitWorkspace", function()
 		workspace.open(M.config)
 	end, { desc = "Open Orbit workspace" })
@@ -306,6 +312,7 @@ local function define_highlights()
 		OrbitProfile = "Identifier",
 		OrbitColumn = "Type",
 		OrbitTable = "Function",
+		OrbitStructureCurrent = "CursorLine",
 		OrbitView = "Constant",
 	}
 	for group, target in pairs(links) do
@@ -336,6 +343,7 @@ local function apply_keymaps(buffer)
 		cancel = "OrbitCancel",
 		execute = "OrbitExecute",
 		select_profile = "OrbitSelectProfile",
+		structure = "OrbitStructure",
 		workspace = "OrbitWorkspace",
 	}
 	for action, lhs in pairs(keymaps) do
@@ -413,6 +421,38 @@ local function configure_ux()
 			if M.config.winbar and vim.bo.filetype == "sql" then
 				vim.wo.winbar = status_winbar
 			end
+		end,
+	})
+	vim.api.nvim_create_autocmd({ "BufEnter", "WinEnter" }, {
+		group = vim.api.nvim_create_augroup("OrbitStructure", { clear = true }),
+		callback = function(event)
+			require("orbit.structure").track(event.buf)
+		end,
+	})
+	vim.api.nvim_create_autocmd({ "CursorMoved", "CursorMovedI" }, {
+		group = "OrbitStructure",
+		callback = function(event)
+			require("orbit.structure").cursor_moved(event.buf)
+		end,
+	})
+	vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, {
+		group = "OrbitStructure",
+		callback = function(event)
+			require("orbit.structure").changed(event.buf)
+		end,
+	})
+	vim.api.nvim_create_autocmd({ "BufDelete", "BufWipeout" }, {
+		group = "OrbitStructure",
+		callback = function(event)
+			require("orbit.structure").source_gone(event.buf)
+		end,
+	})
+	vim.api.nvim_create_autocmd({ "TabClosed", "WinClosed" }, {
+		group = "OrbitStructure",
+		callback = function()
+			vim.schedule(function()
+				require("orbit.structure").cleanup()
+			end)
 		end,
 	})
 end
