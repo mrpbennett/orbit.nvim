@@ -1,5 +1,49 @@
 # Orbit.nvim v0.1 Plan
 
+## Structure View Options Plan
+
+- [x] Add a nested `structure_view` setup object for alphabetical sorting, statement-category visibility, and grouping by type, all enabled by default.
+- [x] Apply category filtering to complete statement subtrees and render enabled non-empty groups in DDL, DML, SELECT, Other order.
+- [x] Keep category groups initially expanded, statement nodes initially collapsed, and sort statements alphabetically with stable source-order ties.
+- [x] Document the options, add focused regression coverage, and run complete verification.
+
+### Settled Design
+
+- `structure_view` owns `sort_alphabetically`, `show_ddl`, `show_dml`, `show_select`, `show_other`, and `group_by_type`; `structure_width` remains a separate geometry option.
+- Disabling a category hides each matching top-level statement and its complete subtree.
+- Grouping adds only enabled, non-empty category headings in fixed DDL, DML, SELECT, Other order.
+- Alphabetical sorting applies within each group, or across all visible statements when grouping is disabled.
+- Category headings start expanded; existing statement expansion behavior remains unchanged.
+
+### Review
+
+- `structure_view` now owns grouping, category visibility, and alphabetical sorting while `structure_width` remains the panel geometry option. Every display field defaults to enabled.
+- Presentation-only category nodes reuse the existing tree controls without changing parser nodes, statement navigation, or execution ranges. Text filtering continues to match statement-tree labels rather than category headings.
+- Coverage verifies fixed group order, initial expansion, alphabetical and source ordering, category filtering, empty-group omission, ungrouped sorting, and nested defaults.
+- Verification: `nvim --headless -u NONE -l tests/run.lua` and `git diff --check` passed. Independent review found no code defects; its documentation finding was resolved. `stylua` is not installed in this environment.
+
+## Structure Panel Execution Plan
+
+- [x] Confirm which Structure elements execute exact source ranges and which fall back to their containing statement.
+- [x] Add regression coverage for exact `SELECT` execution, containing-statement fallback, configurable mapping, and result focus.
+- [x] Route Structure panel execution through the existing query-buffer execution path with an explicit source window.
+- [x] Run focused and complete verification, review the diff, and record the results.
+
+### Settled Design
+
+- `<leader>E` executes the Structure element highlighted by the panel cursor and remains configurable through `keymaps.execute`.
+- Statement, query-block, and `SELECT`-clause rows execute their exact end-exclusive source ranges. Connector errors are acceptable when extracted text is not independently executable.
+- Other rows execute their containing top-level statement.
+- Successful execution keeps focus in the Structure panel unless existing result-focus configuration requests otherwise; execution failures retain the existing focused diagnostic split.
+- Execution continues through `orbit.query` so profile resolution, mutation confirmation, running-state control, cancellation, diagnostics, and Result grid behavior remain intact.
+
+### Review
+
+- Structure rows now execute through `orbit.query`: statement, query-block, and `SELECT`-clause rows use exact end-exclusive ranges, while navigation-only rows use their containing statement.
+- Execution retains the query buffer's source context while preserving panel focus. Profile-selection retries return to the panel and reject changed or closed source buffers rather than executing stale ranges.
+- Changed-tick validation refreshes stale Structure ranges before execution, and configured execution mappings explicitly take precedence over fixed panel mappings.
+- Verification: `nvim --headless -u NONE -l tests/run.lua` and `git diff --check` passed. Independent standards/spec review found no actionable defects. `stylua` is not installed in this environment.
+
 ## PostgreSQL Completion Edit Plan
 
 - [x] Add a Blink-level regression proving a PostgreSQL completion replaces the typed qualifier instead of appending quoted text to it.
@@ -895,3 +939,56 @@ Plan: `~/.claude/plans/sprightly-seeking-blanket.md`. Replaces the two single-li
 - CTE bodies now expose one query node per top-level UNION, INTERSECT, or EXCEPT branch. ALL/DISTINCT separators are omitted from labels and nested SELECT clauses remain in their owning branch.
 - Malformed set-operation and incomplete WITH structures fall back atomically to the statement root rather than exposing partial children.
 - Verification: `nvim --headless -u NONE -l tests/run.lua`, focused exact-label/ID coverage, and `git diff --check` passed. Independent reviews found no remaining behavioral issues. `stylua` is not installed in this environment.
+
+## Detailed Structure Panel Plan
+
+- [x] Add a regression fixture based on the PostgreSQL database-structure statement, covering deeply nested scalar subqueries and long labels.
+- [x] Extend the pure Structure model to recursively expose query blocks and their major clauses without treating ordinary function-call parentheses as queries.
+- [x] Preserve complete node labels in the panel buffer so `structure_width` controls window geometry rather than deleting SQL text.
+- [x] Preserve stable IDs, source ranges, collapsed-by-default behavior, filtering, cursor highlighting, and exact navigation for the new nodes.
+- [x] Update Structure panel documentation and run focused tests, the complete headless suite, formatter when available, and whitespace validation.
+
+### Proposed Hierarchy
+
+- Statement roots retain source order and remain collapsed initially.
+- Existing `WITH -> CTE -> query branch` nodes remain intact.
+- Each query block exposes source-ordered `SELECT`, `FROM`, `WHERE`, `GROUP BY`, `HAVING`, `WINDOW`, `ORDER BY`, `LIMIT`, and `OFFSET` clause nodes when present.
+- Parenthesized query blocks found inside clauses become nested query nodes and recurse through the same clause model. Parenthesized expressions and function calls remain part of their owning clause rather than creating noisy false structure.
+- Full normalized labels remain in the scratch buffer with wrapping disabled, allowing normal horizontal scrolling instead of irreversible ellipsis truncation.
+
+### Acceptance Notes
+
+- The supplied PostgreSQL statement must expose `user_schemas`, `relations`, the outer query, and nested query blocks for extensions, enum types, schemas, columns, constraints, indexes, triggers, and RLS policies.
+- Every visible nested node must navigate to its first meaningful source token and participate in source-cursor highlighting and filtering.
+- Incomplete SQL must continue to fall back conservatively without raising an error or exposing known-false ranges.
+
+### Review
+
+- The Structure model now exposes major SELECT-query clauses and recursively outlines parenthesized SELECT/WITH blocks, including every metadata branch represented by the supplied PostgreSQL statement.
+- Top-level and nested set operations remain distinct query branches. Incomplete nested WITH syntax and contextual identifiers fall back conservatively instead of creating known-false nodes.
+- Full normalized labels remain in the non-wrapping panel buffer and can be inspected with horizontal scrolling; `structure_width` now controls only panel geometry.
+- Regression coverage verifies nested IDs/ranges, collapse traversal, filtering, cursor tracking, navigation, expansion persistence, long labels, set operations, and contextual LIMIT/OFFSET cases.
+- Verification: `nvim --headless -u NONE -l tests/run.lua` and `git diff --check` passed. Independent review found no actionable findings. `stylua` is not installed in this environment.
+
+## Structure Panel Semantic Icons Plan
+
+- [x] Extend the flat icon defaults with configurable statement-category and Structure-element glyphs, retaining documented `icons.query` as a fallback for `icons.query_block`.
+- [x] Render a semantic icon after the existing disclosure column for every Structure row, reusing `icons.folder` for category groups.
+- [x] Add regression coverage for every icon distinction, custom overrides, ungrouped statements, and the legacy query-icon fallback.
+- [x] Document the new icon options and define query block, common table expression, and clause in the domain glossary.
+- [x] Run the complete headless suite, configured formatter when available, and whitespace validation; record the outcome below.
+
+### Settled Design
+
+- Disclosure markers continue to communicate expansion state; semantic icons independently communicate row identity.
+- Category groups use the existing folder icon. Statements use separate DDL, DML, SELECT, and Other icons even when grouping is disabled.
+- WITH containers, common table expressions, query blocks, and clauses each use one structural icon; clause labels continue to distinguish individual clause types.
+- Icons remain unhighlighted Nerd Font glyphs and are configurable through the existing flat `icons` setup table.
+- `query_block` is the canonical public term. A configured legacy `query` icon remains the fallback when `query_block` is not explicitly configured.
+
+### Review
+
+- Structure rows retain their disclosure marker and now show distinct configurable icons for category groups, statement categories, WITH containers, common table expressions, query blocks, and clauses.
+- The documented legacy `icons.query` key supplies `icons.query_block` until the canonical key is explicitly configured. Repeated and failed setup calls preserve that precedence correctly.
+- README configuration and Structure-panel guidance list the new defaults, while the domain glossary now defines query block, common table expression, and clause.
+- Verification: `nvim --headless -u NONE -l tests/run.lua` and `git diff --check` passed. Independent review found no remaining issues. `stylua` is not installed in this environment.

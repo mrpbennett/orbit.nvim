@@ -6,8 +6,9 @@
 -- but nothing about Neovim windows, rendering, mappings, or expansion state.
 --
 -- Every node has a stable source-derived ID, a display label, an end-exclusive
--- source range, and zero or more children. WITH statements add a WITH branch,
--- CTE declaration nodes, body-query branches per CTE, and an outer query node.
+-- source range, and zero or more children. Query blocks expose their major SQL
+-- clauses and recursively bounded parenthesized SELECT/WITH blocks. WITH
+-- statements also add CTE declarations, body-query branches, and an outer query.
 -- Malformed/incomplete WITH syntax falls back to a navigable statement root
 -- rather than exposing a partially trusted hierarchy or raising an error.
 -- ============================================================================
@@ -143,6 +144,7 @@ local function make_node(lines, tokens, options)
 		kind = options.kind,
 		label = options.label or label(lines, tokens, options.first, options.last),
 		category = options.category,
+		clause = options.clause,
 		start_row = options.first.row,
 		start_col = options.first.start_col,
 		end_row = options.last.end_row,
@@ -164,6 +166,166 @@ local function closing_paren(tokens, opening)
 	return nil
 end
 
+local with_children
+local query_node
+local query_nodes
+
+-- Recognize clause boundaries only at the query block's own parenthesis depth.
+-- Keywords inside functions, CASE expressions, and nested queries therefore
+-- remain part of the clause that owns them.
+local function clause_at(content, index, depth, current_clause)
+	local token = content[index]
+	if not token or token.type ~= "identifier" or token.depth ~= depth then
+		return nil
+	end
+	local word = token.text:upper()
+	if word == "SELECT" or word == "FROM" or word == "WHERE" or word == "HAVING" then
+		return word
+	end
+	if word == "WINDOW" then
+		local name = content[index + 1]
+		local as_token = content[index + 2]
+		if
+			name
+			and (name.type == "identifier" or name.type == "quoted_identifier")
+			and name.depth == depth
+			and as_token
+			and as_token.type == "identifier"
+			and as_token.depth == depth
+			and as_token.text:upper() == "AS"
+		then
+			return word
+		end
+		return nil
+	end
+	if word == "LIMIT" or word == "OFFSET" then
+		local previous = content[index - 1]
+		local next_token = content[index + 1]
+		local next_word = next_token and next_token.type == "identifier" and next_token.text:upper() or nil
+		if current_clause == "SELECT" and previous and (previous.type == "identifier" or previous.type == "quoted_identifier") then
+			return nil
+		end
+		if
+			previous
+			and (
+				(previous.type == "identifier" and (previous.text:upper() == "AS" or previous.text:upper() == "SELECT"))
+				or (previous.type == "punct" and previous.text ~= ")")
+			)
+		then
+			return nil
+		end
+		if next_word == "AS" or next_word == "JOIN" or next_word == "ON" then
+			return nil
+		end
+		if next_token and next_token.depth == depth and (next_token.text == "," or next_word == "FROM" or next_word == "WHERE" or next_word == "GROUP" or next_word == "HAVING" or next_word == "WINDOW" or next_word == "ORDER" or next_word == "LIMIT" or next_word == "OFFSET") then
+			return nil
+		end
+		return word
+	end
+	if word == "GROUP" or word == "ORDER" then
+		local next_token = content[index + 1]
+		if next_token and next_token.type == "identifier" and next_token.depth == depth and next_token.text:upper() == "BY" then
+			return word .. " BY"
+		end
+	end
+	return nil
+end
+
+-- Find parenthesized SELECT/WITH blocks inside one clause. Ordinary grouping
+-- and function calls are traversed but do not create nodes; once a real query
+-- is found, its complete range is handed recursively to `query_node`.
+local function nested_queries(lines, tokens, content, first_index, last_index, id_prefix)
+	local children = {}
+	local index = first_index
+	while index <= last_index do
+		local opening = content[index]
+		if opening.text == "(" then
+			local closing = closing_paren(content, index)
+			local first = content[index + 1]
+			local word = first and first.type == "identifier" and first.text:upper() or nil
+			if closing and closing <= last_index + 1 and first and first.depth == opening.depth and (word == "SELECT" or word == "WITH") then
+				local id = string.format("%s:query:%d:%d", id_prefix, first.row, first.start_col)
+				local queries = query_nodes(lines, tokens, content, index + 1, closing - 1, id, first.depth)
+				for _, query in ipairs(queries or {}) do
+					table.insert(children, query)
+				end
+				index = closing + 1
+			else
+				index = index + 1
+			end
+		else
+			index = index + 1
+		end
+	end
+	return children
+end
+
+-- Split one SELECT query block into its major source-ordered clauses. Each
+-- clause retains its complete text and owns any scalar or derived subqueries
+-- nested within that range.
+local function query_clauses(lines, tokens, content, first_index, last_index, id_prefix)
+	local starts = {}
+	local depth = content[first_index].depth
+	local current_clause
+	for index = first_index, last_index do
+		local clause = clause_at(content, index, depth, current_clause)
+		if clause then
+			table.insert(starts, { index = index, clause = clause })
+			current_clause = clause
+		end
+	end
+	if not starts[1] or starts[1].clause ~= "SELECT" then
+		return {}
+	end
+
+	local children = {}
+	for position, start in ipairs(starts) do
+		local clause_last = starts[position + 1] and starts[position + 1].index - 1 or last_index
+		local first = content[start.index]
+		local id = string.format("%s:clause:%s:%d:%d", id_prefix, start.clause:lower():gsub(" ", "_"), first.row, first.start_col)
+		table.insert(children, make_node(lines, tokens, {
+			id = id,
+			kind = "clause",
+			clause = start.clause,
+			first = first,
+			last = content[clause_last],
+			children = nested_queries(lines, tokens, content, start.index, clause_last, id),
+		}))
+	end
+	return children
+end
+
+-- Build one query node and recursively deepen the SQL constructs Orbit can
+-- bound reliably. A nested WITH reuses the same all-or-nothing parser as a
+-- statement-level WITH; ordinary SELECT blocks expose clause nodes.
+query_node = function(lines, tokens, content, first_index, last_index, id)
+	local first = content[first_index]
+	local word = first and first.type == "identifier" and first.text:upper() or nil
+	local children = {}
+	if word == "WITH" then
+		local query_content = content
+		if first_index ~= 1 or last_index ~= #content then
+			query_content = {}
+			for index = first_index, last_index do
+				table.insert(query_content, content[index])
+			end
+		end
+		children = with_children(lines, tokens, query_content, id)
+		if #children == 0 then
+			return nil
+		end
+	elseif word == "SELECT" then
+		children = query_clauses(lines, tokens, content, first_index, last_index, id)
+	end
+	return make_node(lines, tokens, {
+		id = id,
+		kind = "query",
+		first = first,
+		last = content[last_index],
+		children = children,
+	})
+end
+
 -- Split one query range into top-level set-operation branches. UNION,
 -- INTERSECT, and EXCEPT delimit siblings only at the CTE body's own depth, so a
 -- SELECT nested inside a WHERE expression stays part of its owning branch.
@@ -175,13 +337,14 @@ local function query_branches(lines, tokens, content, first_index, last_index, i
 	local function add_branch(last)
 		if branch_start <= last then
 			local first = content[branch_start]
-			table.insert(branches, make_node(lines, tokens, {
-				id = string.format("%s:query:%d:%d", id_prefix, first.row, first.start_col),
-				kind = "query",
-				first = first,
-				last = content[last],
-			}))
+			local id = string.format("%s:query:%d:%d", id_prefix, first.row, first.start_col)
+			local branch = query_node(lines, tokens, content, branch_start, last, id)
+			if not branch then
+				return false
+			end
+			table.insert(branches, branch)
 		end
+		return true
 	end
 	while index <= last_index do
 		local token = content[index]
@@ -190,7 +353,9 @@ local function query_branches(lines, tokens, content, first_index, last_index, i
 			if branch_start == index then
 				return nil
 			end
-			add_branch(index - 1)
+			if not add_branch(index - 1) then
+				return nil
+			end
 			index = index + 1
 			local modifier = content[index]
 			if
@@ -209,7 +374,23 @@ local function query_branches(lines, tokens, content, first_index, last_index, i
 			index = index + 1
 		end
 	end
-	add_branch(last_index)
+	if not add_branch(last_index) then
+		return nil
+	end
+	return branches
+end
+
+-- Keep the established ID for an unsplit query while assigning source-derived
+-- branch IDs when a set operation creates multiple sibling query nodes.
+query_nodes = function(lines, tokens, content, first_index, last_index, single_id, depth)
+	local branches = query_branches(lines, tokens, content, first_index, last_index, single_id, depth)
+	if not branches then
+		return nil
+	end
+	if #branches == 1 then
+		local query = query_node(lines, tokens, content, first_index, last_index, single_id)
+		return query and { query } or nil
+	end
 	return branches
 end
 
@@ -223,7 +404,7 @@ end
 -- This parser is deliberately all-or-nothing. Any missing name, AS keyword,
 -- opening parenthesis, or matching close returns an empty child list. The
 -- statement root still remains usable while a user is midway through editing.
-local function with_children(lines, tokens, content, statement_id)
+with_children = function(lines, tokens, content, statement_id)
 	if not (content[1] and content[1].type == "identifier" and content[1].text:upper() == "WITH") then
 		return {}
 	end
@@ -310,12 +491,21 @@ local function with_children(lines, tokens, content, statement_id)
 	if not content[index] then
 		return {}
 	end
-	table.insert(children, make_node(lines, tokens, {
-		id = statement_id .. ":query",
-		kind = "query",
-		first = content[index],
-		last = content[#content],
-	}))
+	local outer_queries = query_nodes(
+		lines,
+		tokens,
+		content,
+		index,
+		#content,
+		statement_id .. ":query",
+		content[index].depth
+	)
+	if not outer_queries then
+		return {}
+	end
+	for _, query in ipairs(outer_queries) do
+		table.insert(children, query)
+	end
 	return children
 end
 
@@ -330,13 +520,17 @@ local function make_entry(lines, tokens, separator, force_other)
 	local first = content[1]
 	local last = separator or content[#content]
 	local id = string.format("statement:%d:%d", first.row, first.start_col)
+	local children = with_children(lines, tokens, content, id)
+	if #children == 0 and first.type == "identifier" and first.text:upper() == "SELECT" then
+		children = query_nodes(lines, tokens, content, 1, #content, id .. ":query", first.depth) or {}
+	end
 	return make_node(lines, tokens, {
 		id = id,
 		kind = "statement",
 		category = force_other and "Other" or classify(content),
 		first = first,
 		last = last,
-		children = with_children(lines, tokens, content, id),
+		children = children,
 	})
 end
 

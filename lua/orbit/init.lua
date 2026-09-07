@@ -112,24 +112,40 @@ M.config = {
 		workspace = "<leader>D",
 	},
 	icons = {
+		clause = "󰅪",
 		collapsed = ">",
 		column = "󰠵",
+		cte = "󰌷",
 		expanded = "󰘖",
 		folder = "󰉋",
 		index = "",
 		key = "",
 		profile = "󰆼",
 		query = "󰆋",
+		query_block = "󰆋",
 		result = "󰎟",
 		saved_query = "󰆼",
+		statement_ddl = "󰒓",
+		statement_dml = "󰏫",
+		statement_other = "󰌋",
+		statement_select = "󰍉",
 		table = "󰓫",
 		view = "󰈈",
+		with = "󰙅",
 		workspace = "󱓞",
 	},
 	profile_path = vim.fn.expand("~/.local/share/orbit.nvim/profiles.json"),
 	result_height = 15,
 	result_limit = 200,
 	saved_query_dirs = {},
+	structure_view = {
+		group_by_type = true,
+		show_ddl = true,
+		show_dml = true,
+		show_other = true,
+		show_select = true,
+		sort_alphabetically = true,
+	},
 	structure_width = 40,
 	winbar = false,
 	workspace_result_ratio = 0.30,
@@ -142,6 +158,9 @@ M.config = {
 -- accumulate duplicate commands/autocommand groups on every re-source of the
 -- user's config.
 local configured = false
+-- Once the precise Structure key is configured, later legacy `query` changes
+-- must not replace it during repeated setup calls.
+local query_block_icon_configured = false
 -- `default_profile_warned` ensures the removed-option warning notification
 -- (see `M.setup`) is only shown the first time a user passes the old
 -- `default_profile` option, instead of nagging on every `setup()` call.
@@ -563,6 +582,14 @@ function M.setup(options)
 	-- clearing `options.saved_query_dirs`) never affect a table the caller
 	-- might still hold a reference to.
 	options = vim.deepcopy(options or {})
+	-- `query` was documented before Structure icons existed. Treat an explicit
+	-- legacy override as the query-block icon unless the precise key is present.
+	local query_block_icon_explicit = type(options.icons) == "table" and options.icons.query_block ~= nil
+	if type(options.icons) == "table" then
+		if not query_block_icon_explicit and options.icons.query ~= nil and not query_block_icon_configured then
+			options.icons.query_block = options.icons.query
+		end
+	end
 	local saved_query_dirs
 	if options.saved_query_dirs ~= nil then
 		-- Validate/normalize separately, then remove it from `options`
@@ -579,6 +606,9 @@ function M.setup(options)
 	-- `keymaps.execute` without having to re-specify every other keymap or
 	-- config field - anything they don't mention keeps its previous value.
 	M.config = vim.tbl_deep_extend("force", M.config, options)
+	if query_block_icon_explicit then
+		query_block_icon_configured = true
+	end
 	if saved_query_dirs then
 		-- Lists replace previous setup values instead of being merged index by index.
 		M.config.saved_query_dirs = saved_query_dirs

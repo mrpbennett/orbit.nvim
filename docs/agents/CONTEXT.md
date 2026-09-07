@@ -76,6 +76,18 @@ _Avoid_: IDE, dashboard
 A right-side tree of the statements and their significant query elements in the active query buffer, used to navigate that buffer.
 _Avoid_: structure popup, outline window
 
+**Query block**:
+A bounded SQL operation within a statement that can contain clauses and nested query blocks, including each branch of a set operation.
+_Avoid_: query node, query (bare)
+
+**Common table expression (CTE)**:
+A named query result declared by a statement's `WITH` clause and available to other query blocks within that statement.
+_Avoid_: WITH branch
+
+**Clause**:
+A named structural section of a query block, such as `SELECT`, `FROM`, `WHERE`, or `ORDER BY`.
+_Avoid_: clause node
+
 **Table alias**:
 The short name introduced for a table, view, or derived table within a single statement's `FROM`/`JOIN` clauses, scoped to that statement, used to qualify column references within it.
 _Avoid_: alias (bare), table nickname

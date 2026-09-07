@@ -10,6 +10,21 @@ return {
     assert(target == "SELECT 2;")
   end,
 
+  ["statements.target extracts an exact end-exclusive selection"] = function()
+    local target = assert(statements.target({
+      lines = { "SELECT users.id", "FROM users; SELECT hidden" },
+      selection = { start_row = 1, start_col = 7, end_row = 2, end_col = 10 },
+    }))
+
+    assert(target == "users.id\nFROM users")
+
+    target = assert(statements.target({
+      lines = { "SELECT users.id FROM users" },
+      selection = { start_row = 1, start_col = 7, end_row = 1, end_col = 15 },
+    }))
+    assert(target == "users.id")
+  end,
+
   ["statements.target accepts one trailing statement terminator"] = function()
     local target = assert(statements.target({
       lines = { "SELECT", "  *", "FROM users;" },

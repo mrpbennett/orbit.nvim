@@ -14,6 +14,7 @@ All notable changes to Orbit.nvim are documented in this file.
 ### Changed
 
 - Saved-query roots in the Workspace sidebar now start collapsed instead of expanded.
+- The Structure panel now recursively outlines major query clauses and parenthesized `SELECT`/`WITH` blocks, and preserves complete labels for horizontal inspection instead of truncating them to the panel width.
 
 ### Tests
 

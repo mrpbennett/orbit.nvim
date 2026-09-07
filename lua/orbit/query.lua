@@ -231,11 +231,11 @@ end
 --     things like config.confirm_mutations, config.result_height,
 --     config.result_limit, config.max_cell_width, config.focus_results, and
 --     config.profile_path (indirectly, via M.profile_for_buffer).
---   selection (table|nil): an optional { start_row, end_row } describing a
---     1-based, inclusive visual selection range (see
---     lua/orbit/init.lua's visual_selection()). When nil, the whole buffer is
---     considered and statements.target decides what to run (e.g. the
---     statement under the cursor).
+--   selection (table|nil): an optional inclusive whole-line range or exact
+--     end-exclusive source range. When nil, statements.target considers the
+--     whole buffer.
+--   context (table|nil): optional source/trigger windows and tabpage when an
+--     Orbit panel initiated execution for a separate query buffer.
 --
 -- Returns: nothing. This function is fire-and-forget from the caller's
 -- perspective -- the actual work (talking to the database) happens
@@ -248,7 +248,18 @@ end
 -- the database (network/subprocess I/O); on completion, opens a results grid
 -- or updates the workspace UI; shows vim.notify messages and diagnostics on
 -- error.
-function M.execute(buffer, config, selection)
+function M.execute(buffer, config, selection, context)
+	context = context or {}
+	if
+		context.source_changedtick
+		and (
+			not vim.api.nvim_buf_is_valid(buffer)
+			or context.source_changedtick ~= vim.api.nvim_buf_get_changedtick(buffer)
+		)
+	then
+		vim.notify("Query buffer changed or closed; select the Structure element again", vim.log.levels.WARN)
+		return
+	end
 	-- Bump this buffer's "generation" counter before doing anything else. Any
 	-- async callback from a previous, still-in-flight execute in this same
 	-- buffer will capture the *old* generation number and can compare against
@@ -262,7 +273,16 @@ function M.execute(buffer, config, selection)
 		-- pick one, so the user doesn't have to press "execute" twice.
 		vim.notify(profile_err, vim.log.levels.ERROR)
 		M.select_profile(buffer, config, function()
-			M.execute(buffer, config, selection)
+			if
+				context.trigger_window
+				and vim.api.nvim_win_is_valid(context.trigger_window)
+				and context.tabpage
+				and vim.api.nvim_tabpage_is_valid(context.tabpage)
+			then
+				vim.api.nvim_set_current_tabpage(context.tabpage)
+				vim.api.nvim_set_current_win(context.trigger_window)
+			end
+			M.execute(buffer, config, selection, context)
 		end)
 		return
 	end
@@ -321,8 +341,10 @@ function M.execute(buffer, config, selection)
 		-- Remember which tabpage/window the query was started from, since by
 		-- the time results arrive (async) the user may have switched windows;
 		-- results should still show up relative to where the query began.
-		tabpage = vim.api.nvim_get_current_tabpage(),
-		window = vim.api.nvim_get_current_win(),
+		tabpage = context.tabpage and vim.api.nvim_tabpage_is_valid(context.tabpage) and context.tabpage
+			or vim.api.nvim_get_current_tabpage(),
+		window = context.source_window and vim.api.nvim_win_is_valid(context.source_window) and context.source_window
+			or vim.api.nvim_get_current_win(),
 		notice = notice,
 		result_generation = result_generation[buffer],
 	}

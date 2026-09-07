@@ -24,8 +24,9 @@
   Parameters:
     lines (table) - array of buffer line strings (1-indexed, as Neovim
       buffer lines normally are).
-    selection (table|nil) - either nil (no selection was made) or a table
-      with `start_row` and `end_row` (1-based, inclusive line numbers).
+    selection (table|nil) - either nil (no selection was made), an inclusive
+      whole-line range, or an exact range with 0-based `start_col` and
+      end-exclusive `end_col` values.
 
   Returns:
     On no selection: nil (meaning "caller should fall back to the whole
@@ -46,6 +47,39 @@ local function selected_lines(lines, selection)
 	end
 	if type(selection.start_row) ~= "number" or type(selection.end_row) ~= "number" then
 		return nil, "selection requires start_row and end_row"
+	end
+	local has_columns = selection.start_col ~= nil or selection.end_col ~= nil
+	if has_columns then
+		if type(selection.start_col) ~= "number" or type(selection.end_col) ~= "number" then
+			return nil, "exact selection requires start_col and end_col"
+		end
+		local start_row = selection.start_row
+		local end_row = selection.end_row
+		local start_col = selection.start_col
+		local end_col = selection.end_col
+		if
+			start_row % 1 ~= 0
+			or end_row % 1 ~= 0
+			or start_col % 1 ~= 0
+			or end_col % 1 ~= 0
+			or start_row < 1
+			or start_row > #lines
+			or end_row < 1
+			or end_row > #lines
+			or start_row > end_row
+			or start_col < 0
+			or end_col < 0
+			or start_col > #lines[start_row]
+			or end_col > #lines[end_row]
+			or (start_row == end_row and start_col >= end_col)
+		then
+			return nil, "selection is empty or outside the buffer"
+		end
+
+		local selected = vim.list_slice(lines, start_row, end_row)
+		selected[1] = selected[1]:sub(start_col + 1)
+		selected[#selected] = selected[#selected]:sub(1, end_col - (start_row == end_row and start_col or 0))
+		return table.concat(selected, "\n")
 	end
 
 	-- Clamp the requested range to the buffer's actual bounds. This protects
@@ -69,7 +103,7 @@ end
 -- Parameters:
 --   request (table) - expected shape:
 --     request.lines (table) - array of buffer line strings (required).
---     request.selection (table|nil) - optional { start_row, end_row }, as
+--     request.selection (table|nil) - optional whole-line or exact range, as
 --       consumed by `selected_lines` above.
 --
 -- Returns:

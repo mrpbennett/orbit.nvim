@@ -24,6 +24,25 @@ local states = {}
 -- changes out through M.changed so every tab showing that buffer can refresh.
 local attached_buffers = {}
 
+-- DataGrip-compatible statement categories have a fixed presentation order.
+-- Keeping that order here also gives unrecognized SQL a predictable final group.
+local category_order = { "DDL", "DML", "SELECT", "Other" }
+
+-- Select a semantic icon independently from the disclosure marker. Statement
+-- categories need distinct icons because category grouping can be disabled.
+local function icon_for(node, icons)
+	if node.kind == "group" then
+		return icons.folder
+	end
+	if node.kind == "statement" then
+		return icons["statement_" .. node.category:lower()]
+	end
+	if node.kind == "query" then
+		return icons.query_block
+	end
+	return icons[node.kind]
+end
+
 -- Return whether a possibly-nil window handle still names a live Neovim window.
 -- Centralizing this guard keeps stale handles from reaching stricter API calls.
 local function valid_window(window)
@@ -57,7 +76,7 @@ local function state_for(tabpage)
 	return state
 end
 
--- Fit text into a display width without splitting a multibyte character.
+-- Fit fixed panel chrome into a display width without splitting a multibyte character.
 -- `strcharpart` counts characters while `strdisplaywidth` accounts for glyphs
 -- that occupy more than one terminal cell. Widths of three or less use only
 -- dots because a full three-character ellipsis suffix would not fit.
@@ -125,6 +144,52 @@ local function register_parents(state, reset)
 	end
 end
 
+-- Build the top-level rows selected by the Structure view options. Parser nodes
+-- remain untouched; category nodes exist only so the renderer can reuse its
+-- normal tree traversal and expansion behavior for grouped statements.
+local function view_entries(state)
+	local visible = {}
+	for _, entry in ipairs(state.entries) do
+		if state.show_categories[entry.category] then
+			table.insert(visible, entry)
+		end
+	end
+	if state.sort_alphabetically then
+		table.sort(visible, function(left, right)
+			local left_label = left.label:lower()
+			local right_label = right.label:lower()
+			if left_label == right_label then
+				return left.start_row < right.start_row
+			end
+			return left_label < right_label
+		end)
+	end
+	if not state.group_by_type then
+		return visible
+	end
+
+	local groups = {}
+	for _, category in ipairs(category_order) do
+		groups[category] = {}
+	end
+	for _, entry in ipairs(visible) do
+		table.insert(groups[entry.category], entry)
+	end
+	local grouped = {}
+	for _, category in ipairs(category_order) do
+		if #groups[category] > 0 then
+			table.insert(grouped, {
+				id = "structure-group:" .. category,
+				kind = "group",
+				label = category,
+				category = category,
+				children = groups[category],
+			})
+		end
+	end
+	return grouped
+end
+
 -- Render the current outline into the panel scratch buffer.
 --
 -- The renderer builds three lookup tables in one pass:
@@ -171,7 +236,9 @@ local function render(state, selected_id)
 		-- A node remains visible when it or any descendant matches. This recursive
 		-- test is what preserves the path from a matching CTE back to its statement.
 		local function matches(node)
-			local direct = node.label:lower():find(filter, 1, true)
+			-- Category groups are presentation controls, not statement labels. They
+			-- preserve matching paths but never satisfy the text filter themselves.
+			local direct = node.kind ~= "group" and node.label:lower():find(filter, 1, true)
 			if filter == "" or direct then
 				return true
 			end
@@ -193,9 +260,12 @@ local function render(state, selected_id)
 		-- Flatten one visible subtree into buffer lines. Collapse state applies only
 		-- without a filter; filtered results are always expanded enough to reveal
 		-- every matching path.
-		local function add_node(node, depth, parent_id)
+		local function add_node(node, depth, parent_id, statement)
 			if not matches(node) then
 				return
+			end
+			if node.kind == "statement" then
+				statement = node
 			end
 			local has_children = #node.children > 0
 			local collapsed = filter == "" and state.collapsed[node.id]
@@ -204,19 +274,21 @@ local function render(state, selected_id)
 				marker = collapsed and state.icons.collapsed or state.icons.expanded
 				marker = marker .. " "
 			end
-			local prefix = string.rep("  ", depth) .. marker
-			table.insert(lines, truncate(prefix .. node.label, state.width))
-			nodes[#lines] = { node = node, parent_id = parent_id }
+			local prefix = string.rep("  ", depth) .. marker .. icon_for(node, state.icons) .. " "
+			-- Keep SQL labels intact; nowrap plus horizontal scrolling makes content
+			-- inspectable without changing the panel's configured geometry.
+			table.insert(lines, prefix .. node.label)
+			nodes[#lines] = { node = node, parent_id = parent_id, statement = statement }
 			id_to_line[node.id] = #lines
 			if has_children and not collapsed then
 				for _, child in ipairs(node.children) do
-					add_node(child, depth + 1, node.id)
+					add_node(child, depth + 1, node.id, statement)
 				end
 			end
 		end
-		for _, entry in ipairs(state.entries) do
+		for _, entry in ipairs(view_entries(state)) do
 			index_parents(entry, nil)
-			add_node(entry, 0, nil)
+			add_node(entry, 0, nil, nil)
 		end
 		if next(nodes) == nil then
 			table.insert(lines, "No matches")
@@ -270,6 +342,7 @@ local function refresh(state)
 		end
 		if state.source_buffer and vim.api.nvim_buf_is_valid(state.source_buffer) then
 			state.entries = outline.extract(vim.api.nvim_buf_get_lines(state.source_buffer, 0, -1, false))
+			state.source_changedtick = vim.api.nvim_buf_get_changedtick(state.source_buffer)
 			register_parents(state, false)
 		else
 			state.entries = {}
@@ -299,6 +372,7 @@ local function attach_source(state, buffer, window)
 	state.source_buffer = buffer
 	state.source_window = window
 	state.entries = outline.extract(vim.api.nvim_buf_get_lines(buffer, 0, -1, false))
+	state.source_changedtick = vim.api.nvim_buf_get_changedtick(buffer)
 	register_parents(state, true)
 	if not attached_buffers[buffer] then
 		attached_buffers[buffer] = true
@@ -352,7 +426,12 @@ end
 local function navigate(state)
 	local row = vim.api.nvim_win_get_cursor(state.window)[1]
 	local selected = state.nodes[row]
-	if not selected or not state.source_buffer or not vim.api.nvim_buf_is_valid(state.source_buffer) then
+	if
+		not selected
+		or selected.node.kind == "group"
+		or not state.source_buffer
+		or not vim.api.nvim_buf_is_valid(state.source_buffer)
+	then
 		return
 	end
 	local window = source_window(state)
@@ -363,6 +442,70 @@ local function navigate(state)
 	vim.api.nvim_set_current_win(window)
 	vim.api.nvim_win_set_cursor(window, { selected.node.start_row, selected.node.start_col })
 	render(state)
+end
+
+-- Execute the source range represented by the selected Structure row. Complete
+-- statements, query blocks, and SELECT clauses keep their exact parser range;
+-- navigation-only rows fall back to the statement that owns them.
+local function execute(state, config)
+	local selected = state.nodes[vim.api.nvim_win_get_cursor(state.window)[1]]
+	if not selected or not state.source_buffer or not vim.api.nvim_buf_is_valid(state.source_buffer) then
+		return
+	end
+	if state.source_changedtick ~= vim.api.nvim_buf_get_changedtick(state.source_buffer) then
+		local selected_id = selected.node.id
+		state.entries = outline.extract(vim.api.nvim_buf_get_lines(state.source_buffer, 0, -1, false))
+		state.source_changedtick = vim.api.nvim_buf_get_changedtick(state.source_buffer)
+		register_parents(state, false)
+		local still_present = false
+		local function find(node)
+			still_present = still_present or node.id == selected_id
+			for _, child in ipairs(node.children) do
+				find(child)
+			end
+		end
+		for _, entry in ipairs(state.entries) do
+			find(entry)
+		end
+		if not still_present then
+			render(state)
+			vim.notify("Structure changed; select an element again", vim.log.levels.WARN)
+			return
+		end
+		render(state)
+		local selected_line = state.id_to_line[selected_id]
+		if not selected_line then
+			vim.notify("Structure changed; select an element again", vim.log.levels.WARN)
+			return
+		end
+		vim.api.nvim_win_set_cursor(state.window, { selected_line, 0 })
+		selected = state.nodes[selected_line]
+	end
+	local node = selected.node
+	if node.kind ~= "statement" and node.kind ~= "query" and not (node.kind == "clause" and node.clause == "SELECT") then
+		node = selected.statement
+	end
+	local window = source_window(state)
+	if not node or not window then
+		return
+	end
+	state.source_window = window
+	require("orbit.query").execute(
+		state.source_buffer,
+		config,
+		{
+			start_row = node.start_row,
+			start_col = node.start_col,
+			end_row = node.end_row,
+			end_col = node.end_col,
+		},
+		{
+			source_changedtick = state.source_changedtick,
+			source_window = window,
+			tabpage = state.tabpage,
+			trigger_window = state.window,
+		}
+	)
 end
 
 -- Move the panel cursor to a currently visible stable node ID.
@@ -468,6 +611,7 @@ function M.toggle(config)
 	end
 
 	local width = math.max(1, tonumber(config.structure_width) or 40)
+	local view = config.structure_view or {}
 	local state = {
 		tabpage = tabpage,
 		source_buffer = nil,
@@ -479,9 +623,26 @@ function M.toggle(config)
 		parents = {},
 		collapsed = {},
 		known_parents = {},
+		group_by_type = view.group_by_type ~= false,
+		show_categories = {
+			DDL = view.show_ddl ~= false,
+			DML = view.show_dml ~= false,
+			Other = view.show_other ~= false,
+			SELECT = view.show_select ~= false,
+		},
+		sort_alphabetically = view.sort_alphabetically ~= false,
 		icons = {
+			clause = config.icons and config.icons.clause or "󰅪",
 			collapsed = config.icons and config.icons.collapsed or ">",
+			cte = config.icons and config.icons.cte or "󰌷",
 			expanded = config.icons and config.icons.expanded or "v",
+			folder = config.icons and config.icons.folder or "󰉋",
+			query_block = config.icons and (config.icons.query_block or config.icons.query) or "󰆋",
+			statement_ddl = config.icons and config.icons.statement_ddl or "󰒓",
+			statement_dml = config.icons and config.icons.statement_dml or "󰏫",
+			statement_other = config.icons and config.icons.statement_other or "󰌋",
+			statement_select = config.icons and config.icons.statement_select or "󰍉",
+			with = config.icons and config.icons.with or "󰙅",
 		},
 		width = width,
 	}
@@ -524,6 +685,13 @@ function M.toggle(config)
 			M.close(state.tabpage)
 		end
 	end, { buffer = state.buffer, silent = true, desc = "Clear filter or close Structure panel" })
+	-- A configured action takes precedence if the user intentionally reuses one
+	-- of the panel's fixed navigation keys.
+	if config.keymaps and type(config.keymaps.execute) == "string" then
+		vim.keymap.set("n", config.keymaps.execute, function()
+			execute(state, config)
+		end, { buffer = state.buffer, silent = true, desc = "Execute Structure element" })
+	end
 	attach_source(state, source_buffer, initial_source_window)
 	return state
 end

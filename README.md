@@ -261,10 +261,11 @@ Orbit installs the following defaults:
 | Normal, global     | `<leader>D` | Open the workspace or toggle its profile/schema browser. |
 | Normal, SQL buffer | `<leader>E` | Execute the buffer statement.                            |
 | Visual, SQL buffer | `<leader>E` | Execute the visual selection.                            |
+| Normal, Structure panel | `<leader>E` | Execute the highlighted Structure element.          |
 | Normal, SQL buffer | `<leader>P` | Select a connection profile.                             |
 | Normal, SQL buffer | `<leader>X` | Cancel the running statement.                            |
 
-Configure action mappings through `keymaps`. `execute`, `cancel`, `select_profile`, and the disabled-by-default `structure` action are buffer-local in SQL buffers; `workspace` is global. Set an action to `false` to disable it.
+Configure action mappings through `keymaps`. `execute` also applies in the Structure panel; `cancel`, `select_profile`, and the disabled-by-default `structure` action are buffer-local in SQL buffers, while `workspace` is global. Set an action to `false` to disable it.
 
 ```lua
 require("orbit").setup({
@@ -302,19 +303,23 @@ Expanding a table reveals its available metadata folders. SQLite provides column
 
 `:OrbitStructure` opens a fixed-width panel at the far-right edge of the current tabpage and focuses it. Running the command again closes the panel. The panel works in ordinary SQL tabs and in the Orbit Workspace, follows the active query buffer, and updates as statements are edited.
 
-Statements appear as source-order tree roots, with every parent collapsed when the panel first opens. A leading `WITH` clause expands into its named CTEs. Each CTE owns one query node per top-level `UNION`, `INTERSECT`, or `EXCEPT` branch, while nested parenthesized SELECT clauses remain inside their owning branch. The outer query appears beside the `WITH` branch. Orbit ignores comments in labels and highlights the deepest visible element containing the query-buffer cursor.
+By default, statements are grouped under expanded `DDL`, `DML`, `SELECT`, and `Other` headings and sorted alphabetically within each group. Each row keeps its expand/collapse marker and adds a semantic icon distinguishing category groups, statement categories, `WITH` containers, CTEs, query blocks, and clauses. Statement parents start collapsed. A leading `WITH` clause expands into its named CTEs, and each CTE owns one query block per top-level `UNION`, `INTERSECT`, or `EXCEPT` branch. Query blocks expose their `SELECT`, `FROM`, `WHERE`, `GROUP BY`, `HAVING`, `WINDOW`, `ORDER BY`, `LIMIT`, and `OFFSET` clauses. Parenthesized `SELECT` and `WITH` blocks recurse beneath their owning clause, while ordinary function calls and grouped expressions remain inline. The outer query block appears beside the `WITH` container. Orbit ignores comments in labels and highlights the deepest visible element containing the query-buffer cursor.
 
 | Key     | Action                                                        |
 | ------- | ------------------------------------------------------------- |
 | `h`     | Collapse the selected node, or move to its parent.             |
 | `l`     | Expand the selected node, or move to its first child.          |
 | `j`, `k` | Move through visible tree nodes.                              |
+| `zh`, `zl` | Scroll horizontally through a complete SQL label.           |
+| `<leader>E` | Execute the highlighted element using the configured `keymaps.execute` mapping. |
 | `<CR>`  | Return to the query buffer and navigate to the selected element. |
 | `/`     | Filter statement labels using case-insensitive substring matching. |
 | `<Esc>` | Clear the filter, or close the panel when no filter is active. |
 | `q`     | Close the panel and return to the query buffer.               |
 
-Structure parsing is dependency-free and tolerant of incomplete SQL. It outlines leading CTEs rather than attempting to expose every SQL expression. PostgreSQL dollar-quoted bodies and SQLite trigger bodies are kept together; other dialect-specific procedural constructs may appear as best-effort entries.
+Executing a statement, query block, or `SELECT` clause uses that element's exact source range. Other rows execute their containing top-level statement. Extracted query blocks and clauses are not guaranteed to be independently valid, so connector errors are shown through the normal diagnostic split.
+
+Structure parsing is dependency-free and tolerant of incomplete SQL. It outlines reliably bounded query blocks and clauses rather than guessing at every SQL expression. Labels retain their complete normalized SQL even when they exceed `structure_width`; the panel remains fixed-width with wrapping disabled. PostgreSQL dollar-quoted bodies and SQLite trigger bodies are kept together; other dialect-specific procedural constructs may appear as best-effort entries.
 
 ### Result Grid
 
@@ -404,6 +409,14 @@ require("orbit").setup({
   profile_path = vim.fn.expand("~/.local/share/orbit.nvim/profiles.json"),
   result_limit = 200,
   result_height = 15,
+  structure_view = {
+    group_by_type = true,
+    show_ddl = true,
+    show_dml = true,
+    show_other = true,
+    show_select = true,
+    sort_alphabetically = true,
+  },
   structure_width = 40,
   saved_query_dirs = {
     { Work = "~/queries/work" },
@@ -414,18 +427,26 @@ require("orbit").setup({
   workspace_result_ratio = 0.30,
   winbar = false,
   icons = {
+    clause = "󰅪",
     collapsed = ">",
     column = "󰠵",
+    cte = "󰌷",
     expanded = "󰘖",
     folder = "󰉋",
     index = "",
     key = "",
     profile = "󰆼",
     query = "󰆋",
+    query_block = "󰆋",
     result = "󰎟",
     saved_query = "󰆼",
+    statement_ddl = "󰒓",
+    statement_dml = "󰏫",
+    statement_other = "󰌋",
+    statement_select = "󰍉",
     table = "󰓫",
     view = "󰈈",
+    with = "󰙅",
     workspace = "󱓞",
   },
 
@@ -442,11 +463,14 @@ require("orbit").setup({
 | `result_height`           | `15`                                      | Height of a standalone result grid.                                                                                                                                  |
 | `saved_query_dirs`        | `{}`                                      | Ordered named directories of recursively discovered `.sql` files shown in the Workspace sidebar.                                                                     |
 | `max_cell_width`          | `48`                                      | Maximum displayed width of a result cell.                                                                                                                            |
+| `structure_view`          | All fields `true`                         | Structure display controls: `group_by_type`, `show_ddl`, `show_dml`, `show_other`, `show_select`, and `sort_alphabetically`.                                         |
 | `structure_width`         | `40`                                      | Width of the right-side Structure panel.                                                                                                                             |
 | `workspace_sidebar_width` | `32`                                      | Width of the workspace sidebar.                                                                                                                                      |
 | `workspace_result_ratio`  | `0.30`                                    | Fraction of editor height used by workspace results, with a six-line minimum.                                                                                        |
 | `winbar`                  | `false`                                   | Show Orbit status in SQL-window winbars.                                                                                                                             |
 | `keymaps`                 | See above                                 | Configurable action mappings.                                                                                                                                        |
-| `icons`                   | Nerd Font glyphs                          | Override `collapsed`, `expanded`, `folder`, `index`, `key`, `profile`, `query`, `result`, `saved_query`, `table`, `view`, `column`, and `workspace`.                 |
+| `icons`                   | Nerd Font glyphs                          | Override tree, schema, Workspace, result, and Structure-panel icons shown above. The legacy `query` key supplies `query_block` when the precise key is omitted.     |
+
+Within `structure_view`, `show_ddl`, `show_dml`, `show_select`, and `show_other` each control a complete statement subtree. `group_by_type` places enabled, non-empty categories in DDL, DML, SELECT, Other order. `sort_alphabetically` sorts statements within those groups, or across all statements when grouping is disabled; disabling it preserves source order within each group or across the ungrouped list.
 
 For a custom statusline, call `require("orbit").status()`. It reports the bound profile and shows elapsed time while a statement is running.

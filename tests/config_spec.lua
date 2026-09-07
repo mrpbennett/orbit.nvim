@@ -1,6 +1,41 @@
 local orbit = require("orbit")
 
 return {
+  ["Structure view options default to enabled"] = function()
+    assert(orbit.config.structure_view.group_by_type == true)
+    assert(orbit.config.structure_view.show_ddl == true)
+    assert(orbit.config.structure_view.show_dml == true)
+    assert(orbit.config.structure_view.show_other == true)
+    assert(orbit.config.structure_view.show_select == true)
+    assert(orbit.config.structure_view.sort_alphabetically == true)
+  end,
+
+  ["Structure icons have semantic defaults and support the legacy query key"] = function()
+    assert(orbit.config.icons.clause == "󰅪")
+    assert(orbit.config.icons.cte == "󰌷")
+    assert(orbit.config.icons.query_block == "󰆋")
+    assert(orbit.config.icons.statement_ddl == "󰒓")
+    assert(orbit.config.icons.statement_dml == "󰏫")
+    assert(orbit.config.icons.statement_other == "󰌋")
+    assert(orbit.config.icons.statement_select == "󰍉")
+    assert(orbit.config.icons.with == "󰙅")
+
+    local previous_query = orbit.config.icons.query
+    local previous_query_block = orbit.config.icons.query_block
+    local setup_ok = pcall(orbit.setup, {
+      icons = { query_block = "not-applied" },
+      saved_query_dirs = "invalid",
+    })
+    assert(not setup_ok)
+    orbit.setup({ icons = { query = "legacy-query" } })
+    assert(orbit.config.icons.query_block == "legacy-query")
+    orbit.setup({ icons = { query = "legacy-query", query_block = "query-block" } })
+    assert(orbit.config.icons.query_block == "query-block")
+    orbit.setup({ icons = { query = "later-legacy-query" } })
+    assert(orbit.config.icons.query_block == "query-block")
+    orbit.setup({ icons = { query = previous_query, query_block = previous_query_block } })
+  end,
+
   ["setup normalizes and replaces named saved query locations"] = function()
     local root = vim.fn.getcwd()
     orbit.setup({
