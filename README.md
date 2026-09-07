@@ -19,6 +19,7 @@ Orbit runs statements through your existing database CLI, retains one connection
 - [Commands](#commands)
 - [Keybindings](#keybindings)
 - [Completion](#completion)
+- [Structure Panel](#structure-panel)
 - [Execution And Results](#execution-and-results)
 - [Configuration](#configuration)
 

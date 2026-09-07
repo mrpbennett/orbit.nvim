@@ -1,5 +1,25 @@
 # Orbit.nvim v0.1 Plan
 
+## 0.2.5 Release Plan
+
+- [x] Convert the current `Unreleased` notes into the missing `0.2.1` historical section.
+- [x] Add a dated `0.2.5` section covering every user-visible change from `v0.2.1` through `HEAD`.
+- [x] Run the complete test suite and release-file whitespace checks.
+- [x] Inspect the final diff and determine whether a local `v0.2.5` tag can be created without violating repository GitHub policy.
+
+### Scope
+
+- `0.2.5` covers Vertica support, the Structure panel and its execution/configuration features, progressive Trino completion, blink-only completion behavior, glob-style schema patterns, Workspace profile identity, and completion fixes.
+- This repository has no version constant, package manifest, or release workflow; Git tags are its only discoverable version source.
+- GitHub release publication is excluded because workspace policy is read-only and the configured `gh` credentials currently return HTTP 401.
+
+### Review
+
+- `CHANGELOG.md` now preserves the features shipped by `v0.2.1` in a dated historical section and records the complete `v0.2.1..HEAD` user-visible delta under `0.2.5`.
+- Verification: `nvim --headless -u NONE -l tests/run.lua` passed (163 tests). `git diff --check` passed.
+- No version constant or package manifest exists to update; Git tags are the repository's only version source.
+- A release commit, local `v0.2.5` tag, and GitHub release were not created because repository policy prohibits commits and GitHub writes. The configured `gh` credentials also return HTTP 401.
+
 ## Structure View Options Plan
 
 - [x] Add a nested `structure_view` setup object for alphabetical sorting, statement-category visibility, and grouping by type, all enabled by default.

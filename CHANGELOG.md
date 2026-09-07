@@ -4,6 +4,40 @@ All notable changes to Orbit.nvim are documented in this file.
 
 ## Unreleased
 
+## 0.2.5 - 2026-09-07
+
+### Added
+
+- Added Vertica support through the `vsql` CLI, including retained sessions, HTML result parsing, secure `VSQL_PASSWORD` handoff, schema browsing, completion, table and view actions, and metadata for columns, primary keys, foreign keys, projections, and view definitions.
+- Added the `:OrbitStructure` panel for browsing SQL as an expandable outline in ordinary query tabs and the Workspace. The panel follows edits and cursor movement, supports filtering and navigation, and recursively outlines statements, `WITH` clauses, CTEs, set-operation branches, major clauses, and nested query blocks.
+- Added Structure panel controls for statement-category visibility, grouping, alphabetical sorting, panel width, semantic icons, and an optional query-buffer mapping.
+- Added execution from the Structure panel. Statements, query blocks, and `SELECT` clauses use their exact source ranges; other rows execute their containing statement, with stale ranges refreshed before execution.
+- Added glob-style `*` and `?` matching to `schema_patterns` for PostgreSQL, SQLite, Trino, and Vertica while preserving exact-name matching.
+
+### Changed
+
+- Completion is now provided exclusively through the `blink.cmp` source; the native omnifunc and `_G.OrbitComplete` fallback were removed. The `completion` option now controls whether the blink source is enabled.
+- Trino completion now offers configured catalogs and progressively traverses `catalog.`, `catalog.schema.`, and relations while retaining direct relation suggestions and discovered-schema fallbacks.
+- The Workspace header now identifies the selected connection profile and returns to the default title when that profile is removed.
+- Structure panel labels retain their complete normalized SQL for horizontal inspection instead of being truncated to the configured panel width.
+
+### Fixed
+
+- Filtered completion candidates by their typed prefix before blink's fuzzy matching, preventing unrelated cached objects from appearing.
+- Made completion matching for identifiers, aliases, schemas, and catalogs case-insensitive.
+- Prevented stale table and column suggestions after terminal clauses and set operators such as `LIMIT`, `OFFSET`, `FETCH`, `HAVING`, `UNION`, `INTERSECT`, and `EXCEPT`.
+- Added explicit blink text-edit ranges so partial and quoted qualified identifiers are replaced cleanly without duplicated prefixes, dots, or quotes.
+- Corrected blink completion item kinds, names, and database icons.
+
+### Tests
+
+- Added comprehensive Structure parser and panel coverage for statement classification, CTEs, set operations, nested clauses, procedural bodies, filtering, navigation, live refresh, configuration, icons, execution ranges, and stale-source protection.
+- Added Vertica connector coverage for profile validation, secure command construction, HTML parsing, retained-session markers, schema acquisition, metadata, and object actions.
+- Expanded completion coverage for filtering, case-insensitive matching, replacement ranges, PostgreSQL and Vertica qualification, and progressive Trino catalog traversal.
+- Added shared mutation-SQL coverage for editable targets, primary-key changes, inserts, deletes, `NULL` values, no-op updates, and transactions.
+
+## 0.2.1 - 2026-09-02
+
 ### Added
 
 - Added clause-aware SQL completion: a dependency-free tokenizer and statement/alias-scope resolver replace the old single-line regexes, so tables, schemas, columns, and table aliases complete correctly in `SELECT`, `WHERE`, `ON`, `GROUP BY`, `ORDER BY`, `FROM`-family clauses, `INSERT INTO t (...)`, and `UPDATE t SET ...`, across multi-line statements. Table aliases resolve to their columns, including old-style comma joins; unqualified columns are offered from every table in scope, annotated by source.
@@ -14,7 +48,6 @@ All notable changes to Orbit.nvim are documented in this file.
 ### Changed
 
 - Saved-query roots in the Workspace sidebar now start collapsed instead of expanded.
-- The Structure panel now recursively outlines major query clauses and parenthesized `SELECT`/`WITH` blocks, and preserves complete labels for horizontal inspection instead of truncating them to the panel width.
 
 ### Tests
 
