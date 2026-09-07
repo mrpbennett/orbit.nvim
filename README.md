@@ -8,6 +8,20 @@ Orbit runs statements through your existing database CLI, retains one connection
 
 ![preview](./assets/preview.png)
 
+## Contents
+
+- [What It Does](#what-it-does)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Connection Profiles](#connection-profiles)
+- [Workspace Workflow](#workspace-workflow)
+- [Commands](#commands)
+- [Keybindings](#keybindings)
+- [Completion](#completion)
+- [Execution And Results](#execution-and-results)
+- [Configuration](#configuration)
+
 ## What It Does
 
 - Open one dedicated workspace tab with a searchable profile and schema browser.
@@ -300,6 +314,8 @@ require("orbit").setup({
 Expanding a table reveals its available metadata folders. SQLite provides columns, primary keys, foreign keys, and indexes; Vertica provides columns, primary keys, foreign keys, and projections. Each folder loads on demand. Views remain under the schema's `views` group and expose their columns.
 
 ### Structure Panel
+
+![structure panel](./assets/structure_panel.png)
 
 `:OrbitStructure` opens a fixed-width panel at the far-right edge of the current tabpage and focuses it. Running the command again closes the panel. The panel works in ordinary SQL tabs and in the Orbit Workspace, follows the active query buffer, and updates as statements are edited.
 
