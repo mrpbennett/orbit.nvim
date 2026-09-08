@@ -123,8 +123,6 @@ Profiles are JSON, versioned at `1`, and names must be unique:
 }
 ```
 
-</details>
-
 ### MySQL Profiles
 
 Use TCP for Docker and remote servers. Use a Unix socket only when Neovim and MySQL can access the same socket file on one machine. MySQL passwords are not connection-profile options; configure them through the selected client's credential file.
@@ -206,6 +204,7 @@ Socket profiles cannot set `host`, `port`, or `sslmode`. Mounting a container so
 - **SSH tunnel:** Run `ssh -L 3307:127.0.0.1:3306 user@remote-host`, then connect to `127.0.0.1:3307`. Because that loopback host normally does not match the server certificate, Oracle MySQL users should use `verify_ca` with a trusted CA, or use a local hostname that resolves to `127.0.0.1` and appears in the certificate. MariaDB clients do not expose an equivalent CA-only mode.
 
 Oracle MySQL clients support `disabled`, `preferred`, `required`, `verify_ca`, and `verify_identity` for `sslmode`. MariaDB clients support `disabled`, `preferred`, and `verify_identity`; other modes fail validation rather than silently changing their security meaning. Pass CA files through `arguments`, as shown in the Oracle profile.
+</details>
 
 <details>
 <summary>PostgreSQL</summary>
