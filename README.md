@@ -235,6 +235,8 @@ Orbit passes profile values to the CLI as literal arguments. It does **not** exp
 3. Press `n` to open a new SQL buffer already bound to the selected profile.
 4. Execute a statement. Results appear in the reusable bottom result grid.
 
+Schema browser labels normally retain their familiar dotted form. If distinct catalog/schema combinations would display the same label, Orbit quotes their segments to distinguish them, for example `"a.b"."c"` versus `"a"."b.c"`. These labels stay stable while filtering, and each group's expansion and metadata state remain independent. Copied qualified names and SQL completion formatting are unchanged.
+
 Set `saved_query_dirs` to add ordered, named recursive trees of `.sql` files to the sidebar:
 
 ```lua

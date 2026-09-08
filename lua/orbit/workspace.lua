@@ -117,8 +117,7 @@ local function filter_text(state)
 	return line:sub(#"Filter: " + 1)
 end
 
--- Convenience alias: schema_tree.object_name formats a table/view row's
--- catalog/schema/name into a single dotted string (e.g. "db.public.users").
+-- Labels come from the complete schema snapshot, not the filtered view.
 local object_name = schema_tree.object_name
 
 -- Recursively walk a directory on disk and build a tree of saved .sql
@@ -572,7 +571,7 @@ local function load_metadata(state, profile, row, category, show_progress)
 	local generation = state.generation
 	schema_tree.set_metadata_loading(state.tree, row, category.id, true)
 	local notice = show_progress
-		and feedback.start("Loading " .. category.label .. " for " .. object_name(row) .. "...")
+		and feedback.start("Loading " .. category.label .. " for " .. object_name(state.tree, row) .. "...")
 	cache.load_metadata(profile, row, category.id, {}, function(entries, err)
 		if state.generation ~= generation or not vim.api.nvim_buf_is_valid(state.sidebar) then
 			return
@@ -585,7 +584,7 @@ local function load_metadata(state, profile, row, category, show_progress)
 		if notice then
 			feedback.finish(
 				notice,
-				err and category.label .. " load failed: " .. object_name(row)
+				err and category.label .. " load failed: " .. object_name(state.tree, row)
 					or string.format("%s loaded: %d", category.label, #entries),
 				err and vim.log.levels.ERROR or vim.log.levels.INFO
 			)
@@ -718,7 +717,7 @@ local function run_object_action(state, profile, connector, row, action)
 		open_generated_query(state, profile, action.statement, row)
 		return
 	end
-	local notice = feedback.start("Loading " .. action.label:lower() .. " for " .. object_name(row) .. "...")
+	local notice = feedback.start("Loading " .. action.label:lower() .. " for " .. object_name(state.tree, row) .. "...")
 	runner.run(profile, action.statement, function(rows, err)
 		if workspaces[state.tabpage] ~= state or not vim.api.nvim_tabpage_is_valid(state.tabpage) then
 			feedback.finish(notice, "Schema action discarded", vim.log.levels.DEBUG)
@@ -734,7 +733,7 @@ local function run_object_action(state, profile, connector, row, action)
 			limit = state.config.result_limit,
 			max_cell_width = state.config.max_cell_width,
 			profile_name = profile.name,
-			source_name = action.label .. " / " .. object_name(row),
+			source_name = action.label .. " / " .. object_name(state.tree, row),
 			source_window = state.query_window,
 			tabpage = state.tabpage,
 		})
@@ -770,7 +769,7 @@ local function select_object_action(state, profile, row)
 		return
 	end
 	vim.ui.select(actions, {
-		prompt = "Orbit action for " .. object_name(row),
+		prompt = "Orbit action for " .. object_name(state.tree, row),
 		format_item = function(action)
 			return action.label
 		end,

@@ -23,6 +23,9 @@ _Avoid_: database tree, sidebar
 **Schema acquisition**:
 The retrieval and refresh of the tables, views, and table metadata exposed by a connection profile for use by Orbit.nvim views, completion, and editable results.
 
+**Schema object**:
+A table or view exposed by a connection profile, identified by its catalog, schema, and object-name segments where applicable. Distinct schema objects can have the same dotted display label; that label does not determine their identity.
+
 **Table metadata category**:
 A recognized kind of metadata for a schema object: columns, primary keys, foreign keys, or indexes. A connector exposes only the categories it supports for that object.
 

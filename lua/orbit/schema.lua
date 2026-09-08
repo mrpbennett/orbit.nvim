@@ -17,9 +17,59 @@
 --   { name = "users", type = "table" | "view", schema = "public", catalog = nil|"my_catalog" }
 --
 -- Exports:
+--   M.identity(row)     -> opaque structural key, independent of display text
+--   M.labels(rows)      -> identity-keyed display labels for a complete snapshot
 --   M.filter(rows, query) -> array of rows whose name matches `query`
---   M.group(rows, query)  -> array of { name, tables = {...}, views = {...} }
+--   M.group(rows, query)  -> array of { key, name, tables = {...}, views = {...} }
 local M = {}
+
+-- Keep segment positions even when a catalog or schema is absent. Encoding
+-- the tuple escapes identifier punctuation without making it a separator.
+-- Callers may compare/store the key, but must not interpret its encoding.
+function M.identity(row)
+	return vim.json.encode({ row.catalog or "", row.schema or "", row.name or "" })
+end
+
+-- Labels are presentation only. Resolve collisions against the complete
+-- snapshot so filtering cannot rename the remaining visible objects.
+-- A row without a name describes a catalog/schema group rather than an object.
+function M.labels(rows)
+	local labels, quoted = {}, {}
+	for _, row in ipairs(rows) do
+		local parts, quoted_parts = {}, {}
+		for _, field in ipairs({ "catalog", "schema", "name" }) do
+			local part = row[field]
+			if part and part ~= "" then
+				table.insert(parts, part)
+				table.insert(quoted_parts, '"' .. part:gsub('"', '""') .. '"')
+			end
+		end
+		local key = M.identity(row)
+		labels[key] = table.concat(parts, ".")
+		quoted[key] = table.concat(quoted_parts, ".")
+	end
+
+	-- Quoting can itself collide with another literal display label containing
+	-- quote characters. Promote those labels too, until presentation is stable.
+	local changed = true
+	while changed do
+		changed = false
+		local seen, collisions = {}, {}
+		for key, label in pairs(labels) do
+			if seen[label] then
+				collisions[key], collisions[seen[label]] = true, true
+			end
+			seen[label] = key
+		end
+		for key in pairs(collisions) do
+			if labels[key] ~= quoted[key] then
+				labels[key] = quoted[key]
+				changed = true
+			end
+		end
+	end
+	return labels
+end
 
 -- Filters a flat list of schema object rows down to only the ones whose
 -- name contains `query` (case-insensitive substring match). Used for simple
@@ -66,7 +116,7 @@ end
 --     schema).
 --
 -- Returns:
---   array of group tables: { name = <schema label>, tables = {...rows...},
+--   array of group tables: { key = <opaque identity>, name = <schema label>, tables = {...rows...},
 --   views = {...rows...} }, sorted by group name; within each group,
 --   `tables` and `views` are each sorted by row name.
 --
@@ -74,22 +124,30 @@ end
 function M.group(rows, query)
 	query = vim.trim(query or ""):lower()
 	local by_schema = {}
+	local namespaces = {}
 	for _, row in ipairs(rows) do
+		-- Preserve the implicit "main" schema used for schema-less objects.
+		table.insert(namespaces, { catalog = row.catalog, schema = row.schema or "main" })
+	end
+	local labels = M.labels(namespaces)
+	for index, row in ipairs(rows) do
     -- Catalog is part of a Trino schema's identity; matching a schema includes all of its objects.
     -- (Postgres/sqlite rows have no catalog, so this just falls back to the schema name, or "main"
     -- when even the schema is unknown -- sqlite in particular has a single implicit schema.)
     local schema_name = row.catalog and row.catalog .. "." .. (row.schema or "main") or row.schema or "main"
+		local key = M.identity(namespaces[index])
 		-- `find(needle, 1, true)` does a *plain* substring search starting at
 		-- position 1 -- the trailing `true` disables Lua pattern matching so
 		-- that characters like "." or "%" in schema/table names are treated
 		-- literally instead of as pattern metacharacters.
 		local schema_matches = query == "" or schema_name:lower():find(query, 1, true)
+			or labels[key]:lower():find(query, 1, true)
 		local object_matches = query == "" or row.name:lower():find(query, 1, true)
 		if schema_matches or object_matches then
 			-- Reuse the group for this schema if we've already started one,
 			-- otherwise create it lazily on first sight.
-			local group = by_schema[schema_name] or { name = schema_name, tables = {}, views = {} }
-			by_schema[schema_name] = group
+			local group = by_schema[key] or { key = key, name = labels[key], tables = {}, views = {} }
+			by_schema[key] = group
 			-- Route the row into "views" or "tables" depending on its type;
 			-- indexing group[...] with a computed key avoids writing out an
 			-- if/else branch for the two cases.

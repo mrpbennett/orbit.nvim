@@ -4,6 +4,19 @@ All notable changes to Orbit.nvim are documented in this file.
 
 ## Unreleased
 
+### Changed
+
+- Schema browser labels now quote identifier segments when distinct catalog/schema combinations would otherwise look identical. Ordinary labels remain unchanged, and disambiguated labels stay stable while filtering.
+
+### Fixed
+
+- Prevented distinct schema objects with identical dotted labels, such as `"a.b"."c"` and `"a"."b.c"`, from sharing cached metadata or receiving each other's column completions.
+- Kept colliding catalog/schema groups separate and made schema browser expansion and metadata state independent of display labels.
+
+### Tests
+
+- Added regression coverage for independent in-flight and cached metadata, column completion, metadata categories, namespace grouping, quoted-label collisions, and expansion across filtering and label changes.
+
 ## 0.2.5 - 2026-09-07
 
 ### Added

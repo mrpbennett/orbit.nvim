@@ -30,6 +30,140 @@ local function with_acquisition(profile, rows, acquire, callback)
 end
 
 return {
+  ["PostgreSQL acquisition and completion distinguish objects with the same dotted label"] = function()
+    local profile = { name = "completion-object-identity", kind = "postgres", options = { database = "orbit" } }
+    local rows = {
+      { schema = "a.b", name = "c", type = "table" },
+      { schema = "a", name = "b.c", type = "table" },
+    }
+    local first_columns = { { name = "first_id", type = "integer" } }
+    local second_columns = { { name = "second_id", type = "text" } }
+    with_acquisition(profile, rows, function(done)
+      cache.load_tables(profile, {}, done)
+    end, function()
+      local original_run = runner.run
+      local pending, results = {}, {}
+      runner.run = function(received, statement, done)
+        assert(received == profile)
+        table.insert(pending, { statement = statement, done = done })
+      end
+      local ok, err = xpcall(function()
+        local function received(label)
+          return function(result, result_err)
+            assert(result_err == nil)
+            results[label] = result
+          end
+        end
+        cache.load_columns(profile, rows[1], {}, received("first"))
+        -- Equivalent row values join the request, independent of Lua table identity.
+        cache.load_columns(profile, { catalog = "", schema = "a.b", name = "c", type = "table" }, {}, received("joined"))
+        cache.load_columns(profile, rows[2], {}, received("second"))
+        assert(#pending == 2, "distinct schema objects must start distinct column statements")
+        assert(next(results) == nil)
+        assert(pending[1].statement ~= pending[2].statement)
+        assert(pending[1].statement:find("table_schema = 'a.b'", 1, true))
+        assert(pending[1].statement:find("table_name = 'c'", 1, true))
+        assert(pending[2].statement:find("table_schema = 'a'", 1, true))
+        assert(pending[2].statement:find("table_name = 'b.c'", 1, true))
+        pending[2].done(second_columns)
+        assert(vim.deep_equal(results.second, second_columns))
+        assert(results.first == nil and results.joined == nil)
+        pending[1].done(first_columns)
+        assert(vim.deep_equal(results.first, first_columns))
+        assert(vim.deep_equal(results.joined, first_columns))
+        assert(vim.deep_equal(cache.columns(profile, rows[1]), first_columns))
+        assert(vim.deep_equal(cache.columns(profile, rows[2]), second_columns))
+        cache.load_columns(profile, rows[1], {}, received("cached_first"))
+        cache.load_columns(profile, rows[2], {}, received("cached_second"))
+        assert(results.cached_first == nil and results.cached_second == nil)
+        assert(vim.wait(1000, function()
+          return results.cached_first ~= nil and results.cached_second ~= nil
+        end))
+        assert(vim.deep_equal(results.cached_first, first_columns))
+        assert(vim.deep_equal(results.cached_second, second_columns))
+        assert(#pending == 2, "cached columns must not start new statements")
+
+        for _, case in ipairs({
+          { 'SELECT x. FROM "a.b"."c" x', #"SELECT x.", { "x.first_id" } },
+          { 'SELECT y. FROM "a"."b.c" y', #"SELECT y.", { "y.second_id" } },
+          { 'SELECT  FROM "a.b"."c"', #"SELECT ", { "first_id" } },
+          { 'SELECT  FROM "a"."b.c"', #"SELECT ", { "second_id" } },
+          { 'INSERT INTO "a.b"."c" (', nil, { "first_id" } },
+          { 'INSERT INTO "a"."b.c" (', nil, { "second_id" } },
+          { 'UPDATE "a.b"."c" SET ', nil, { "first_id" } },
+          { 'UPDATE "a"."b.c" SET ', nil, { "second_id" } },
+          -- Without FROM, the qualifier remains a bare-object cache read, not name resolution.
+          { "SELECT c.", nil, {} },
+        }) do
+          assert(vim.deep_equal(words(completion.items(profile, { case[1] }, 1, case[2] or #case[1])), case[3]), case[1])
+        end
+      end, debug.traceback)
+      runner.run = original_run
+      assert(ok, err)
+    end)
+  end,
+
+  ["PostgreSQL metadata acquisition isolates colliding objects and categories"] = function()
+    local profile = { name = "completion-metadata-identity", kind = "postgres", options = { database = "orbit" } }
+    local first = { schema = "a.b", name = "c", type = "table" }
+    local second = { schema = "a", name = "b.c", type = "table" }
+    local cases = {
+      { row = first, category = "primary_keys", rows = {} },
+      { row = second, category = "primary_keys", rows = { { name = "second_id", pk = 1 } } },
+      { row = first, category = "indexes", rows = { { name = "first_index" } } },
+      { row = second, category = "indexes", rows = { { name = "second_index" } } },
+    }
+    local original_run = runner.run
+    local pending, results, cached = {}, {}, {}
+    runner.run = function(received, statement, done)
+      assert(received == profile)
+      table.insert(pending, { statement = statement, done = done })
+    end
+    local ok, err = xpcall(function()
+      for index, case in ipairs(cases) do
+        cache.load_metadata(profile, case.row, case.category, {}, function(result, result_err)
+          assert(result_err == nil)
+          results[index] = result
+        end)
+      end
+      local joined
+      cache.load_metadata(profile, vim.deepcopy(first), "primary_keys", {}, function(result, result_err)
+        assert(result_err == nil)
+        joined = result
+      end)
+      assert(#pending == 4, "only the same object and category may share a statement")
+      assert(next(results) == nil and joined == nil)
+      assert(pending[1].statement:find("tc.table_schema = 'a.b'", 1, true))
+      assert(pending[1].statement:find("tc.table_name = 'c'", 1, true))
+      assert(pending[2].statement:find("tc.table_schema = 'a'", 1, true))
+      assert(pending[2].statement:find("tc.table_name = 'b.c'", 1, true))
+      assert(pending[3].statement:find("FROM pg_indexes", 1, true))
+      assert(pending[3].statement:find("schemaname = 'a.b'", 1, true))
+      assert(pending[3].statement:find("tablename = 'c'", 1, true))
+      assert(pending[4].statement:find("schemaname = 'a'", 1, true))
+      assert(pending[4].statement:find("tablename = 'b.c'", 1, true))
+      for index, case in ipairs(cases) do
+        pending[index].done(case.rows)
+        assert(vim.deep_equal(results[index], case.rows))
+        cache.load_metadata(profile, case.row, case.category, {}, function(result, result_err)
+          assert(result_err == nil)
+          cached[index] = result
+        end)
+      end
+      assert(vim.deep_equal(joined, {}))
+      assert(next(cached) == nil)
+      assert(vim.wait(1000, function()
+        return #cached == #cases
+      end))
+      for index, case in ipairs(cases) do
+        assert(vim.deep_equal(cached[index], case.rows))
+      end
+      assert(#pending == 4, "cached metadata, including empty rows, must not run statements")
+    end, debug.traceback)
+    runner.run = original_run
+    assert(ok, err)
+  end,
+
   ["completion suggests cached tables after FROM"] = function()
     local profile = { name = "completion-tables", kind = "trino", options = { catalog = "hive", schema = "public" } }
     local rows = {

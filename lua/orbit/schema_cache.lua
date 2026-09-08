@@ -20,8 +20,8 @@
 -- Cache shape: `profiles` is a table keyed by profile name, each holding one
 -- "state" table (see `entry` below) with:
 --   .tables   - cached array of table/view rows, or nil if never loaded.
---   .columns  - map of "catalog.schema.table" -> cached array of column rows.
---   .metadata - map of "catalog.schema.table\0category" -> cached array of
+--   .columns  - map of opaque schema-object identity -> cached column rows.
+--   .metadata - map of object identity + category -> cached array of
 --               rows for a metadata category (primary_keys/foreign_keys/indexes/projections).
 --   .requests - map of cache key -> in-flight request bookkeeping (see
 --               `acquire`), so concurrent callers asking for the same thing
@@ -35,6 +35,7 @@
 -- whenever a profile's connection settings change.
 local adapters = require("orbit.adapters")
 local runner = require("orbit.runner")
+local schema = require("orbit.schema")
 
 local M = {}
 local profiles = {}
@@ -144,8 +145,8 @@ start_acquisition = function(request, refresh)
 end
 
 -- The core cache/de-duplication engine shared by M.load_tables,
--- M.load_columns, and M.load_metadata. Given a cache `key` (e.g. "tables",
--- or "columns\0mytable"), decides whether to answer `callback` immediately
+-- M.load_columns, and M.load_metadata. Given a cache `key` identifying the
+-- object and metadata category, decides whether to answer `callback` immediately
 -- from cache, join an already-in-flight request for the same key, or start
 -- a brand new query.
 -- Parameters:
@@ -275,18 +276,6 @@ local function connector_for_metadata(profile, row, category, callback)
   end)
 end
 
--- Builds the cache key used to identify one schema object across catalog/
--- schema/table, e.g. "mycatalog.myschema.mytable" or just "mytable" for a
--- backend (like SQLite) that has no catalog/schema. Empty/absent parts are
--- dropped rather than leaving stray "." separators.
--- Parameter: row - a schema object row with optional .catalog/.schema and .name.
--- Returns: a dotted string uniquely naming the object for cache-key purposes.
-local function object_name(row)
-  return table.concat(vim.tbl_filter(function(value)
-    return value and value ~= ""
-  end, { row.catalog, row.schema, row.name }), ".")
-end
-
 -- Synchronously returns whatever table/view list is currently cached for
 -- `profile`, without triggering a load. Callers that want to guarantee
 -- fresh (or at least loaded-once) data should call M.load_tables instead;
@@ -297,12 +286,12 @@ function M.tables(profile)
 end
 
 -- Synchronously returns whatever column list is currently cached for
--- `table_name` (as produced by object_name) on `profile`, without
+-- schema object `row` on `profile`, without
 -- triggering a load. See M.tables above for the same "cache read, no fetch"
 -- pattern.
 -- Returns: an array of column rows, or {} if not loaded yet.
-function M.columns(profile, table_name)
-  return entry(profile).columns[table_name] or {}
+function M.columns(profile, row)
+  return entry(profile).columns[schema.identity(row)] or {}
 end
 
 -- Asynchronously loads the list of tables/views for `profile`, using the
@@ -355,12 +344,12 @@ function M.load_columns(profile, row, options, callback)
   if not connector then
     return
   end
-  local table_name = object_name(row)
+  local key = schema.identity(row)
   local state = entry(profile)
-  acquire(state, "columns\0" .. table_name, options, callback, function()
-    return state.columns[table_name]
+  acquire(state, "columns\0" .. key, options, callback, function()
+    return state.columns[key]
   end, function(rows)
-    state.columns[table_name] = rows
+    state.columns[key] = rows
   end, function(done)
     run_schema_statement(profile, connector, {
       type = "columns",
@@ -403,7 +392,7 @@ function M.load_metadata(profile, row, category, options, callback)
   if not connector then
     return
   end
-  local key = object_name(row) .. "\0" .. category
+  local key = schema.identity(row) .. "\0" .. category
   local state = entry(profile)
   acquire(state, "metadata\0" .. key, options, callback, function()
     return state.metadata[key]

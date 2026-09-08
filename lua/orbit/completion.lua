@@ -197,9 +197,8 @@ local function table_items(profile, connector, qualifier_segments, raw_prefix, p
 	return sorted(items)
 end
 
--- Column completion for one specific table. `table_name` is the schema
--- cache's own dotted key for a table (see the `object_name` helper below,
--- which builds this key from an alias-scope entry's identity). `prefix` is
+-- Column completion for one specific schema object `row`, passed directly
+-- to the cache so completion need not encode object identity. `prefix` is
 -- prepended to every inserted column name (used to also complete a partial
 -- word the user's already typed, when called from `qualified_column_items`
 -- with a raw qualifier prefix); `source` overrides what's shown in the
@@ -208,40 +207,14 @@ end
 -- name that column comes from instead). `partial` narrows to columns whose
 -- name starts with the in-progress word (case-insensitive), or "" to
 -- disable this filter (see partial_matches).
-local function column_items(profile, table_name, prefix, source, partial)
+local function column_items(profile, row, prefix, source, partial)
 	local items = {}
-	for _, column in ipairs(cache.columns(profile, table_name)) do
+	for _, column in ipairs(cache.columns(profile, row)) do
 		if partial_matches(column.name, partial) then
 			table.insert(items, item(prefix .. column.name, "Column", source or column.type or ""))
 		end
 	end
 	return sorted(items)
-end
-
--- The connection between an alias-scope entry's `name`/`schema`/`catalog`
--- and the schema_cache's own dotted `catalog.schema.name` key: find the
--- matching cached table row, if any, then hand that row's identity back to
--- the cache using the exact same key shape `schema_cache.object_name` uses.
--- ipairs over a literal table stops at the first nil, so catalog/schema
--- being absent (common) must be checked individually, not via a shared loop.
--- The connection between an alias-scope entry's `name`/`schema`/`catalog`
--- and the schema_cache's own dotted `catalog.schema.name` key: find the
--- matching cached table row, if any, then hand that row's identity back to
--- the cache using the exact same key shape `schema_cache.object_name` uses.
--- ipairs over a literal table stops at the first nil, so catalog/schema
--- being absent (common) must be checked individually, not via a shared loop.
-local function object_name(row)
-	local parts = {}
-	if row.catalog and row.catalog ~= "" then
-		table.insert(parts, row.catalog)
-	end
-	if row.schema and row.schema ~= "" then
-		table.insert(parts, row.schema)
-	end
-	if row.name and row.name ~= "" then
-		table.insert(parts, row.name)
-	end
-	return table.concat(parts, ".")
 end
 
 -- Finds the schema-cache row (as returned by cache.tables) matching an
@@ -304,7 +277,7 @@ local function qualified_column_items(profile, alias_scope, qualifier_segments, 
 	if #alias_scope == 0 then
 		-- No FROM clause yet to resolve against; fall back to treating the
 		-- qualifier as a bare table name, matching pre-tokenizer behavior.
-		return column_items(profile, name, raw_prefix, nil, partial)
+		return column_items(profile, { name = name }, raw_prefix, nil, partial)
 	end
 	local entry = find_scope_entry(alias_scope, name)
 	if not entry or entry.kind ~= "table" then
@@ -314,7 +287,7 @@ local function qualified_column_items(profile, alias_scope, qualifier_segments, 
 	if not row then
 		return {}
 	end
-	return column_items(profile, object_name(row), raw_prefix, nil, partial)
+	return column_items(profile, row, raw_prefix, nil, partial)
 end
 
 -- Column completion for an UNqualified position (no `alias.` typed yet),
@@ -333,7 +306,7 @@ local function unqualified_column_items(profile, alias_scope, partial)
 			local row = resolve_table_row(profile, entry)
 			if row then
 				local source = entry.alias or entry.name
-				for _, column in ipairs(column_items(profile, object_name(row), "", source, partial)) do
+				for _, column in ipairs(column_items(profile, row, "", source, partial)) do
 					table.insert(items, column)
 				end
 			end
@@ -357,7 +330,7 @@ local function single_target_column_items(profile, alias_scope, partial)
 		if entry.kind == "table" then
 			local row = resolve_table_row(profile, entry)
 			if row then
-				return column_items(profile, object_name(row), "", nil, partial)
+				return column_items(profile, row, "", nil, partial)
 			end
 		end
 	end

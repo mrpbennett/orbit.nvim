@@ -23,6 +23,7 @@
 --                       as previously loaded from the database (grouped
 --                       into schemas/tables/views by `orbit.schema.group`
 --                       when rendering).
+--   labels           - identity-keyed object labels, resolved before filtering.
 --
 -- "Nodes" are lightweight, disposable description tables (not stored
 -- long-term) representing one line of the tree: a schema, a group (the
@@ -50,6 +51,7 @@ function M.new()
     loading_metadata = {},
     metadata = {},
     tables = {},
+    labels = {},
   }
 end
 
@@ -62,6 +64,7 @@ function M.reset(tree)
   tree.loading_metadata = {}
   tree.metadata = {}
   tree.tables = {}
+  tree.labels = {}
 end
 
 -- Store the flat list of table/view rows fetched for this profile (e.g.
@@ -70,28 +73,23 @@ end
 -- Side effects: mutates tree.tables.
 function M.set_tables(tree, rows)
   tree.tables = rows
+  tree.labels = schema.labels(rows)
 end
 
--- Build a dotted, fully-qualified display name for a table/view row, e.g.
--- "catalog.schema.table_name", omitting any of those parts that are
--- missing/empty (some databases don't have catalogs, or the row is a
--- plain table with no schema concept).
--- Parameter: row - a table/view row with optional .catalog/.schema and
--- required .name fields.
--- Returns: the joined string. Used both for display and as part of the
--- unique keys that track expanded/metadata state per object.
-function M.object_name(row)
-  return table.concat(vim.tbl_filter(function(value)
-    return value and value ~= ""
-  end, { row.catalog, row.schema, row.name }), ".")
+-- Use the complete snapshot's label even when a filter hides its collision.
+-- An asynchronous action may still reference a row removed by refresh; that
+-- row gets its ordinary label rather than requiring stale tree state.
+function M.object_name(tree, row)
+  local key = schema.identity(row)
+  return tree.labels[key] or schema.labels({ row })[key]
 end
 
 -- Build the unique state-tracking key for a "group" node (the
 -- "tables"/"views" bucket displayed under a schema).
--- Parameters: schema_name - the schema's name; kind - "tables" or "views".
-local function group_key(schema_name, kind)
+-- Parameters: schema_key - the schema module's opaque identity; kind - "tables" or "views".
+local function group_key(schema_key, kind)
   -- NUL delimiters keep adjacent schema, object, and category names from colliding.
-  return "group\0" .. schema_name .. "\0" .. kind
+  return "group\0" .. schema_key .. "\0" .. kind
 end
 
 -- Build the unique state-tracking key for a metadata category node (e.g.
@@ -99,7 +97,7 @@ end
 -- Parameters: row - the table/view row this metadata belongs to;
 -- category_id - the metadata category id (e.g. "columns", "primary_keys").
 local function metadata_key(row, category_id)
-  return "metadata\0" .. M.object_name(row) .. "\0" .. category_id
+  return "metadata\0" .. schema.identity(row) .. "\0" .. category_id
 end
 
 -- Compute the unique string key used to track expand/collapse (and, for
@@ -114,13 +112,13 @@ end
 -- kinds (defensive fallback -- shouldn't normally happen).
 local function node_key(node)
   if node.kind == "schema" then
-    return "schema\0" .. node.name
+    return "schema\0" .. node.key
   end
   if node.kind == "group" then
-    return group_key(node.schema, node.group)
+    return group_key(node.key, node.group)
   end
   if node.kind == "table" then
-    return "table\0" .. M.object_name(node.row)
+    return "table\0" .. schema.identity(node.row)
   end
   if node.kind == "metadata" then
     return metadata_key(node.row, node.category.id)
@@ -285,7 +283,7 @@ function M.lines(tree, profile, filter, options)
     table.insert(lines, "No matching tables or views")
   end
   for _, schema_group in ipairs(groups) do
-    local schema_node = { kind = "schema", name = schema_group.name }
+    local schema_node = { kind = "schema", key = schema_group.key, name = schema_group.name }
     -- Filtering reveals matching ancestors without changing the user's saved expansion state.
     local schema_expanded = M.is_expanded(tree, schema_node) or filter ~= ""
     table.insert(lines, string.format("%s %s", schema_expanded and icons.expanded or icons.collapsed, schema_group.name))
@@ -293,7 +291,7 @@ function M.lines(tree, profile, filter, options)
     for _, kind in ipairs({ "tables", "views" }) do
       local objects = schema_group[kind]
       if schema_expanded and #objects > 0 then
-        local group_node = { kind = "group", schema = schema_group.name, group = kind }
+        local group_node = { kind = "group", key = schema_group.key, schema = schema_group.name, group = kind }
         local group_expanded = M.is_expanded(tree, group_node) or filter ~= ""
         table.insert(lines, string.format("  %s %s %d", group_expanded and icons.expanded or icons.collapsed, kind, #objects))
         nodes[#lines] = group_node

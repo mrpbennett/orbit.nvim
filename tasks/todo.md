@@ -1,5 +1,30 @@
 # Orbit.nvim v0.1 Plan
 
+## Schema Object Identity Deepening
+
+- [x] Confirm scope and ownership with the user; distinguish Schema object from its display label in the domain glossary.
+- [x] Deepen the existing schema module around structural identity and grouping; make acquisition reads accept schema objects and remove completion's key encoder.
+- [x] Use structural identity for schema browser expansion and metadata; preserve ordinary labels and disambiguate collisions before filtering.
+- [x] Verify collisions through acquisition, completion, grouping, and schema browser interfaces, including metadata categories and expansion across filtering.
+- [x] Run the full suite, inspect the diff, and complete an independent code review.
+
+### Settled Design
+
+- Scope includes acquisition, completion, schema browser state, and catalog/schema grouping; no new module, seam, or adapter.
+- The existing pure schema module owns structural identity. Callers must not reconstruct or interpret its encoding.
+- Schema acquisition accepts schema objects instead of dotted storage keys; there is no persisted-key migration or established external key contract.
+- Display labels do not determine identity. Preserve ordinary labels; quote identifier segments for collisions based on the complete acquired schema, before filtering.
+- Keep connector-owned qualified names, completion insertion and name matching, refresh semantics, loaded-empty metadata behavior, defaults, and keybindings unchanged.
+- Test through existing module interfaces, using the established runner substitution seam rather than direct cache mutation.
+
+### Review
+
+- Structural identity and collision-aware display labels now live in `lua/orbit/schema.lua`; acquisition and schema browser state use opaque identities, while completion passes schema objects directly.
+- Regression tests first reproduced acquisition collisions, namespace merging, and shared schema browser state. Coverage now verifies independent in-flight and cached metadata, qualified/unqualified and INSERT/UPDATE completion, category isolation, stable labels, and expansion across filtering and label changes.
+- Verification: 42 focused schema/completion/schema-browser tests passed; `nvim --headless -u NONE -l tests/run.lua` and `git diff --check` passed. An independent reviewer also ran the full suite with `-i NONE` successfully.
+- Independent Standards and Spec reviews reported no actionable findings. PostgreSQL/Trino/Vertica were not tested against live databases; collision tests use real connectors with the existing runner substitution seam.
+- No formatter configuration was found and `stylua` is unavailable; no formatting-only changes were made. No commits or GitHub writes were made.
+
 ## 0.2.5 Release Plan
 
 - [x] Convert the current `Unreleased` notes into the missing `0.2.1` historical section.

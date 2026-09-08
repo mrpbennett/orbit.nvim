@@ -194,7 +194,7 @@ return {
     assert_queued_refresh(function(options, callback)
       cache.load_columns(profile, row, options, callback)
     end, { { name = "old_id", type = "INTEGER" } }, { { name = "id", type = "INTEGER" } }, function()
-      assert(cache.columns(profile, "main.orders")[1].name == "id")
+      assert(cache.columns(profile, row)[1].name == "id")
     end)
   end,
 
@@ -303,7 +303,10 @@ return {
       { schema = "staging", name = "imports", type = "table" },
     })
 
-    assert(vim.deep_equal(groups, {
+    local visible_groups = vim.tbl_map(function(group)
+      return { name = group.name, tables = group.tables, views = group.views }
+    end, groups)
+    assert(vim.deep_equal(visible_groups, {
       {
         name = "analytics",
         tables = { { schema = "analytics", name = "events", type = "table" } },
@@ -315,5 +318,27 @@ return {
         views = {},
       },
     }))
+  end,
+
+  ["schema.group separates colliding namespaces and keeps labels stable through filtering"] = function()
+    local rows = {
+      { catalog = "a.b", schema = "c", name = "first", type = "table" },
+      { catalog = "a", schema = "b.c", name = "second", type = "view" },
+      { schema = "public", name = "ordinary", type = "table" },
+    }
+    local groups = schema.group(rows)
+    assert(#groups == 3, "distinct catalog/schema segments must not merge")
+    assert(groups[1].name == '"a"."b.c"')
+    assert(groups[1].views[1] == rows[2])
+    assert(groups[2].name == '"a.b"."c"')
+    assert(groups[2].tables[1] == rows[1])
+    assert(groups[3].name == "public")
+    assert(groups[1].key ~= groups[2].key)
+
+    local filtered = schema.group(rows, "FIRST")
+    assert(#filtered == 1 and filtered[1].name == '"a.b"."c"')
+    assert(filtered[1].key == groups[2].key)
+    assert(#schema.group(rows, "a.b.c") == 2, "ordinary dotted search must still work")
+    assert(#schema.group(rows, "missing") == 0)
   end,
 }
