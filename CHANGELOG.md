@@ -4,6 +4,12 @@ All notable changes to Orbit.nvim are documented in this file.
 
 ## Unreleased
 
+### Added
+
+- Added a MySQL 8.x connector backed by Oracle MySQL or MariaDB CLI clients, with TCP and Unix-socket profiles, client-managed credentials, family-specific TLS validation, and retained XML sessions.
+- Added MySQL schema browsing, backtick-qualified completion, columns, primary keys, foreign keys, indexes, view definitions, object actions, and editable table results. Failed editable batches terminate the client so MySQL rolls back before Orbit reconnects.
+- Added connector-selected MySQL tokenization for backtick identifiers, quoted strings, backslash escapes, and MySQL line-comment rules without changing other SQL dialects.
+
 ### Changed
 
 - Schema browser labels now quote identifier segments when distinct catalog/schema combinations would otherwise look identical. Ordinary labels remain unchanged, and disambiguated labels stay stable while filtering.
@@ -16,6 +22,7 @@ All notable changes to Orbit.nvim are documented in this file.
 ### Tests
 
 - Added regression coverage for independent in-flight and cached metadata, column completion, metadata categories, namespace grouping, quoted-label collisions, and expansion across filtering and label changes.
+- Added MySQL coverage for profile and TLS validation, client command construction, XML framing and parsing, schema capabilities, mutations, qualified completion, and dialect tokenization.
 
 ## 0.2.5 - 2026-09-07
 

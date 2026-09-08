@@ -1,5 +1,45 @@
 # Orbit.nvim v0.1 Plan
 
+## MySQL README Onboarding
+
+- [x] Close the MySQL profile details block consistently with the other connectors.
+- [x] Provide complete Oracle MySQL and MariaDB-client credential/profile workflows.
+- [x] Correct MySQL schema, metadata, editable-result, and SSH/TLS guidance.
+- [x] Validate every JSON and shell example, then run Markdown whitespace checks.
+
+### Review
+
+- MySQL onboarding now provides copy-paste credential setup and complete profiles for Oracle MySQL and MariaDB clients, plus explicit TCP, Docker, socket, remote, and SSH-tunnel guidance.
+- The MySQL details block matches the other connector blocks. The default database is no longer redundantly repeated in `schema_patterns`.
+- Workspace metadata and editable-result documentation now includes MySQL. SSH tunnel guidance distinguishes hostname verification from CA-only verification and calls out the MariaDB-client limitation.
+- Both complete profile documents pass `jq`, the credential script passes `bash -n`, and `git diff --check` passes.
+
+## MySQL Connector Plan
+
+- [x] Add failing coverage for MySQL profile validation, client commands, XML framing/parsing, schema capabilities, and editable mutations.
+- [x] Implement the full MySQL 8.x connector and register the `mysql` connection-profile kind.
+- [x] Add MySQL-aware tokenization for backticks, comments, escapes, and qualified-name splitting without changing existing dialect behavior.
+- [x] Verify retained execution and schema acquisition against the local MySQL 8.4 fixture.
+- [x] Update user and domain documentation, run complete verification, and independently review the implementation.
+
+### Settled Design
+
+- `kind: "mysql"` targets MySQL 8.x servers through either Oracle MySQL 8 or MariaDB CLI clients; MariaDB servers are unsupported and rejected.
+- Profiles require `database`; optional database patterns extend that default. TCP and Unix-socket settings are mutually exclusive.
+- `client_family` defaults to `mysql`. TLS mappings are exact per family and unsupported MariaDB-client modes fail validation.
+- Credentials remain client-managed. Orbit does not accept a MySQL password or use `MYSQL_PWD`.
+- Retained sessions use XML framing. One row-producing result set is supported, with explicit errors for multiple sets and arbitrary binary-cell limitations.
+- Qualified names use backtick-quoted database and object segments. MySQL lexical behavior is selected without regressing existing connectors.
+
+### Review
+
+- Added the `mysql` connection-profile kind with strict TCP/socket, client-family, TLS, and credential validation; retained XML sessions; MySQL 8 server enforcement; schema metadata/actions; qualified completion; and editable table results.
+- Generated text uses mode-independent hex literals. Connector-owned `--skip-force` makes a SQL error terminate the client so MySQL rolls back an unfinished editable batch before Orbit reconnects.
+- MySQL-aware tokenization handles backticks, default double-quoted strings, backslash escapes, `#` comments, and MySQL's whitespace requirement for `--` comments without changing existing connector behavior.
+- Live MySQL 8.4 verification passed through both Oracle MySQL 8.4 and MariaDB 12.3 clients, including value fidelity, schema patterns, keys/indexes, warning-only stderr, user/internal field-name collisions, trailing comments, error recovery, editable writes, and rollback after a forced mid-batch duplicate-key failure.
+- Verification: `nvim --headless -u NONE -l tests/run.lua` and `git diff --check` pass. `stylua` is unavailable. Independent Standards and Spec reviews found no remaining code issues after follow-up fixes.
+- No commit or GitHub write was made under repository policy.
+
 ## Trino Schema Loading Regression
 
 - [x] Create a deterministic performance regression test for a large Trino schema snapshot.

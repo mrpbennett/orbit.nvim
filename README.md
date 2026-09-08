@@ -45,6 +45,7 @@ Orbit runs statements through your existing database CLI, retains one connection
 | `trino`      | [`trino`](https://trino.io/docs/current/client/cli.html)               | Orbit requests JSON output.               |
 | `sqlite`     | `sqlite3`                                                              | Requires a build that supports `-json`.   |
 | `postgres`   | [`psql`](https://www.postgresql.org/docs/current/app-psql.html)        | Requires a version that supports `--csv`. |
+| `mysql`      | Oracle [`mysql`](https://dev.mysql.com/doc/refman/8.4/en/mysql.html) 8.x or MariaDB [`mariadb`](https://mariadb.com/docs/server/clients-and-utilities/mariadb-client/mariadb-command-line-client) | Connects to MySQL 8.x servers using XML. |
 | `vertica`    | [`vsql`](https://docs.vertica.com/24.3.x/en/connecting-to/using-vsql/) | Uses HTML table output.                   |
 
 ## Installation
@@ -81,19 +82,130 @@ If a query buffer has no profile, executing it opens profile selection and retri
 | `trino`    | `server`, `user`, `catalog` | `schema`, `schema_patterns`, `executable`, `arguments`, `confirm_mutations`                                      | Tables, views, and columns from `information_schema`. Omitting `schema` browses the catalog except `information_schema`. |
 | `sqlite`   | `path`                      | `schema_patterns`, `executable`, `arguments`, `confirm_mutations`                                                | Tables and views from `sqlite_master`, plus columns from `PRAGMA table_info`, under `main`.                              |
 | `postgres` | `database`                  | `schema_patterns`, `host`, `port`, `user`, `password`, `sslmode`, `executable`, `arguments`, `confirm_mutations` | Tables and views outside PostgreSQL system schemas, plus columns, primary keys, foreign keys, and indexes.               |
+| `mysql`    | `database`                  | `schema_patterns`, `host`, `port`, `socket`, `user`, `client_family`, `sslmode`, `executable`, `arguments`, `confirm_mutations` | MySQL 8.x tables and views, plus columns, primary keys, foreign keys, indexes, and view definitions.                 |
 | `vertica`  | `host`, `user`, `database`  | `schema_patterns`, `port`, `password`, `sslmode`, `executable`, `arguments`, `confirm_mutations`                 | User tables and views, plus columns, primary keys, foreign keys, projections, and view definitions.                      |
 
-`executable` replaces the CLI binary and `arguments` adds an array of string arguments before Orbit's generated arguments. This is useful for wrappers or CLI-specific authentication flags. For SQLite, PostgreSQL, and Vertica, Orbit retains one interactive CLI connection per profile; statements, schema browsing, and completion prewarming share it and are serialized per profile. A changed profile definition, failed CLI, `:OrbitDisconnect`, or Neovim exit closes the connection; the next request reconnects automatically. Trino statements instead run one `trino` CLI invocation per statement, serialized per profile, because the `trino` CLI does not flush its output while held open on a retained connection.
+`executable` replaces the CLI binary and `arguments` adds an array of string arguments before Orbit's generated arguments. This is useful for wrappers or CLI-specific authentication flags. For SQLite, PostgreSQL, MySQL, and Vertica, Orbit retains one interactive CLI connection per profile; statements, schema browsing, and completion prewarming share it and are serialized per profile. A changed profile definition, failed CLI, `:OrbitDisconnect`, or Neovim exit closes the connection; the next request reconnects automatically. Trino statements instead run one `trino` CLI invocation per statement, serialized per profile, because the `trino` CLI does not flush its output while held open on a retained connection.
 
 Schema browsing and completion cache rows only while the connection profile's kind and options are unchanged. Updating a profile clears its prior schema rows before Orbit acquires replacements. Connector metadata that is unavailable for an object, such as Trino primary keys, is shown as unavailable rather than treated as a statement failure. Explicit Workspace refreshes run after pending acquisitions and coalesce with other refresh requests.
 
-`schema_patterns` restricts the tables and views shown by Orbit's Workspace schema browser, but does not change database permissions or restrict statements you run manually. For Trino, it maps each catalog to an array of exact schema names; use an empty array to include every non-system schema from that catalog. PostgreSQL, SQLite, and Vertica use a non-empty array of exact schema names instead. SQLite's only available schema is `main`.
+`schema_patterns` restricts the tables and views shown by Orbit's Workspace schema browser, but does not change database permissions or restrict statements you run manually. For Trino, it maps each catalog to an array of schema patterns; use an empty array to include every non-system schema from that catalog. PostgreSQL, MySQL, SQLite, and Vertica use a non-empty array instead. Entries accept `*` and `?` globs. A MySQL profile always includes its required default `database`; its patterns add other databases. SQLite's only available schema is `main`.
 
 ## Connection Profiles
 
 The profile file is the source of truth for named connection profiles. Its default location is `~/.local/share/orbit.nvim/profiles.json`; set `profile_path` in `setup()` to use another location. Orbit refuses to load a file that is not mode `0600`.
 
 Profiles are JSON, versioned at `1`, and names must be unique:
+
+<details>
+<summary>MySQL</summary>
+
+```json
+{
+  "version": 1,
+  "profiles": [
+    {
+      "name": "app-mysql",
+      "kind": "mysql",
+      "options": {
+        "database": "app",
+        "host": "mysql.example.com",
+        "port": 3306,
+        "user": "alice",
+        "sslmode": "verify_identity",
+        "arguments": [
+          "--login-path=orbit",
+          "--ssl-ca=/home/alice/.mysql/ca.pem"
+        ]
+      }
+    }
+  ]
+}
+```
+
+</details>
+
+### MySQL Profiles
+
+Use TCP for Docker and remote servers. Use a Unix socket only when Neovim and MySQL can access the same socket file on one machine. MySQL passwords are not connection-profile options; configure them through the selected client's credential file.
+
+#### Oracle MySQL Client
+
+Create a protected login path. This command prompts for the password without placing it in shell history:
+
+```sh
+mysql_config_editor set \
+  --login-path=orbit \
+  --host=mysql.example.com \
+  --port=3306 \
+  --user=alice \
+  --password
+```
+
+Then paste the complete MySQL profile shown above into the profile file and replace the example host, database, user, home directory, and CA path. `client_family` and `executable` default to `mysql` and can be omitted.
+
+#### MariaDB Client With Local Docker
+
+The MariaDB client can connect to a MySQL 8.x server but cannot read Oracle MySQL login paths. Create a dedicated owner-only option file instead:
+
+```bash
+mkdir -p ~/.local/share/orbit.nvim
+read -rsp "MySQL password: " MYSQL_PASSWORD; printf '\n'
+umask 077
+printf '[client]\npassword=%s\n' "$MYSQL_PASSWORD" \
+  > ~/.local/share/orbit.nvim/mysql-docker.cnf
+unset MYSQL_PASSWORD
+```
+
+Paste this complete profile into the profile file. Replace `/home/you` with the value printed by `printf '%s\n' "$HOME"`:
+
+```json
+{
+  "version": 1,
+  "profiles": [
+    {
+      "name": "docker-mysql",
+      "kind": "mysql",
+      "options": {
+        "database": "orbit_dev",
+        "host": "127.0.0.1",
+        "port": 3306,
+        "user": "orbit",
+        "client_family": "mariadb",
+        "executable": "mariadb",
+        "arguments": [
+          "--defaults-extra-file=/home/you/.local/share/orbit.nvim/mysql-docker.cnf"
+        ]
+      }
+    }
+  ]
+}
+```
+
+Publish the container's MySQL port, for example with `-p 3306:3306`. If Neovim runs in another container on the same Docker network, replace `127.0.0.1` with the MySQL service name. Set `client_family` explicitly even when the MariaDB executable is named `mysql`; executable names do not reliably identify the client family. MariaDB servers are not supported.
+
+#### Unix Socket
+
+Replace `host` and `port` with the socket path in either profile shape:
+
+```json
+{
+  "database": "app",
+  "user": "alice",
+  "socket": "/run/mysqld/mysqld.sock"
+}
+```
+
+Socket profiles cannot set `host`, `port`, or `sslmode`. Mounting a container socket onto the host is possible, but publishing the TCP port is usually simpler.
+
+#### MySQL Connection Scenarios
+
+- **Local Docker:** Publish `3306`, then connect to `127.0.0.1:3306`.
+- **Docker-to-Docker:** Put both containers on one network, then use the MySQL service name and port `3306`.
+- **Remote MySQL:** Use the server DNS name and port, `sslmode: "verify_identity"`, and a trusted CA. The server firewall and MySQL grants must permit the client address.
+- **SSH tunnel:** Run `ssh -L 3307:127.0.0.1:3306 user@remote-host`, then connect to `127.0.0.1:3307`. Because that loopback host normally does not match the server certificate, Oracle MySQL users should use `verify_ca` with a trusted CA, or use a local hostname that resolves to `127.0.0.1` and appears in the certificate. MariaDB clients do not expose an equivalent CA-only mode.
+
+Oracle MySQL clients support `disabled`, `preferred`, `required`, `verify_ca`, and `verify_identity` for `sslmode`. MariaDB clients support `disabled`, `preferred`, and `verify_identity`; other modes fail validation rather than silently changing their security meaning. Pass CA files through `arguments`, as shown in the Oracle profile.
 
 <details>
 <summary>PostgreSQL</summary>
@@ -219,6 +331,8 @@ PostgreSQL profiles may include `options.password`. Orbit passes it only to `psq
 
 Vertica profiles may include `options.password`. Orbit passes it only to `vsql` as `VSQL_PASSWORD`, never as a command-line argument.
 
+MySQL profiles do not accept a password. Follow [MySQL Profiles](#mysql-profiles) to configure an Oracle MySQL login path or a protected MariaDB option file.
+
 Configure Trino authentication exactly as you do for the Trino CLI, including its `--password` flag, environment variables, tokens, keyrings, or credential providers it uses.
 
 Orbit passes profile values to the CLI as literal arguments. It does **not** expand `$VAR` or `${VAR}` inside JSON. Other Trino CLI authentication mechanisms, such as tokens or external credential providers, continue to work through their normal CLI configuration.
@@ -314,7 +428,7 @@ require("orbit").setup({
 | `?`    | Show help.                                                                                                  |
 | `q`    | Close the workspace.                                                                                        |
 
-Expanding a table reveals its available metadata folders. SQLite provides columns, primary keys, foreign keys, and indexes; Vertica provides columns, primary keys, foreign keys, and projections. Each folder loads on demand. Views remain under the schema's `views` group and expose their columns.
+Expanding a table reveals its available metadata folders. SQLite, PostgreSQL, and MySQL provide columns, primary keys, foreign keys, and indexes; Vertica provides columns, primary keys, foreign keys, and projections. Each folder loads on demand. Views remain under the schema's `views` group and expose their columns.
 
 ### Structure Panel
 
@@ -349,7 +463,7 @@ Structure parsing is dependency-free and tolerant of incomplete SQL. It outlines
 | `y`                | Copy the raw selected value.                                             |
 | `q`                | Close the standalone grid, or return to the query editor in a workspace. |
 
-Workspace sample statements for PostgreSQL and SQLite base tables become editable when Orbit can load a primary key. Ad-hoc statements, views, Trino, and tables without a primary key remain read-only.
+Workspace sample statements for MySQL, PostgreSQL, and SQLite base tables become editable when Orbit can load a primary key. Ad-hoc statements, views, Trino, Vertica, and tables without a primary key remain read-only.
 
 | Key / command       | Action                                                                     |
 | ------------------- | -------------------------------------------------------------------------- |
@@ -374,6 +488,7 @@ Press `a` on a table or view in the Workspace schema browser to select an action
 
 - SQLite: sample statement, columns, primary keys, indexes, foreign keys, and object definition.
 - PostgreSQL: sample statement, columns, primary keys, indexes, foreign keys, and view definition.
+- MySQL: sample statement, columns, primary keys, indexes, foreign keys, and view definition.
 - Vertica: sample statement, columns, primary keys, foreign keys, projections, and view definition.
 - Trino: sample statement and columns.
 
@@ -399,7 +514,7 @@ Orbit's schema-aware completion (tables, views, columns, table aliases) is provi
 
 Once wired up, suggestions appear automatically as you type, no manual trigger needed. Completion is clause-aware: it parses the statement around your cursor (not just the current line) with a small dependency-free SQL tokenizer, so suggestions depend on where you are:
 
-- Tables and views after any `FROM`-family clause (`FROM`, `JOIN`, `UPDATE`, `INTO`), and after `schema.`/`catalog.schema.` qualifiers on connectors that support them (PostgreSQL, Trino).
+- Tables and views after any `FROM`-family clause (`FROM`, `JOIN`, `UPDATE`, `INTO`), and after database/schema/catalog qualifiers on connectors that support them (MySQL, PostgreSQL, Trino).
 - Trino catalogs configured as top-level `schema_patterns` keys are offered alongside direct relation suggestions. Selecting a catalog and schema completes progressively (`catalog.` → `catalog.schema.` → `catalog.schema.table`); without `schema_patterns`, only the profile's default `catalog` is offered.
 - Columns in the `SELECT` list, `WHERE`, `ON`, `GROUP BY`, `ORDER BY`, `INSERT INTO t (...)`, and `UPDATE t SET ...`.
 - Table aliases: `SELECT u.| FROM users u` resolves `u` to `users`'s columns, including old-style comma joins (`FROM a, b`). With more than one table in scope, unqualified columns are offered from every table, each annotated with its source alias.
@@ -412,11 +527,13 @@ Set `completion = false` in Orbit's `setup()` to disable the blink source's `ena
 
 ## Execution And Results
 
-Orbit runs statements asynchronously through the selected profile's CLI. For SQLite, PostgreSQL, and Vertica, schema work and statements share one retained connection and execute one at a time; failures notify you and open a diagnostic window, and the next request starts a new connection. Trino statements each run their own `trino` CLI invocation, still serialized per profile. One running statement is allowed per query buffer; `:OrbitCancel` terminates the current CLI invocation (and, for SQLite, PostgreSQL, and Vertica, the retained connection) and pending work fails rather than running against an uncertain session.
+Orbit runs statements asynchronously through the selected profile's CLI. For SQLite, PostgreSQL, MySQL, and Vertica, schema work and statements share one retained connection and execute one at a time; failures notify you and open a diagnostic window, and the next request starts a new connection. Trino statements each run their own `trino` CLI invocation, still serialized per profile. One running statement is allowed per query buffer; `:OrbitCancel` terminates the current CLI invocation (and, for retained connectors, the connection) and pending work fails rather than running against an uncertain session.
 
 Potentially mutating statements require confirmation by default. A single `SELECT`, `SHOW`, `DESCRIBE`, `EXPLAIN`, `USE`, or `VALUES` statement runs without confirmation; everything else requires it. This is a convenience guardrail, not a security boundary.
 
 Result grids are reused per tabpage. They show up to `result_limit` rows and truncate displayed cell text to `max_cell_width` characters while retaining the raw value for copy and inspection.
+
+MySQL XML results preserve SQL `NULL`, empty strings, tabs, line feeds, and ordinary Unicode text. Statements returning multiple row-producing result sets fail explicitly because the Result grid represents one set. Arbitrary binary/BLOB bytes are not guaranteed to round-trip through the CLI XML format. MariaDB servers are rejected rather than treated as compatible MySQL servers.
 
 ## Configuration
 

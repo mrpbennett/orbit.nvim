@@ -48,11 +48,24 @@ return {
     assert_equal(loaded.profiles[2].kind, "sqlite")
   end,
 
+	["profiles.load accepts MySQL profiles and requires a database"] = function()
+		local valid = write_profiles({
+			version = 1,
+			profiles = { { name = "mysql-local", kind = "mysql", options = { database = "orbit_dev", client_family = "mariadb" } } },
+		})
+		assert(assert(profiles.load(valid)).profiles[1].kind == "mysql")
+
+		local missing = write_profiles({ version = 1, profiles = { { name = "mysql-local", kind = "mysql", options = {} } } })
+		local loaded, err = profiles.load(missing)
+		assert(loaded == nil and err:match("options.database"))
+	end,
+
   ["adapters resolve supported connector kinds and reject unknown kinds"] = function()
     assert(adapters.connector({ kind = "sqlite" }) == connector("sqlite"))
     assert(adapters.connector({ kind = "postgres" }) == connector("postgres"))
     assert(adapters.connector({ kind = "trino" }) == connector("trino"))
     assert(adapters.connector({ kind = "vertica" }) == connector("vertica"))
+		assert(adapters.connector({ kind = "mysql" }) == connector("mysql"))
     local unknown, err = adapters.connector({ kind = "unknown" })
     assert(unknown == nil)
     assert(err == "unsupported profile kind: unknown")

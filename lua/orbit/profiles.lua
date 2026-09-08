@@ -134,9 +134,9 @@ local function validate_profile(profile)
   if not valid then
     return nil, err
   end
-	-- Only these three database kinds are supported; anything else (typo,
+	-- Only registered database kinds are supported; anything else (typo,
 	-- unsupported future kind, missing field entirely) is rejected up front.
-	if profile.kind ~= "trino" and profile.kind ~= "sqlite" and profile.kind ~= "postgres" and profile.kind ~= "vertica" then
+	if profile.kind ~= "trino" and profile.kind ~= "sqlite" and profile.kind ~= "postgres" and profile.kind ~= "vertica" and profile.kind ~= "mysql" then
     return nil, string.format("profile %q has unsupported kind %q", profile.name, tostring(profile.kind))
   end
   if type(profile.options) ~= "table" then
@@ -147,9 +147,11 @@ local function validate_profile(profile)
 	-- fields: Trino needs a server/user/catalog to know where and how to
 	-- connect; Postgres needs at least a database name (host/user/etc are
 	-- presumably optional/defaulted); anything else (sqlite) just needs a
-	-- file `path`.
+	-- file `path`. MySQL also requires a default database, while Vertica
+	-- requires the complete host/user/database coordinates.
 	local required = profile.kind == "trino" and { "server", "user", "catalog" }
 		or profile.kind == "postgres" and { "database" }
+		or profile.kind == "mysql" and { "database" }
 		or profile.kind == "vertica" and { "host", "user", "database" }
 		or { "path" }
   for _, field in ipairs(required) do

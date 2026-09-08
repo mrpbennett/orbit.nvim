@@ -365,7 +365,7 @@ function M.items(profile, lines, row, col)
 	-- cursor is in, then analyze that statement for its clause/qualifier/
 	-- alias-scope. This module only decides what KIND of candidates to
 	-- build for each clause and fetches them from the schema cache.
-	local tokens = tokenizer.tokenize(lines)
+	local tokens = tokenizer.tokenize(lines, connector.sql_dialect)
 	local statement_tokens, cursor_index, touching = scope.statement_at(tokens, row, col)
 	local analysis = scope.analyze(statement_tokens, cursor_index, touching)
 	local qualifier = analysis.qualifier

@@ -137,7 +137,11 @@ local function start_next(session)
 				if output then
 					local request = session.active
 					session.active = nil
-					finish(request, output, request.stderr ~= "" and vim.trim(request.stderr) or nil)
+					local request_err = request.stderr ~= "" and vim.trim(request.stderr) or nil
+					if session.connector.session_error then
+						request_err = session.connector.session_error(request_err)
+					end
+					finish(request, output, request_err)
 					-- This request is done; immediately try to start whatever's
 					-- next in the queue on the same still-open process.
 					start_next(session)
@@ -166,10 +170,16 @@ local function start_next(session)
 			-- this profile name, this exit callback belongs to an old process
 			-- and must not fail the new session.
 			if sessions[session.profile.name] == session then
+				local stderr = result.stderr or ""
+				-- Streaming stderr callbacks may consume text before vim.system's
+				-- final result is assembled; preserve the active request's copy.
+				if stderr == "" and session.active then
+					stderr = session.active.stderr
+				end
 				fail(
 					session,
 					result.code == 0 and "connection closed"
-						or string.format("connection closed (%d): %s", result.code, vim.trim(result.stderr or ""))
+						or string.format("connection closed (%d): %s", result.code, vim.trim(stderr))
 				)
 			end
 		end)

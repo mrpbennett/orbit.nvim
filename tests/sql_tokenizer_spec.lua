@@ -79,7 +79,18 @@ return {
 
 	["split_qualified unquotes dotted quoted identifiers"] = function()
 		assert(vim.deep_equal(tokenizer.split_qualified([["Sales"."Order"]]), { "Sales", "Order" }))
+		assert(vim.deep_equal(tokenizer.split_qualified([[`sales``west`.`order.item`]]), { "sales`west", "order.item" }))
 		assert(vim.deep_equal(tokenizer.split_qualified("orders"), { "orders" }))
 		assert(vim.deep_equal(tokenizer.split_qualified("catalog.schema.name"), { "catalog", "schema", "name" }))
+	end,
+
+	["MySQL mode recognizes its quoted names, strings, and comments"] = function()
+		local tokens = tokenizer.tokenize({ [[SELECT `semi;``colon`, "text;value", 'it\'s;safe' # comment;]], "SELECT 1--2; -- comment" }, "mysql")
+		assert(tokens[2].type == "quoted_identifier" and tokens[2].text == "`semi;``colon`")
+		assert(tokens[4].type == "string" and tokens[4].text == [["text;value"]])
+		assert(tokens[6].type == "string" and tokens[6].text == [['it\'s;safe']])
+		assert(tokens[7].type == "comment")
+		assert(tokens[10].text == "-" and tokens[11].text == "-")
+		assert(tokens[13].type == "semicolon" and tokens[14].type == "comment")
 	end,
 }

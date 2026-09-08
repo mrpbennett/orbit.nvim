@@ -1,6 +1,6 @@
 # Orbit.nvim
 
-Orbit.nvim is a personal Neovim database query workspace for Trino, SQLite, and PostgreSQL. It provides statement execution, schema browsing, and formatted query results through backend-specific CLIs.
+Orbit.nvim is a personal Neovim database query workspace for Trino, SQLite, PostgreSQL, and MySQL. It provides statement execution, schema browsing, and formatted query results through backend-specific CLIs.
 
 ## Language
 
@@ -30,7 +30,7 @@ A table or view exposed by a connection profile, identified by its catalog, sche
 A recognized kind of metadata for a schema object: columns, primary keys, foreign keys, or indexes. A connector exposes only the categories it supports for that object.
 
 **Qualified name**:
-The canonical SQL-pasteable identifier for a schema object. It is connector-specific: SQLite uses a quoted object name, PostgreSQL uses quoted schema and object names, and Trino uses quoted catalog, schema, and object names.
+The canonical SQL-pasteable identifier for a schema object. It is connector-specific: SQLite uses a quoted object name, PostgreSQL uses quoted schema and object names, MySQL uses backtick-quoted database and object names, and Trino uses quoted catalog, schema, and object names.
 _Avoid_: table name, object path
 
 **Completion qualifier**:

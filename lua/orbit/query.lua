@@ -28,6 +28,7 @@
 -- buffer-local vim variables (vim.b[buffer].orbit_profile), and per-buffer
 -- "is something running" state lives in the private `running` table here.
 local profiles = require("orbit.profiles")
+local adapters = require("orbit.adapters")
 local diagnostics = require("orbit.diagnostics")
 local feedback = require("orbit.feedback")
 local results = require("orbit.results")
@@ -46,6 +47,17 @@ local running = {}
 -- has since started in the same buffer and bail out instead of rendering stale
 -- results on top of the new ones.
 local result_generation = {}
+
+local function set_buffer_dialect(buffer, profile)
+	local connector = adapters.connector(profile)
+	local dialect = connector and connector.sql_dialect or nil
+	if vim.b[buffer].orbit_sql_dialect == dialect then
+		return
+	end
+	vim.b[buffer].orbit_sql_dialect = dialect
+	-- Profile edits can change lexical rules without changing the SQL text.
+	require("orbit.structure").changed(buffer)
+end
 
 -- Lowercased first keywords of SQL statements that are considered "mutating"
 -- (i.e. they can change data or schema, as opposed to just reading it). Note
@@ -168,6 +180,7 @@ function M.profile_for_buffer(buffer, config)
 	if not profile then
 		return nil, string.format("connection profile %q does not exist", name)
 	end
+	set_buffer_dialect(buffer, profile)
 	return profile
 end
 
@@ -214,6 +227,7 @@ end
 --     profile got bound.
 function M.bind_profile(buffer, profile)
 	vim.b[buffer].orbit_profile = profile.name
+	set_buffer_dialect(buffer, profile)
 	if require("orbit").config.completion then
 		require("orbit.completion").prewarm(profile)
 	end

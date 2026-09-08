@@ -9,3 +9,5 @@
 - For UI-parity work, model the hierarchy shown in the reference rather than reducing it to top-level items; a SQL structure view includes internal query elements, not only statements.
 - For navigable trees, settle initial expansion and repeated-clause behavior explicitly; SQL set-operation branches are distinct outline nodes while deeper parenthesized subqueries are not peers.
 - Group a cohesive family of new display controls under one configuration object instead of expanding the top-level setup API with parallel fields.
+- For README connector additions, verify the requested profile object is complete and visibly placed in the rendered connector details, not merely described elsewhere.
+- In README requirement tables, name and link each required CLI explicitly so the dependency is as visible as the surrounding entries.

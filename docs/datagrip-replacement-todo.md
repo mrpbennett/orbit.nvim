@@ -55,7 +55,7 @@ This backlog prioritizes a fast, native Neovim database workspace over exhaustiv
 - [ ] Organize connection profiles into groups without putting credentials in project files.
 - [ ] Support project-local references to connection profiles stored in the owner-protected profile file.
 - [ ] Document CLI authentication, SSH tunnel, and environment-based secret workflows for each supported connector.
-- [ ] Add additional connectors based on actual use: PostgreSQL first if applicable, then MySQL/MariaDB and SQL Server.
+- [ ] Add additional connectors based on actual use: MariaDB server and SQL Server.
 
 ## Verification
 

@@ -30,6 +30,19 @@ local function with_acquisition(profile, rows, acquire, callback)
 end
 
 return {
+	["MySQL completion recognizes backtick-qualified namespaces"] = function()
+		local profile = { name = "mysql-completion", kind = "mysql", options = { database = "orbit_dev" } }
+		local rows = { { schema = "orbit_dev", name = "users", type = "table" } }
+		with_acquisition(profile, rows, function(done)
+			cache.load_tables(profile, {}, done)
+		end, function()
+			local line = "FROM `orbit_dev`."
+			assert(vim.deep_equal(words(completion.items(profile, { line }, 1, #line)), { "`orbit_dev`.`users`" }))
+			local commented = { "SELECT 1 # FROM ignored;", line }
+			assert(vim.deep_equal(words(completion.items(profile, commented, 2, #line)), { "`orbit_dev`.`users`" }))
+		end)
+	end,
+
   ["PostgreSQL acquisition and completion distinguish objects with the same dotted label"] = function()
     local profile = { name = "completion-object-identity", kind = "postgres", options = { database = "orbit" } }
     local rows = {

@@ -542,10 +542,11 @@ end
 -- a block because `previous_word` records the preceding END. An explicit
 -- DECLARE section may contain separators before its eventual BEGIN.
 --
--- Params: lines - query-buffer lines without newline terminators.
+-- Params: lines - query-buffer lines without newline terminators; dialect is
+-- the optional connector-selected tokenizer mode.
 -- Returns: an array of statement-root nodes in source order.
 -- Side effects: none.
-function M.extract(lines)
+function M.extract(lines, dialect)
 	local entries = {}
 	local current = {}
 	local compound = false
@@ -565,7 +566,7 @@ function M.extract(lines)
 		previous_word = nil
 	end
 
-	local tokens = tokenizer.tokenize(lines)
+	local tokens = tokenizer.tokenize(lines, dialect)
 	-- Once DECLARE appears in a recognized compound declaration, semicolons are
 	-- declarations rather than statement boundaries until BEGIN starts the body.
 	local function has_declarations()

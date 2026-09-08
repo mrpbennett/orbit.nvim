@@ -341,7 +341,7 @@ local function refresh(state)
 			return
 		end
 		if state.source_buffer and vim.api.nvim_buf_is_valid(state.source_buffer) then
-			state.entries = outline.extract(vim.api.nvim_buf_get_lines(state.source_buffer, 0, -1, false))
+			state.entries = outline.extract(vim.api.nvim_buf_get_lines(state.source_buffer, 0, -1, false), vim.b[state.source_buffer].orbit_sql_dialect)
 			state.source_changedtick = vim.api.nvim_buf_get_changedtick(state.source_buffer)
 			register_parents(state, false)
 		else
@@ -371,7 +371,7 @@ local function attach_source(state, buffer, window)
 	end
 	state.source_buffer = buffer
 	state.source_window = window
-	state.entries = outline.extract(vim.api.nvim_buf_get_lines(buffer, 0, -1, false))
+	state.entries = outline.extract(vim.api.nvim_buf_get_lines(buffer, 0, -1, false), vim.b[buffer].orbit_sql_dialect)
 	state.source_changedtick = vim.api.nvim_buf_get_changedtick(buffer)
 	register_parents(state, true)
 	if not attached_buffers[buffer] then
@@ -454,7 +454,7 @@ local function execute(state, config)
 	end
 	if state.source_changedtick ~= vim.api.nvim_buf_get_changedtick(state.source_buffer) then
 		local selected_id = selected.node.id
-		state.entries = outline.extract(vim.api.nvim_buf_get_lines(state.source_buffer, 0, -1, false))
+		state.entries = outline.extract(vim.api.nvim_buf_get_lines(state.source_buffer, 0, -1, false), vim.b[state.source_buffer].orbit_sql_dialect)
 		state.source_changedtick = vim.api.nvim_buf_get_changedtick(state.source_buffer)
 		register_parents(state, false)
 		local still_present = false

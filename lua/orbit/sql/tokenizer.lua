@@ -71,6 +71,8 @@ end
 --
 -- Params: lines - a Lua array of strings, one per buffer line, with no
 --   trailing "\n" on each (Neovim's own line-splitting convention).
+--   dialect - optional connector-selected lexical mode; "mysql" enables
+--   MySQL's quoting, escaping, and line-comment rules.
 -- Returns: a Lua array of token tables, each shaped like:
 --   { type = <string>, text = <string>, row = <1-based line number>,
 --     start_col = <0-based column where the token starts>,
@@ -83,7 +85,8 @@ end
 --
 -- All three connectors agree on '...' strings ('' escaping) and "..." quoted
 -- identifiers ("" escaping); see connectors/{postgres,sqlite,trino}.lua.
-function M.tokenize(lines)
+function M.tokenize(lines, dialect)
+	local mysql = dialect == "mysql"
 	-- Joining all lines with "\n" lets the scanner walk one flat string with
 	-- a single index `i`, instead of juggling a separate index per line. The
 	-- injected "\n" characters are treated specially in `advance()` below so
@@ -179,7 +182,7 @@ function M.tokenize(lines)
 	--   stops at end-of-input rather than raising an error — per the module
 	--   comment, unterminated literals must not crash the tokenizer, since
 	--   the buffer is frequently mid-edit while completion is running.
-	local function scan_delimited(quote, escape)
+	local function scan_delimited(quote, backslash_escapes)
 		local start_row, start_col = row, col
 		local text = { quote }
 		advance() -- opening quote
@@ -190,7 +193,15 @@ function M.tokenize(lines)
 				-- here (see the note above) rather than erroring.
 				break
 			end
-			if c == quote then
+			if backslash_escapes and c == "\\" then
+				-- MySQL uses a backslash to protect the following byte in quoted text.
+				table.insert(text, c)
+				advance()
+				if char() then
+					table.insert(text, char())
+					advance()
+				end
+			elseif c == quote then
 				if char(1) == quote then
 					-- Doubled quote: it's an escaped literal quote
 					-- character inside the value, not the end of the
@@ -264,12 +275,18 @@ function M.tokenize(lines)
 			-- Whitespace carries no meaning for SQL parsing/completion, so
 			-- it's simply skipped rather than emitted as a token.
 			advance()
-		elseif c == "-" and char(1) == "-" then
+		elseif c == "-" and char(1) == "-" and (not mysql or char(2) == nil or char(2):match("%s")) then
 			-- Line comment: "--" through to (but not including) the next
 			-- newline, or end of input if there isn't one. The comment's
 			-- text isn't kept (emitted as ""), since nothing downstream
 			-- needs the comment's contents — only that a comment occupies
 			-- this span, so it can be skipped when analyzing SQL structure.
+			local start_row, start_col = row, col
+			while char() and char() ~= "\n" do
+				advance()
+			end
+			emit("comment", start_row, start_col, "")
+		elseif mysql and c == "#" then
 			local start_row, start_col = row, col
 			while char() and char() ~= "\n" do
 				advance()
@@ -295,17 +312,20 @@ function M.tokenize(lines)
 				advance()
 			end
 			emit("comment", start_row, start_col, "")
+		elseif mysql and c == "`" then
+			local start_row, start_col, text = scan_delimited("`", false)
+			emit("quoted_identifier", start_row, start_col, text)
 		elseif c == '"' then
 			-- Quoted identifier, e.g. "My Table". See scan_delimited above
 			-- for the escaping rules.
-			local start_row, start_col, text = scan_delimited('"')
-			emit("quoted_identifier", start_row, start_col, text)
+			local start_row, start_col, text = scan_delimited('"', mysql)
+			emit(mysql and "string" or "quoted_identifier", start_row, start_col, text)
 		elseif c == "'" then
 			-- String literal, e.g. 'hello'. Same escaping rules as quoted
 			-- identifiers, just with a different delimiter character.
-			local start_row, start_col, text = scan_delimited("'")
+			local start_row, start_col, text = scan_delimited("'", mysql)
 			emit("string", start_row, start_col, text)
-		elseif c == "$" and dollar_delimiter() then
+		elseif not mysql and c == "$" and dollar_delimiter() then
 			local start_row, start_col, text = scan_dollar_quoted(dollar_delimiter())
 			emit("string", start_row, start_col, text)
 		elseif is_digit(c) then
@@ -326,7 +346,7 @@ function M.tokenize(lines)
 				end
 			end
 			emit("number", start_row, start_col, "")
-		elseif is_ident_start(c) then
+		elseif is_ident_start(c) or (mysql and c == "$") then
 			-- Identifier or keyword (e.g. `select`, `users`, `my_column`).
 			-- The tokenizer doesn't try to distinguish keywords from plain
 			-- identifiers here — everything that looks like a word is
@@ -335,7 +355,7 @@ function M.tokenize(lines)
 			-- keyword text if they care to.
 			local start_row, start_col = row, col
 			local text = {}
-			while is_ident_char(char()) do
+			while is_ident_char(char()) or (mysql and char() == "$") do
 				table.insert(text, char())
 				advance()
 			end
@@ -404,19 +424,20 @@ function M.split_qualified(text)
 	local n = #text
 	while i <= n do
 		local c = text:sub(i, i)
-		if c == '"' then
+		if c == '"' or c == "`" then
+			local quote = c
 			-- Enter a quoted segment: consume characters verbatim
 			-- (un-escaping doubled quotes back to one) until the closing
 			-- quote, without treating '.' specially while inside it.
 			i = i + 1
 			while i <= n do
 				local d = text:sub(i, i)
-				if d == '"' then
-					if text:sub(i + 1, i + 1) == '"' then
+				if d == quote then
+					if text:sub(i + 1, i + 1) == quote then
 						-- Doubled quote inside the quoted segment: a
 						-- literal '"' character in the name, not the end
 						-- of the segment.
-						table.insert(buffer, '"')
+						table.insert(buffer, quote)
 						i = i + 2
 					else
 						-- Single quote: closes this quoted segment.

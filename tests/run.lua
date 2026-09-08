@@ -10,6 +10,7 @@ local modules = {
   "orbit.adapters",
 	"orbit.completion",
 	"orbit.connectors.postgres",
+	"orbit.connectors.mysql",
 	"orbit.connectors.utils.mutation_sql",
    "orbit.diagnostics",
    "orbit.editable_result",
@@ -38,6 +39,7 @@ end
 local specs = {
   require("tests.config_spec"),
   require("tests.profile_spec"),
+	require("tests.mysql_spec"),
   require("tests.feedback_spec"),
   require("tests.keymaps_spec"),
   require("tests.statements_spec"),
