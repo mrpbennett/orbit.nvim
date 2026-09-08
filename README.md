@@ -304,8 +304,6 @@ Oracle MySQL clients support `disabled`, `preferred`, `required`, `verify_ca`, a
 }
 ```
 
-</details>
-
 ### Trino Multi-Catalog Schema Browser
 
 Trino profiles still require `catalog` as the CLI's default catalog, but `schema_patterns` can browse schemas from multiple catalogs. Orbit retains each object's catalog for column inspection, copied names, and generated sample statements:
@@ -323,6 +321,7 @@ Trino profiles still require `catalog` as the CLI's default catalog, but `schema
 ```
 
 An empty array, such as `"catalog_1": []`, includes every non-system schema from that catalog. Omit a catalog entirely to hide it.
+</details>
 
 ### Authentication
 
