@@ -23,7 +23,7 @@
 --                       as previously loaded from the database (grouped
 --                       into schemas/tables/views by `orbit.schema.group`
 --                       when rendering).
---   labels           - identity-keyed object labels, resolved before filtering.
+--   labels           - identity-keyed object labels, resolved on first use.
 --
 -- "Nodes" are lightweight, disposable description tables (not stored
 -- long-term) representing one line of the tree: a schema, a group (the
@@ -73,7 +73,7 @@ end
 -- Side effects: mutates tree.tables.
 function M.set_tables(tree, rows)
   tree.tables = rows
-  tree.labels = schema.labels(rows)
+  tree.labels = nil
 end
 
 -- Use the complete snapshot's label even when a filter hides its collision.
@@ -81,6 +81,9 @@ end
 -- row gets its ordinary label rather than requiring stale tree state.
 function M.object_name(tree, row)
   local key = schema.identity(row)
+  if not tree.labels then
+    tree.labels = schema.labels(tree.tables)
+  end
   return tree.labels[key] or schema.labels({ row })[key]
 end
 

@@ -1,6 +1,7 @@
 local schema = require("orbit.schema")
 local cache = require("orbit.schema_cache")
 local runner = require("orbit.runner")
+local schema_tree = require("orbit.schema_tree")
 
 local function assert_queued_refresh(load, ordinary_rows, refreshed_rows, assert_cached)
   local original_run = runner.run
@@ -340,5 +341,34 @@ return {
     assert(filtered[1].key == groups[2].key)
     assert(#schema.group(rows, "a.b.c") == 2, "ordinary dotted search must still work")
     assert(#schema.group(rows, "missing") == 0)
+  end,
+
+  ["schema identity remains fast for large Trino schema snapshots"] = function()
+    local rows = {}
+    for schema_index = 1, 100 do
+      for object_index = 1, 1000 do
+        table.insert(rows, {
+          catalog = "hive",
+          schema = "schema_" .. schema_index,
+          name = "table_" .. object_index,
+          type = "table",
+        })
+      end
+    end
+
+    local started_at = vim.uv.hrtime()
+    local tree = schema_tree.new()
+    schema_tree.set_tables(tree, rows)
+    local lines = schema_tree.lines(tree, {
+      kind = "trino",
+      name = "large-trino-schema",
+      options = { catalog = "hive" },
+    }, "", {
+      icons = { collapsed = ">", column = "C", expanded = "v", folder = "F", result = "R", table = "T", view = "V" },
+    })
+    local elapsed_ms = (vim.uv.hrtime() - started_at) / 1e6
+
+    assert(#lines == 100)
+    assert(elapsed_ms < 500, string.format("grouping 100,000 Trino objects took %.0fms", elapsed_ms))
   end,
 }

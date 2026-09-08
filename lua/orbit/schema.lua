@@ -23,11 +23,14 @@
 --   M.group(rows, query)  -> array of { key, name, tables = {...}, views = {...} }
 local M = {}
 
--- Keep segment positions even when a catalog or schema is absent. Encoding
--- the tuple escapes identifier punctuation without making it a separator.
+-- Keep segment positions even when a catalog or schema is absent. Length
+-- prefixes make every tuple unambiguous without serializing it as JSON.
 -- Callers may compare/store the key, but must not interpret its encoding.
 function M.identity(row)
-	return vim.json.encode({ row.catalog or "", row.schema or "", row.name or "" })
+	local catalog = row.catalog or ""
+	local schema = row.schema or ""
+	local name = row.name or ""
+	return #catalog .. ":" .. catalog .. #schema .. ":" .. schema .. #name .. ":" .. name
 end
 
 -- Labels are presentation only. Resolve collisions against the complete
@@ -35,7 +38,7 @@ end
 -- A row without a name describes a catalog/schema group rather than an object.
 function M.labels(rows)
 	local labels, quoted = {}, {}
-	for _, row in ipairs(rows) do
+	for _, row in pairs(rows) do
 		local parts, quoted_parts = {}, {}
 		for _, field in ipairs({ "catalog", "schema", "name" }) do
 			local part = row[field]
@@ -127,15 +130,19 @@ function M.group(rows, query)
 	local namespaces = {}
 	for _, row in ipairs(rows) do
 		-- Preserve the implicit "main" schema used for schema-less objects.
-		table.insert(namespaces, { catalog = row.catalog, schema = row.schema or "main" })
+		local namespace = { catalog = row.catalog, schema = row.schema or "main" }
+		local key = M.identity(namespace)
+		-- A Trino catalog/schema typically owns many objects. Retain the
+		-- namespace once, rather than labeling an identical copy per object.
+		namespaces[key] = namespace
 	end
 	local labels = M.labels(namespaces)
-	for index, row in ipairs(rows) do
+	for _, row in ipairs(rows) do
     -- Catalog is part of a Trino schema's identity; matching a schema includes all of its objects.
     -- (Postgres/sqlite rows have no catalog, so this just falls back to the schema name, or "main"
     -- when even the schema is unknown -- sqlite in particular has a single implicit schema.)
     local schema_name = row.catalog and row.catalog .. "." .. (row.schema or "main") or row.schema or "main"
-		local key = M.identity(namespaces[index])
+		local key = M.identity({ catalog = row.catalog, schema = row.schema or "main" })
 		-- `find(needle, 1, true)` does a *plain* substring search starting at
 		-- position 1 -- the trailing `true` disables Lua pattern matching so
 		-- that characters like "." or "%" in schema/table names are treated

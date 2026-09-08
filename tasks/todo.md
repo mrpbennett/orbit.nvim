@@ -1,5 +1,19 @@
 # Orbit.nvim v0.1 Plan
 
+## Trino Schema Loading Regression
+
+- [x] Create a deterministic performance regression test for a large Trino schema snapshot.
+- [x] Measure the current schema acquisition/render path and isolate the post-`248e222` bottleneck.
+- [x] Apply the smallest correction and preserve schema-object identity behavior.
+- [x] Run focused and complete verification, then record the root cause and results.
+
+### Review
+
+- Root cause: `248e222` allocated and JSON-serialized structural identities for every object twice during first tree render, including a separate namespace record per object. Large Trino schemas therefore spent most of their load time in local bookkeeping rather than acquisition.
+- `schema.identity` now uses an unambiguous length-prefixed tuple. Grouping retains and labels each unique catalog/schema once, and object labels are deferred until an object action needs one.
+- Regression coverage exercises a 100,000-object Trino snapshot through tree population and initial render with a 500ms budget.
+- Verification: the full suite passes via `nvim --headless -u NONE -l tests/run.lua`; `git diff --check` passes. `stylua` is unavailable in this environment.
+
 ## Schema Object Identity Deepening
 
 - [x] Confirm scope and ownership with the user; distinguish Schema object from its display label in the domain glossary.
