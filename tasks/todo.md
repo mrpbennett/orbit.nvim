@@ -1,5 +1,24 @@
 # Orbit.nvim v0.1 Plan
 
+## README Keybinding Audit
+
+- [x] Update the configurable-mapping table to show every supported action, including the disabled-by-default Structure mapping.
+- [x] Complete the Workspace documentation with query-buffer filtering, mouse activation, filter exit, and floating preview/help close keys.
+- [x] Complete the Result-grid documentation with editable navigation/selection controls and value-inspector keys.
+- [x] Document the diagnostic-window close key, then verify every listed mapping against source and run Markdown whitespace checks.
+
+### Scope
+
+- Treat mappings installed by Orbit and relevant native Neovim movement/scrolling keys already presented as part of an Orbit view as user-facing keybindings.
+- Keep keybindings grouped by their actual scope: configurable actions, Workspace sidebar/query buffers, Structure panel, Result grid, editable Result grid, floating windows, and diagnostics.
+- Change only `README.md` plus this task record; no runtime behavior or defaults will change.
+
+### Review
+
+- The README now covers every configurable action and each mapping installed in SQL buffers, the Workspace sidebar and its popups, the Structure panel, Result grids and value inspectors, and diagnostic splits.
+- Added previously omitted Workspace mouse/filter controls, editable Result-grid selection and first/last-row navigation, popup close/copy controls, and the diagnostic close key.
+- Verification: `nvim --headless -u NONE -l tests/run.lua` and `git diff --check` pass.
+
 ## Semantic Icon Colors
 
 - [x] Add focused coverage for icon-only highlights in the Workspace and Structure panel.

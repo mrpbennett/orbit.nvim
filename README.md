@@ -390,14 +390,15 @@ Whole-buffer execution rejects ambiguous multi-statement content. Select the exa
 
 Orbit installs the following defaults:
 
-| Mode and scope     | Mapping     | Action                                                   |
-| ------------------ | ----------- | -------------------------------------------------------- |
-| Normal, global     | `<leader>D` | Open the workspace or toggle its profile/schema browser. |
-| Normal, SQL buffer | `<leader>E` | Execute the buffer statement.                            |
-| Visual, SQL buffer | `<leader>E` | Execute the visual selection.                            |
-| Normal, Structure panel | `<leader>E` | Execute the highlighted Structure element.          |
-| Normal, SQL buffer | `<leader>P` | Select a connection profile.                             |
-| Normal, SQL buffer | `<leader>X` | Cancel the running statement.                            |
+| Mode and scope          | Default      | Action                                                   |
+| ----------------------- | ------------ | -------------------------------------------------------- |
+| Normal, global          | `<leader>D`  | Open the workspace or toggle its profile/schema browser. |
+| Normal, SQL buffer      | `<leader>E`  | Execute the buffer statement.                            |
+| Visual, SQL buffer      | `<leader>E`  | Execute the visual selection.                            |
+| Normal, Structure panel | `<leader>E`  | Execute the highlighted Structure element.               |
+| Normal, SQL buffer      | `<leader>P`  | Select a connection profile.                             |
+| Normal, SQL buffer      | `<leader>X`  | Cancel the running statement.                            |
+| Normal, SQL buffer      | Disabled     | Toggle the Structure panel (`structure = false`).        |
 
 Configure action mappings through `keymaps`. `execute` also applies in the Structure panel; `cancel`, `select_profile`, and the disabled-by-default `structure` action are buffer-local in SQL buffers, while `workspace` is global. Set an action to `false` to disable it.
 
@@ -425,11 +426,14 @@ require("orbit").setup({
 | `a`    | Select an action for the selected table, view, or saved query.                                               |
 | `y`    | Copy the qualified selected table or view name.                                                             |
 | `P`    | Preview the selected saved query without opening or binding it.                                             |
-| `/`    | Filter profiles, schema objects, and saved queries.                                                         |
+| `/`    | Focus the filter from the sidebar or a Workspace query buffer.                                             |
 | `r`    | Reload the profile file and refresh the selected profile schema, or rescan saved queries.                   |
 | `Z`    | Collapse the open profile schema tree.                                                                      |
+| `<2-LeftMouse>` | Activate the clicked node; expandable nodes toggle, profiles bind, and saved queries open.              |
 | `?`    | Show help.                                                                                                  |
 | `q`    | Close the workspace.                                                                                        |
+
+While editing the Workspace filter, press `<Esc>` to finish filtering. In a saved-query preview, `q` or `<Esc>` closes the preview. In Workspace help, `q`, `?`, or `<Esc>` closes the help window.
 
 Expanding a table reveals its available metadata folders. SQLite, PostgreSQL, and MySQL provide columns, primary keys, foreign keys, and indexes; Vertica provides columns, primary keys, foreign keys, and projections. Each folder loads on demand. Views remain under the schema's `views` group and expose their columns.
 
@@ -459,12 +463,12 @@ Structure parsing is dependency-free and tolerant of incomplete SQL. It outlines
 
 ### Result Grid
 
-| Key                | Action                                                                   |
-| ------------------ | ------------------------------------------------------------------------ |
-| `h`, `j`, `k`, `l` | Move between cells.                                                      |
-| `<CR>`             | Inspect the raw value in a floating window.                              |
-| `y`                | Copy the raw selected value.                                             |
-| `q`                | Close the standalone grid, or return to the query editor in a workspace. |
+| Key                | Action                                                                            |
+| ------------------ | --------------------------------------------------------------------------------- |
+| `h`, `j`, `k`, `l` | Move between cells.                                                               |
+| `<CR>`             | Inspect a read-only value, or edit the focused cell in an editable grid.          |
+| `y`                | Copy the raw selected value.                                                      |
+| `q`                | Close the standalone grid, or return to the query editor in a Workspace.          |
 
 Workspace sample statements for MySQL, PostgreSQL, and SQLite base tables become editable when Orbit can load a primary key. Ad-hoc statements, views, Trino, Vertica, and tables without a primary key remain read-only.
 
@@ -474,7 +478,9 @@ Workspace sample statements for MySQL, PostgreSQL, and SQLite base tables become
 | `i`, `<CR>`         | Enter Insert mode in the focused cell; press `Esc` to keep the local edit. |
 | `dd`                | Mark the current row for local deletion.                                   |
 | `V`, `j` / `k`, `d` | Select complete rows and delete the selection.                             |
+| `<Esc>`             | Clear the current row selection.                                           |
 | `u`                 | Undo the most recent local edit.                                           |
+| `gg`, `G`           | Move to the first or last result row while retaining the focused column.   |
 | `:w`                | Confirm, transactionally save, and reload pending changes.                 |
 | `:wq`               | Save successfully, then close the Result grid.                             |
 | `:q!`               | Discard local changes and close.                                           |
@@ -484,6 +490,12 @@ Edits are never sent to the database until `:w`. A failed write leaves the local
 Type `NULL` as the complete cell value to write a SQL `NULL` value.
 
 Normal Neovim scrolling remains available, including `<C-d>`, `<C-u>`, `zh`, and `zl`.
+
+In the raw-value inspector, `y` copies the complete value and `q` closes the window.
+
+### Diagnostic Window
+
+Database and execution errors may open in a diagnostic split. Press `q` there to close it.
 
 ### Schema Object Actions
 
