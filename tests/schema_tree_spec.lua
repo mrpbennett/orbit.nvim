@@ -150,6 +150,36 @@ return {
     assert(nodes[3].row.name == "sessions")
   end,
 
+  ["schema_tree.lines highlights semantic icons without coloring labels"] = function()
+    local tree = schema_tree.new()
+    local colored_icons = vim.tbl_extend("force", icons, { schema = "", table = "󰓫" })
+    schema_tree.set_tables(tree, { { schema = "main", name = "sessions", type = "table" } })
+    local _, nodes = schema_tree.lines(tree, profile, "", { icons = colored_icons })
+    schema_tree.toggle(tree, nodes[1])
+    _, nodes = schema_tree.lines(tree, profile, "", { icons = colored_icons })
+    schema_tree.toggle(tree, nodes[2])
+
+    local lines, _, highlights = schema_tree.lines(tree, profile, "", { icons = colored_icons })
+    local by_group = {}
+    for _, highlight in ipairs(highlights) do
+      by_group[highlight.group] = highlight
+    end
+
+    assert(lines[1] == "v  main")
+    assert(vim.deep_equal(by_group.OrbitIconSchema, {
+      group = "OrbitIconSchema",
+      line = 1,
+      col_start = 2,
+      col_end = 2 + #colored_icons.schema,
+    }))
+    assert(vim.deep_equal(by_group.OrbitIconTable, {
+      group = "OrbitIconTable",
+      line = 3,
+      col_start = 6,
+      col_end = 6 + #colored_icons.table,
+    }))
+  end,
+
   ["schema_tree.toggle expands a table to reveal its metadata categories"] = function()
     local tree = schema_tree.new()
     local row = { schema = "main", name = "sessions", type = "table" }

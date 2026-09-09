@@ -67,6 +67,10 @@ _Avoid_: selected connection, current connection
 A Neovim buffer containing statements and optionally associated with a specific connection profile.
 _Avoid_: SQL file, editor buffer
 
+**Saved query**:
+A reusable `.sql` file contained within a saved query location. Orbit can open it as a query buffer and organize it within the configured saved query locations.
+_Avoid_: query file, saved file
+
 **Saved query location**:
 A named directory containing reusable `.sql` files that can be opened as query buffers.
 _Avoid_: save directory, save location

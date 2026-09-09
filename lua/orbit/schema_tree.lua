@@ -238,6 +238,30 @@ local function metadata_entry_icon(icons, category)
 	return icons.result
 end
 
+-- Highlight columns are byte offsets because that is what Neovim's buffer API
+-- expects. This keeps multi-byte Nerd Font glyphs isolated from their labels.
+local function add_icon_highlight(highlights, line, group, col_start, icon)
+	table.insert(highlights, {
+		group = group,
+		line = line,
+		col_start = col_start,
+		col_end = col_start + #icon,
+	})
+end
+
+local function metadata_icon_group(category)
+	if category == "columns" then
+		return "OrbitIconColumn"
+	end
+	if category == "primary_keys" or category == "foreign_keys" then
+		return "OrbitIconKey"
+	end
+	if category == "indexes" then
+		return "OrbitIconIndex"
+	end
+	return "OrbitIconResult"
+end
+
 -- Render the entire schema tree (for one profile) into plain text lines,
 -- ready to be written into the sidebar buffer. This is the main entry
 -- point the workspace calls on every redraw (e.g. after a toggle, a filter
@@ -264,10 +288,8 @@ end
 --                "loading..." message), so the workspace can map a cursor
 --                line back to "what did the user just press Enter/toggle
 --                on".
---   highlights - list of { group = <highlight group name>, line = <line
---                number> } used to apply syntax highlighting (e.g.
---                "OrbitTable"/"OrbitView"/"OrbitColumn") to specific lines
---                via extmarks/matchadd in the workspace.
+--   highlights - line highlights plus icon highlights carrying byte-based
+--                col_start/col_end ranges for the Workspace buffer API.
 --   (4th value) - boolean, true if there was at least one group to show
 --                (i.e. the filter matched something) -- lets the caller
 --                distinguish "showing real results" from "nothing
@@ -299,6 +321,13 @@ function M.lines(tree, profile, filter, options)
 			)
 		)
 		nodes[#lines] = schema_node
+		add_icon_highlight(
+			highlights,
+			#lines,
+			"OrbitIconSchema",
+			#(schema_expanded and icons.expanded or icons.collapsed) + 1,
+			icons.schema
+		)
 		for _, kind in ipairs({ "tables", "views" }) do
 			local objects = schema_group[kind]
 			if schema_expanded and #objects > 0 then
@@ -314,6 +343,9 @@ function M.lines(tree, profile, filter, options)
 				end
 				table.insert(lines, string.format("  %s %s", marker, label))
 				nodes[#lines] = group_node
+				if kind == "tables" then
+					add_icon_highlight(highlights, #lines, "OrbitIconTable", #("  " .. marker .. " "), icons.with)
+				end
 				if group_expanded then
 					for _, row in ipairs(objects) do
 						local object_kind = row.type == "view" and "view" or "table"
@@ -332,6 +364,13 @@ function M.lines(tree, profile, filter, options)
 						table.insert(
 							highlights,
 							{ group = object_kind == "view" and "OrbitView" or "OrbitTable", line = #lines }
+						)
+						add_icon_highlight(
+							highlights,
+							#lines,
+							object_kind == "view" and "OrbitIconView" or "OrbitIconTable",
+							#("    " .. (table_expanded and icons.expanded or icons.collapsed) .. " "),
+							icons[object_kind]
 						)
 						if table_expanded then
 							-- Ask the connector which metadata categories apply to this
@@ -364,6 +403,13 @@ function M.lines(tree, profile, filter, options)
 									)
 								)
 								nodes[#lines] = metadata_node
+								add_icon_highlight(
+									highlights,
+									#lines,
+									"OrbitIconFolder",
+									#("      " .. (metadata_expanded and icons.expanded or icons.collapsed) .. " "),
+									icons.folder
+								)
 								if metadata_expanded then
 									if entries then
 										for _, entry in ipairs(entries) do
@@ -375,10 +421,18 @@ function M.lines(tree, profile, filter, options)
 													metadata_label(category.id, entry)
 												)
 											)
+											local entry_icon = metadata_entry_icon(icons, category.id)
 											table.insert(highlights, {
 												group = category.id == "columns" and "OrbitColumn" or "OrbitTable",
 												line = #lines,
 											})
+											add_icon_highlight(
+												highlights,
+												#lines,
+												metadata_icon_group(category.id),
+												#"        ",
+												entry_icon
+											)
 										end
 									else
 										-- entries is nil here: the category has been expanded

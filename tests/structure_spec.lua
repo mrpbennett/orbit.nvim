@@ -247,7 +247,7 @@ return {
       expanded = "-",
       folder = "G",
       query = "Q",
-      statement_ddl = "D",
+      statement_ddl = "󰒓",
       statement_dml = "M",
       statement_other = "O",
       statement_select = "S",
@@ -260,9 +260,23 @@ return {
       assert(node_text(state, "group", "DML"):find("G DML", 1, true))
       assert(node_text(state, "group", "SELECT"):find("G SELECT", 1, true))
       assert(node_text(state, "group", "Other"):find("G Other", 1, true))
-      assert(node_text(state, "statement", "CREATE TABLE widgets (id int);"):find("D CREATE", 1, true))
+      assert(node_text(state, "statement", "CREATE TABLE widgets (id int);"):find("󰒓 CREATE", 1, true))
       assert(node_text(state, "statement", "UPDATE widgets SET id = 1;"):find("M UPDATE", 1, true))
       assert(node_text(state, "statement", "VACUUM;"):find("O VACUUM", 1, true))
+
+      local ddl_line = assert(node_line(state, "statement", "CREATE TABLE widgets (id int);"))
+      local icon_highlight
+      local current_highlight
+      for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(state.buffer, -1, { ddl_line - 1, 0 }, { ddl_line - 1, -1 }, { details = true })) do
+        if mark[4].hl_group == "OrbitIconDDL" then
+          icon_highlight = mark
+        elseif mark[4].hl_group == "OrbitStructureCurrent" then
+          current_highlight = mark
+        end
+      end
+      assert(icon_highlight, "DDL icon should have a semantic highlight")
+      assert(icon_highlight[3] == 4 and icon_highlight[4].end_col == 4 + #icons.statement_ddl, vim.inspect(icon_highlight))
+      assert(not current_highlight or current_highlight[1] < icon_highlight[1], "icon color should take precedence")
 
       local select_statement = assert(statement_line(state, "SELECT"))
       assert(vim.api.nvim_buf_get_lines(state.buffer, select_statement - 1, select_statement, false)[1]:find("S WITH", 1, true))
@@ -292,7 +306,7 @@ return {
         structure_width = 60,
       })
       assert(not node_line(state, "group"))
-      assert(node_text(state, "statement", "CREATE TABLE widgets (id int);"):find("D CREATE", 1, true))
+      assert(node_text(state, "statement", "CREATE TABLE widgets (id int);"):find("󰒓 CREATE", 1, true))
       assert(node_text(state, "statement", "UPDATE widgets SET id = 1;"):find("M UPDATE", 1, true))
       assert(node_text(state, "statement", "WITH crm AS (SELECT id FROM users) SELECT count(*) FROM crm;"):find("S WITH", 1, true))
       assert(node_text(state, "statement", "VACUUM;"):find("O VACUUM", 1, true))

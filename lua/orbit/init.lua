@@ -162,6 +162,9 @@ local configured = false
 -- Once the precise Structure key is configured, later legacy `query` changes
 -- must not replace it during repeated setup calls.
 local query_block_icon_configured = false
+-- Remember only colors Orbit applied itself, allowing background changes to
+-- update those defaults without replacing a colorscheme or user-owned group.
+local applied_icon_colors = {}
 -- `default_profile_warned` ensures the removed-option warning notification
 -- (see `M.setup`) is only shown the first time a user passes the old
 -- `default_profile` option, instead of nagging on every `setup()` call.
@@ -262,8 +265,8 @@ end
 -- Parameters: none.
 -- Returns: nothing.
 -- Side effects: creates the `OrbitExecute`, `OrbitCancel`, `OrbitDisconnect`,
--- `OrbitSelectProfile`, `OrbitProfile`, `OrbitProfiles`, `OrbitWorkspace`,
--- and `OrbitWorkspaceClose` user commands. Called once from `M.setup` (via
+-- `OrbitSelectProfile`, `OrbitProfile`, `OrbitProfiles`, `OrbitSave`,
+-- `OrbitWorkspace`, and `OrbitWorkspaceClose` user commands. Called once from `M.setup` (via
 -- `configure_ux`), guarded by the `configured` flag, so calling `setup()`
 -- again does not try to redefine these commands.
 local function create_commands()
@@ -298,6 +301,9 @@ local function create_commands()
 	vim.api.nvim_create_user_command("OrbitStructure", function()
 		structure.toggle(M.config)
 	end, { desc = "Toggle the Orbit Structure panel" })
+	vim.api.nvim_create_user_command("OrbitSave", function()
+		workspace.save_query(vim.api.nvim_get_current_buf())
+	end, { desc = "Save the current query to an Orbit saved query location" })
 	vim.api.nvim_create_user_command("OrbitWorkspace", function()
 		workspace.open(M.config)
 	end, { desc = "Open Orbit workspace" })
@@ -307,9 +313,8 @@ local function create_commands()
 end
 
 -- Defines (or re-defines) orbit's highlight groups by linking each one to a
--- sensible builtin/theme highlight group, so orbit's UI (errors, headers,
--- hints, nulls in results, profile/column/table/view names, etc.) picks up
--- colors from whatever colorscheme the user has active.
+-- sensible builtin/theme highlight groups and gives semantic icons colors that
+-- remain legible against the configured light or dark background.
 -- `vim.api.nvim_set_hl(namespace, name, opts)` defines a highlight group;
 -- namespace `0` means "the global highlight namespace". `link = target`
 -- makes `name` visually identical to `target`, and `default = true` means
@@ -337,6 +342,64 @@ local function define_highlights()
 	}
 	for group, target in pairs(links) do
 		vim.api.nvim_set_hl(0, group, { default = true, link = target })
+	end
+
+	-- Database concepts do not map to filetype icons, so Orbit supplies its own
+	-- semantic palette while leaving every group available for user overrides.
+	local palettes = {
+		dark = {
+			OrbitIconWorkspace = "#89b4fa", -- blue
+			OrbitIconProfile = "#cba6f7", -- mauve
+			OrbitIconSchema = "#94e2d5", -- teal
+			OrbitIconTable = "#89b4fa", -- blue
+			OrbitIconView = "#b4befe", -- lavender
+			OrbitIconColumn = "#a6e3a1", -- green
+			OrbitIconFolder = "#f9e2af", -- yellow
+			OrbitIconKey = "#fab387", -- peach
+			OrbitIconIndex = "#74c7ec", -- sapphire
+			OrbitIconQuery = "#f2cdcd", -- flamingo
+			OrbitIconResult = "#74c7ec", -- sapphire
+			OrbitIconClause = "#f9e2af", -- yellow
+			OrbitIconCTE = "#94e2d5", -- teal
+			OrbitIconDDL = "#fab387", -- peach
+			OrbitIconDML = "#a6e3a1", -- green
+			OrbitIconSelect = "#89b4fa", -- blue
+			OrbitIconOther = "#cba6f7", -- mauve
+		},
+		light = {
+			OrbitIconWorkspace = "#1e66f5", -- blue
+			OrbitIconProfile = "#8839ef", -- mauve
+			OrbitIconSchema = "#179299", -- teal
+			OrbitIconTable = "#1e66f5", -- blue
+			OrbitIconView = "#7287fd", -- lavender
+			OrbitIconColumn = "#40a02b", -- green
+			OrbitIconFolder = "#df8e1d", -- yellow
+			OrbitIconKey = "#fe640b", -- peach
+			OrbitIconIndex = "#209fb5", -- sapphire
+			OrbitIconQuery = "#dd7878", -- flamingo
+			OrbitIconResult = "#209fb5", -- sapphire
+			OrbitIconClause = "#df8e1d", -- yellow
+			OrbitIconCTE = "#179299", -- teal
+			OrbitIconDDL = "#fe640b", -- peach
+			OrbitIconDML = "#40a02b", -- green
+			OrbitIconSelect = "#1e66f5", -- blue
+			OrbitIconOther = "#8839ef", -- mauve
+		},
+	}
+	for group, color in pairs(palettes[vim.o.background]) do
+		local desired = tonumber(color:sub(2), 16)
+		local current = vim.api.nvim_get_hl(0, { name = group })
+		if current.fg == nil then
+			vim.api.nvim_set_hl(0, group, { default = true, fg = color })
+		elseif applied_icon_colors[group] and current.fg == applied_icon_colors[group] then
+			vim.api.nvim_set_hl(0, group, { fg = color })
+		else
+			applied_icon_colors[group] = nil
+		end
+		local applied = vim.api.nvim_get_hl(0, { name = group })
+		if applied.fg == desired then
+			applied_icon_colors[group] = desired
+		end
 	end
 end
 
@@ -417,8 +480,14 @@ end
 -- Called once from `M.setup`, guarded by the `configured` flag.
 local function configure_ux()
 	define_highlights()
+	local highlight_group = vim.api.nvim_create_augroup("OrbitHighlights", { clear = true })
 	vim.api.nvim_create_autocmd("ColorScheme", {
-		group = vim.api.nvim_create_augroup("OrbitHighlights", { clear = true }),
+		group = highlight_group,
+		callback = define_highlights,
+	})
+	vim.api.nvim_create_autocmd("OptionSet", {
+		group = highlight_group,
+		pattern = "background",
 		callback = define_highlights,
 	})
 	vim.api.nvim_create_autocmd("FileType", {

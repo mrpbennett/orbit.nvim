@@ -86,8 +86,8 @@ local fallback_icons = {
 	workspace = "*",
 }
 
--- Replace everything below the fixed help/spacing/filter lines with freshly
--- rendered title and tree text.
+-- Synchronize the filter line and replace everything below the fixed header
+-- with freshly rendered title and tree text.
 --   state: the workspace state table.
 --   lines: array of strings, one per remaining buffer line, to write.
 -- Side effects: temporarily makes the (normally read-only/"not modifiable")
@@ -102,6 +102,7 @@ local function set_content(state, lines)
 	-- on_lines must distinguish this redraw from an edit to the filter input.
 	state.rendering = true
 	vim.bo[state.sidebar].modifiable = true
+	vim.api.nvim_buf_set_lines(state.sidebar, FILTER_LINE - 1, FILTER_LINE, false, { "Filter: " .. state.filter })
 	vim.api.nvim_buf_set_lines(state.sidebar, FIXED_HEADER_LINES, -1, false, lines)
 	if not state.filtering then
 		vim.bo[state.sidebar].modifiable = false
@@ -135,7 +136,7 @@ local object_name = schema_tree.object_name
 --     location entry to re-scan).
 -- Returns: an array of nodes, each either
 --   { kind = "saved_directory", name, path, root_path, children = {...} }
---   { kind = "saved_query", name, path }
+--   { kind = "saved_query", name, path, root_path }
 -- sorted so subdirectories come before files, and alphabetically
 -- (case-insensitive) within each group.
 -- Side effects: none (pure filesystem read); does not touch buffers.
@@ -170,7 +171,7 @@ local function discover_saved_queries(directory, root_path)
 					})
 				end
 			elseif kind == "file" and name:lower():sub(-4) == ".sql" then
-				table.insert(entries, { kind = "saved_query", name = name, path = entry_path })
+				table.insert(entries, { kind = "saved_query", name = name, path = entry_path, root_path = root_path })
 			end
 		end
 		table.sort(entries, function(left, right)
@@ -218,6 +219,136 @@ local function saved_directory_key(node)
 	return node.root_path .. "\0" .. node.path
 end
 
+-- Return every existing directory a query may be saved into. Descendant
+-- symlinks are excluded, matching discovery and keeping writes within the
+-- directory the user selected.
+local function saved_query_directories(state)
+	local directories = {}
+	local function scan(location, path, segments, ancestors)
+		table.insert(directories, {
+			ancestors = vim.deepcopy(ancestors),
+			label = location.name .. (#segments > 0 and " / " .. table.concat(segments, " / ") or ""),
+			location = location,
+			path = path,
+		})
+		local handle = vim.uv.fs_scandir(path)
+		if not handle then
+			return
+		end
+		local children = {}
+		while true do
+			local name, kind = vim.uv.fs_scandir_next(handle)
+			if not name then
+				break
+			end
+			if kind == "directory" then
+				table.insert(children, name)
+			end
+		end
+		table.sort(children, function(left, right)
+			local left_lower, right_lower = left:lower(), right:lower()
+			return left_lower == right_lower and left < right or left_lower < right_lower
+		end)
+		for _, name in ipairs(children) do
+			local child_path = path .. "/" .. name
+			local child_segments = vim.list_extend(vim.deepcopy(segments), { name })
+			local child_ancestors = vim.list_extend(vim.deepcopy(ancestors), { child_path })
+			scan(location, child_path, child_segments, child_ancestors)
+		end
+	end
+
+	for _, location in ipairs(state.saved_query_locations) do
+		local stat = vim.uv.fs_stat(location.path)
+		if stat and stat.type == "directory" then
+			scan(location, location.path, {}, { location.path })
+		end
+	end
+	return directories
+end
+
+-- Saved queries accept file names, not paths. Keeping this validation shared
+-- prevents Rename and OrbitSave from drifting into subtly different rules.
+local function saved_query_filename(filename, operation)
+	if
+		filename:match("^%s*$")
+		or filename == "."
+		or filename == ".."
+		or filename:find("[/\\%c]")
+	then
+		vim.notify(operation .. " filename must be a file name without a path", vim.log.levels.ERROR)
+		return
+	end
+	if filename:lower():sub(-4) ~= ".sql" then
+		filename = filename .. ".sql"
+	end
+	return filename
+end
+
+local function loaded_buffer(path)
+	for _, buffer in ipairs(vim.api.nvim_list_bufs()) do
+		if
+			vim.api.nvim_buf_is_valid(buffer)
+			and vim.api.nvim_buf_is_loaded(buffer)
+			and vim.api.nvim_buf_get_name(buffer) == path
+		then
+			return buffer
+		end
+	end
+end
+
+local function saved_query_directory_available(directory)
+	local stat = directory.path == directory.location.path and vim.uv.fs_stat(directory.path)
+		or vim.uv.fs_lstat(directory.path)
+	if not stat or stat.type ~= "directory" then
+		return false
+	end
+	local root = vim.uv.fs_realpath(directory.location.path)
+	local path = vim.uv.fs_realpath(directory.path)
+	if not root or not path then
+		return false
+	end
+	local root_prefix = root:sub(-1) == "/" and root or root .. "/"
+	return path == root or path:sub(1, #root_prefix) == root_prefix
+end
+
+-- Locations may overlap lexically or through symlinked configured roots.
+-- Rescanning every configured root is the only reliable way to update every
+-- visible occurrence after the old path may already have disappeared.
+local function refresh_saved_query_paths(state, _)
+	for _, location in ipairs(state.saved_query_locations) do
+		location.children = discover_saved_queries(location.path)
+	end
+end
+
+-- Create the destination exclusively before removing the source. A hard link
+-- is cheap and preserves metadata on one filesystem; copyfile handles EXDEV
+-- and filesystems that do not support hard links. Both paths refuse overwrite.
+local function move_saved_query_file(source, destination)
+	local linked, link_error, link_name = vim.uv.fs_link(source, destination)
+	if not linked then
+		if link_name == "EEXIST" then
+			return nil, "destination already exists: " .. destination
+		end
+		local copied, copy_error, copy_name = vim.uv.fs_copyfile(source, destination, { excl = true })
+		if not copied then
+			if copy_name == "EEXIST" then
+				return nil, "destination already exists: " .. destination
+			end
+			return nil, string.format("%s; copy fallback failed: %s", link_error, copy_error)
+		end
+	end
+	local removed, remove_error = vim.uv.fs_unlink(source)
+	if removed then
+		return true
+	end
+
+	local cleaned, cleanup_error = vim.uv.fs_unlink(destination)
+	if cleaned then
+		return nil, remove_error
+	end
+	return nil, string.format("%s; also failed to remove copied destination: %s", remove_error, cleanup_error)
+end
+
 -- The heart of the sidebar UI: rebuild the entire tree of text lines from
 -- scratch (state.profiles + state.tree + state.saved_query_locations +
 -- state.filter) and write it into the sidebar buffer.
@@ -240,8 +371,7 @@ end
 --   * Clears and re-applies all highlight groups on the sidebar buffer
 --     (nvim_buf_clear_namespace with namespace -1 clears highlights added
 --     under the "default"/global namespace since we didn't create one of
---     our own; nvim_buf_add_highlight paints one highlight group over a
---     full line).
+--     our own; nvim_buf_add_highlight paints whole lines or exact icon ranges).
 --   * Fully replaces state.nodes, which is the buffer-line-number -> node
 --     lookup table used everywhere else in this file to figure out "what
 --     is the cursor currently sitting on".
@@ -262,6 +392,12 @@ local function render(state)
 		"Profiles:",
 	}
 	local highlights = { { group = "OrbitHeader", line = FILTER_LINE } }
+	table.insert(highlights, {
+		group = state.selected and "OrbitIconProfile" or "OrbitIconWorkspace",
+		line = 4,
+		col_start = 0,
+		col_end = #title_icon,
+	})
 	-- Nodes are keyed by rendered buffer line so mappings can resolve the cursor without parsing text.
 	state.nodes = {}
 	for _, profile in ipairs(state.profiles) do
@@ -290,11 +426,12 @@ local function render(state)
 		-- otherwise a profile whose name doesn't match the filter but which
 		-- contains a matching table would wrongly disappear.
 		if profile_matches or (expanded and has_matches) then
+			local marker = expanded and icons.expanded or icons.collapsed
 			table.insert(
 				lines,
 				string.format(
 					"  %s %s %s (%s)",
-					expanded and icons.expanded or icons.collapsed,
+					marker,
 					icons.profile,
 					profile.name,
 					profile.kind
@@ -302,6 +439,12 @@ local function render(state)
 			)
 			state.nodes[#lines] = { kind = "profile", profile = profile }
 			table.insert(highlights, { group = "OrbitProfile", line = #lines })
+			table.insert(highlights, {
+				group = "OrbitIconProfile",
+				line = #lines,
+				col_start = #("  " .. marker .. " "),
+				col_end = #("  " .. marker .. " ") + #icons.profile,
+			})
 		end
 		if expanded and (profile_matches or has_matches) then
 			-- `base` is how many lines exist so far (right after the profile's
@@ -319,7 +462,12 @@ local function render(state)
 				state.nodes[base + line_number] = node
 			end
 			for _, highlight in ipairs(tree_highlights) do
-				table.insert(highlights, { group = highlight.group, line = base + highlight.line })
+				table.insert(highlights, {
+					group = highlight.group,
+					line = base + highlight.line,
+					col_start = highlight.col_start and highlight.col_start + 4 or nil,
+					col_end = highlight.col_end and highlight.col_end + 4 or nil,
+				})
 			end
 		end
 	end
@@ -350,6 +498,13 @@ local function render(state)
 					)
 				)
 				state.nodes[#lines] = node
+				table.insert(highlights, {
+					group = "OrbitIconFolder",
+					line = #lines,
+					col_start = #(string.rep("  ", depth) .. (expanded and icons.expanded or icons.collapsed) .. " "),
+					col_end = #(string.rep("  ", depth) .. (expanded and icons.expanded or icons.collapsed) .. " ")
+						+ #icons.folder,
+				})
 				if expanded then
 					if #node.children == 0 then
 						table.insert(lines, string.rep("  ", depth + 1) .. "No saved SQL files")
@@ -362,6 +517,12 @@ local function render(state)
 			else
 				table.insert(lines, string.format("%s%s %s", string.rep("  ", depth), icons.saved_query, node.name))
 				state.nodes[#lines] = node
+				table.insert(highlights, {
+					group = "OrbitIconQuery",
+					line = #lines,
+					col_start = #string.rep("  ", depth),
+					col_end = #string.rep("  ", depth) + #icons.saved_query,
+				})
 			end
 		end
 		for _, location in ipairs(state.saved_query_locations) do
@@ -386,8 +547,34 @@ local function render(state)
 	for _, highlight in ipairs(highlights) do
 		-- highlight.line is 1-indexed (matches `lines`/`state.nodes`), but
 		-- nvim_buf_add_highlight wants a 0-indexed line, hence the -1.
-		-- The two -1/-1 col arguments mean "highlight the whole line".
-		vim.api.nvim_buf_add_highlight(state.sidebar, -1, highlight.group, highlight.line - 1, 0, -1)
+		-- Descriptors without columns retain the existing whole-line highlight.
+		vim.api.nvim_buf_add_highlight(
+			state.sidebar,
+			-1,
+			highlight.group,
+			highlight.line - 1,
+			highlight.col_start or 0,
+			highlight.col_end or -1
+		)
+	end
+end
+
+local function reveal_saved_query(state, directory, path)
+	state.filter = ""
+	for _, ancestor in ipairs(directory.ancestors) do
+		state.expanded_saved_dirs[saved_directory_key({
+			path = ancestor,
+			root_path = directory.location.path,
+		})] = true
+	end
+	render(state)
+	if vim.api.nvim_win_is_valid(state.sidebar_window) then
+		for line, node in pairs(state.nodes) do
+			if node.kind == "saved_query" and node.path == path and node.root_path == directory.location.path then
+				vim.api.nvim_win_set_cursor(state.sidebar_window, { line, 0 })
+				break
+			end
+		end
 	end
 end
 
@@ -874,6 +1061,191 @@ local function preview_saved_query(node)
 	end
 end
 
+local function relocate_saved_query(state, node, destination, directory, operation)
+	if workspaces[state.tabpage] ~= state then
+		return
+	end
+	local source_stat = vim.uv.fs_lstat(node.path)
+	if not source_stat or source_stat.type ~= "file" then
+		vim.notify(operation .. " failed: the saved query no longer exists", vim.log.levels.ERROR)
+		return
+	end
+	if not saved_query_directory_available(directory) then
+		vim.notify(operation .. " failed: destination directory is no longer available", vim.log.levels.ERROR)
+		return
+	end
+	if destination == node.path then
+		vim.notify("Saved query is already at " .. destination)
+		return
+	end
+	if vim.uv.fs_lstat(destination) then
+		vim.notify(operation .. " failed: destination already exists: " .. destination, vim.log.levels.ERROR)
+		return
+	end
+
+	local source_buffer = loaded_buffer(node.path)
+	local destination_buffer = loaded_buffer(destination)
+	if destination_buffer and destination_buffer ~= source_buffer then
+		vim.notify(operation .. " failed: destination is already loaded: " .. destination, vim.log.levels.ERROR)
+		return
+	end
+
+	local moved, move_error = move_saved_query_file(node.path, destination)
+	if not moved then
+		vim.notify(operation .. " failed: " .. tostring(move_error), vim.log.levels.ERROR)
+		return
+	end
+	if source_buffer then
+		local renamed, rename_error = pcall(vim.api.nvim_buf_set_name, source_buffer, destination)
+		if not renamed then
+			local rolled_back, rollback_error = move_saved_query_file(destination, node.path)
+			local detail = rolled_back and "filesystem change was rolled back"
+				or "rollback also failed: " .. tostring(rollback_error)
+			vim.notify(operation .. " failed to update the open buffer: " .. tostring(rename_error) .. "; " .. detail, vim.log.levels.ERROR)
+			return
+		end
+	end
+
+	refresh_saved_query_paths(state, { node.path, destination })
+	reveal_saved_query(state, directory, destination)
+	vim.notify(operation .. " complete: " .. destination)
+end
+
+local function rename_saved_query(state, node)
+	local source_directory = vim.fs.dirname(node.path)
+	local directory
+	for _, candidate in ipairs(saved_query_directories(state)) do
+		if candidate.location.path == node.root_path and candidate.path == source_directory then
+			directory = candidate
+			break
+		end
+	end
+	if not directory then
+		vim.notify("Rename saved query failed: its directory is no longer available", vim.log.levels.ERROR)
+		return
+	end
+
+	vim.ui.input({
+		prompt = "Rename saved query: ",
+		default = node.name:sub(1, -5),
+	}, function(filename)
+		if filename == nil then
+			return
+		end
+		filename = saved_query_filename(filename, "Rename saved query")
+		if filename then
+			relocate_saved_query(state, node, directory.path .. "/" .. filename, directory, "Rename saved query")
+		end
+	end)
+end
+
+local function move_saved_query(state, node)
+	local directories = saved_query_directories(state)
+	if #directories == 0 then
+		vim.notify("Move saved query found no available saved query directories", vim.log.levels.ERROR)
+		return
+	end
+	vim.ui.select(directories, {
+		prompt = "Move saved query to:",
+		format_item = function(directory)
+			return directory.label
+		end,
+	}, function(directory)
+		if directory then
+			relocate_saved_query(state, node, directory.path .. "/" .. node.name, directory, "Move saved query")
+		end
+	end)
+end
+
+local function delete_saved_query(state, node)
+	if workspaces[state.tabpage] ~= state then
+		return
+	end
+	local source_stat = vim.uv.fs_lstat(node.path)
+	if not source_stat or source_stat.type ~= "file" then
+		vim.notify("Delete saved query failed: the saved query no longer exists", vim.log.levels.ERROR)
+		return
+	end
+
+	local buffer = loaded_buffer(node.path)
+	local message = "Delete saved query " .. node.path .. "?"
+	if buffer and vim.bo[buffer].modified then
+		message = message .. "\nThis query has unsaved edits; its buffer will be kept unnamed."
+	elseif buffer then
+		message = message .. "\nIts open buffer will be kept unnamed."
+	end
+	if vim.fn.confirm(message, "&Delete\n&Cancel", 2) ~= 1 then
+		return
+	end
+	local confirmed_stat = vim.uv.fs_lstat(node.path)
+	if
+		not confirmed_stat
+		or confirmed_stat.type ~= "file"
+		or confirmed_stat.dev ~= source_stat.dev
+		or confirmed_stat.ino ~= source_stat.ino
+	then
+		vim.notify("Delete saved query failed: the file changed while awaiting confirmation", vim.log.levels.ERROR)
+		return
+	end
+
+	local row = vim.api.nvim_win_is_valid(state.sidebar_window)
+			and vim.api.nvim_win_get_cursor(state.sidebar_window)[1]
+		or 1
+	if buffer then
+		local unnamed, unnamed_error = pcall(vim.api.nvim_buf_set_name, buffer, "")
+		if not unnamed then
+			vim.notify("Delete saved query failed to preserve its open buffer: " .. tostring(unnamed_error), vim.log.levels.ERROR)
+			return
+		end
+	end
+	local removed, remove_error = vim.uv.fs_unlink(node.path)
+	if not removed then
+		local restored, restore_error
+		if buffer then
+			restored, restore_error = pcall(vim.api.nvim_buf_set_name, buffer, node.path)
+		end
+		local detail = buffer and not restored and "; buffer name restore failed: " .. tostring(restore_error) or ""
+		vim.notify("Delete saved query failed: " .. tostring(remove_error) .. detail, vim.log.levels.ERROR)
+		return
+	end
+
+	refresh_saved_query_paths(state, { node.path })
+	render(state)
+	if vim.api.nvim_win_is_valid(state.sidebar_window) then
+		local nearest_line
+		for line in pairs(state.nodes) do
+			if not nearest_line or math.abs(line - row) < math.abs(nearest_line - row) then
+				nearest_line = line
+			end
+		end
+		vim.api.nvim_win_set_cursor(state.sidebar_window, {
+			nearest_line or math.max(1, math.min(row, vim.api.nvim_buf_line_count(state.sidebar))),
+			0,
+		})
+	end
+	vim.notify("Saved query deleted: " .. node.path)
+end
+
+local function select_saved_query_action(state, node)
+	local actions = {
+		{ id = "open", label = "Open", run = function() open_saved_query(state, node) end },
+		{ id = "preview", label = "Preview", run = function() preview_saved_query(node) end },
+		{ id = "rename", label = "Rename", run = function() rename_saved_query(state, node) end },
+		{ id = "move", label = "Move", run = function() move_saved_query(state, node) end },
+		{ id = "delete", label = "Delete", run = function() delete_saved_query(state, node) end },
+	}
+	vim.ui.select(actions, {
+		prompt = "Saved query action:",
+		format_item = function(action)
+			return action.label
+		end,
+	}, function(action)
+		if action and workspaces[state.tabpage] == state then
+			action.run()
+		end
+	end)
+end
+
 -- Move the cursor into the sidebar's "Filter: " line and drop into insert
 -- mode positioned right after whatever's already typed, ready for the
 -- user to keep typing a filter. Bound to "/" in the sidebar (see
@@ -911,7 +1283,7 @@ local function show_help(state)
 		"Orbit Workspace",
 		"",
 		"Sidebar: <CR> bind/open, h/l collapse/expand, Z collapse schema, n new query, r refresh",
-		"Table: s sample, a actions, y copy name. Saved query: P preview. / filter, q close",
+		"Table: s sample, a actions, y copy name. Saved query: a actions, P preview. / filter, q close",
 		"Results: h/j/k/l cells, y copy, <CR> inspect, <C-d>/<C-u> page",
 		"Use your normal Neovim window mappings to move between panels.",
 	})
@@ -1136,9 +1508,12 @@ local function configure_sidebar(state)
 		if position.winid == state.sidebar_window and position.line > 0 then
 			vim.api.nvim_win_set_cursor(state.sidebar_window, { position.line, 0 })
 			local node = current_node()
-			if node and node.kind == "profile" then
-				-- Profile double-click both binds the profile and toggles its schema tree.
+			if node and (node.kind == "profile" or node.kind == "saved_query") then
+				-- Profiles bind before toggling; saved-query leaves open immediately.
 				activate_current()
+			end
+			if node and node.kind == "saved_query" then
+				return
 			end
 			if current_expanded() then
 				collapse_current()
@@ -1215,15 +1590,16 @@ local function configure_sidebar(state)
 			end
 		end
 	end, { buffer = state.sidebar, silent = true, nowait = true, desc = "Open Orbit sample statement" })
-	-- "a" keymap: on a table/view node, open the full action picker
-	-- (vim.ui.select) so the user can choose from every available action,
-	-- not just "sample".
+	-- "a" is context-sensitive: tables expose connector actions, while saved
+	-- queries expose file-management actions.
 	vim.keymap.set("n", "a", function()
 		local node = current_node()
 		if node and node.kind == "table" then
 			select_object_action(state, node.profile, node.row)
+		elseif node and node.kind == "saved_query" then
+			select_saved_query_action(state, node)
 		end
-	end, { buffer = state.sidebar, silent = true, nowait = true, desc = "Select Orbit schema object action" })
+	end, { buffer = state.sidebar, silent = true, nowait = true, desc = "Select Orbit node action" })
 	-- "y" keymap: on a table/view node, copy its fully-qualified name to
 	-- the clipboard/unnamed register.
 	vim.keymap.set("n", "y", function()
@@ -1405,6 +1781,133 @@ function M.open(config)
 		vim.notify("Orbit workspace opened without profiles", vim.log.levels.WARN)
 	end
 	return state
+end
+
+-- Save an Orbit Workspace query buffer into a configured saved-query
+-- location. UI callbacks may be asynchronous, so ownership is checked again
+-- immediately before writing.
+function M.save_query(buffer)
+	buffer = buffer or vim.api.nvim_get_current_buf()
+	if not vim.api.nvim_buf_is_valid(buffer) then
+		vim.notify("OrbitSave requires a valid Workspace query buffer", vim.log.levels.ERROR)
+		return
+	end
+	local tabpage = vim.b[buffer].orbit_workspace_tab
+	local state = tabpage and workspaces[tabpage] or nil
+	if not state or not vim.api.nvim_tabpage_is_valid(tabpage) then
+		vim.notify("OrbitSave requires an Orbit Workspace query buffer", vim.log.levels.ERROR)
+		return
+	end
+	if #state.saved_query_locations == 0 then
+		vim.notify("OrbitSave requires at least one saved_query_dirs location", vim.log.levels.ERROR)
+		return
+	end
+
+	local directories = saved_query_directories(state)
+	if #directories == 0 then
+		vim.notify("OrbitSave found no available saved query directories", vim.log.levels.ERROR)
+		return
+	end
+
+	local function choose_filename(directory)
+		if not directory then
+			return
+		end
+		if
+			not vim.api.nvim_buf_is_valid(buffer)
+			or workspaces[state.tabpage] ~= state
+			or vim.b[buffer].orbit_workspace_tab ~= state.tabpage
+		then
+			vim.notify("OrbitSave query buffer is no longer in its Workspace", vim.log.levels.ERROR)
+			return
+		end
+		if not saved_query_directory_available(directory) then
+			vim.notify("OrbitSave destination directory is no longer available", vim.log.levels.ERROR)
+			return
+		end
+		local current_name = vim.api.nvim_buf_get_name(buffer)
+		local default_name = current_name ~= "" and vim.fs.basename(current_name) or "query.sql"
+		vim.ui.input({ prompt = "Save query as: ", default = default_name }, function(filename)
+			if filename == nil then
+				return
+			end
+			filename = saved_query_filename(filename, "OrbitSave")
+			if not filename then
+				return
+			end
+			if
+				not vim.api.nvim_buf_is_valid(buffer)
+				or workspaces[state.tabpage] ~= state
+				or vim.b[buffer].orbit_workspace_tab ~= state.tabpage
+			then
+				vim.notify("OrbitSave query buffer is no longer in its Workspace", vim.log.levels.ERROR)
+				return
+			end
+			if not saved_query_directory_available(directory) then
+				vim.notify("OrbitSave destination directory is no longer available", vim.log.levels.ERROR)
+				return
+			end
+
+			local destination = directory.path .. "/" .. filename
+			local destination_stat = vim.uv.fs_lstat(destination)
+			if destination_stat and destination_stat.type == "link" then
+				vim.notify("OrbitSave will not replace a symbolic link", vim.log.levels.ERROR)
+				return
+			end
+			if destination_stat and destination_stat.type ~= "file" then
+				vim.notify("OrbitSave destination is not a file: " .. destination, vim.log.levels.ERROR)
+				return
+			end
+			if
+				destination_stat
+				and vim.fn.confirm("Overwrite saved query " .. destination .. "?", "&Overwrite\n&Cancel", 2) ~= 1
+			then
+				return
+			end
+			local confirmed_destination = vim.uv.fs_lstat(destination)
+			if
+				(destination_stat == nil and confirmed_destination ~= nil)
+				or (destination_stat ~= nil and confirmed_destination == nil)
+				or (
+					destination_stat
+					and confirmed_destination
+					and (
+						destination_stat.type ~= confirmed_destination.type
+						or destination_stat.dev ~= confirmed_destination.dev
+						or destination_stat.ino ~= confirmed_destination.ino
+					)
+				)
+			then
+				vim.notify("OrbitSave destination changed while awaiting confirmation", vim.log.levels.ERROR)
+				return
+			end
+
+			local ok, err = pcall(function()
+				vim.api.nvim_buf_call(buffer, function()
+					vim.api.nvim_cmd({ cmd = "saveas", args = { destination }, bang = destination_stat ~= nil }, {})
+				end)
+			end)
+			if not ok then
+				vim.notify("OrbitSave failed: " .. tostring(err), vim.log.levels.ERROR)
+				return
+			end
+
+			refresh_saved_query_paths(state, { destination })
+			reveal_saved_query(state, directory, destination)
+			vim.notify("Orbit query saved: " .. destination)
+		end)
+	end
+
+	if #directories == 1 then
+		choose_filename(directories[1])
+		return
+	end
+	vim.ui.select(directories, {
+		prompt = "Save query to:",
+		format_item = function(directory)
+			return directory.label
+		end,
+	}, choose_filename)
 end
 
 -- Public entry point used by other modules (e.g. schema-object actions,

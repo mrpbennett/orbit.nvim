@@ -37,6 +37,38 @@ return {
     orbit.setup({ icons = { query = previous_query, query_block = previous_query_block } })
   end,
 
+  ["Semantic icon highlights use Catppuccin colors for dark and light backgrounds"] = function()
+    local original_background = vim.o.background
+    orbit.setup()
+
+    local function color(group)
+      return string.format("#%06x", vim.api.nvim_get_hl(0, { name = group }).fg)
+    end
+    local function reset(group)
+      vim.api.nvim_set_hl(0, group, {})
+    end
+
+    vim.o.background = "dark"
+    reset("OrbitIconTable")
+    vim.api.nvim_exec_autocmds("ColorScheme", {})
+    assert(color("OrbitIconTable") == "#89b4fa")
+
+	vim.o.background = "light"
+	vim.api.nvim_exec_autocmds("OptionSet", { pattern = "background" })
+    assert(color("OrbitIconTable") == "#1e66f5")
+    assert(color("OrbitIconDDL") == "#fe640b")
+
+    vim.api.nvim_set_hl(0, "OrbitIconTable", { fg = "#123456" })
+    vim.o.background = "dark"
+	vim.api.nvim_exec_autocmds("OptionSet", { pattern = "background" })
+    assert(color("OrbitIconTable") == "#123456", "user-owned icon colors should not be replaced")
+
+    vim.o.background = original_background
+    reset("OrbitIconTable")
+    reset("OrbitIconDDL")
+    vim.api.nvim_exec_autocmds("ColorScheme", {})
+  end,
+
   ["setup normalizes and replaces named saved query locations"] = function()
     local root = vim.fn.getcwd()
     orbit.setup({

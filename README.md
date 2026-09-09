@@ -360,6 +360,10 @@ saved_query_dirs = {
 
 Each entry must contain one unique display name and directory. Orbit preserves the configured order, expands paths such as `~`, and shows each location as a separate top-level tree collapsed by default. Select a profile, then press `<CR>` on a saved query to open it in the Workspace query window bound to that profile; loading the schema is not required. Press `r` on any saved-query directory to rescan only its top-level location.
 
+Run `:OrbitSave` from a Workspace query buffer to save it into a configured location. Orbit lets you choose from the available locations and their existing subdirectories, prompts for a filename, and adds `.sql` when needed. Existing files require confirmation. After saving, the current buffer becomes the saved file, so later `:w` writes it normally, and the Workspace reveals it in the saved-query tree.
+
+Press `a` on a saved query to open, preview, rename, move, or delete it. Rename and Move refuse to overwrite an existing file and keep an open query buffer attached to its new path, including unsaved edits. Move can target any existing directory under a configured saved query location. Delete requires confirmation and preserves an open query as an unnamed buffer so its contents are not lost.
+
 From a workspace query buffer, `/` focuses the workspace filter. Elsewhere, `/` retains normal Neovim search behavior.
 
 ## Commands
@@ -374,6 +378,7 @@ From a workspace query buffer, `/` focuses the workspace filter. Elsewhere, `/` 
 | `:OrbitCancel`         | Cancel the statement running in the current buffer.             |
 | `:OrbitDisconnect`     | Close the connection for the current buffer's profile.          |
 | `:OrbitStructure`      | Toggle the current query buffer's Structure panel.               |
+| `:OrbitSave`           | Save a Workspace query buffer into a saved query location.       |
 | `:OrbitWorkspace`      | Open the workspace or toggle its profile/schema browser.        |
 | `:OrbitWorkspaceClose` | Close the Orbit workspace tabpage.                              |
 
@@ -417,7 +422,7 @@ require("orbit").setup({
 | `<CR>` | Select and bind a profile to the current query buffer, or open a saved query bound to the selected profile. |
 | `n`    | Create a query buffer bound to the selected profile.                                                        |
 | `s`    | Open a bound sample statement for the selected table or view.                                               |
-| `a`    | Select a connector-supported action for the selected table or view.                                         |
+| `a`    | Select an action for the selected table, view, or saved query.                                               |
 | `y`    | Copy the qualified selected table or view name.                                                             |
 | `P`    | Preview the selected saved query without opening or binding it.                                             |
 | `/`    | Filter profiles, schema objects, and saved queries.                                                         |
@@ -605,6 +610,16 @@ require("orbit").setup({
 | `winbar`                  | `false`                                   | Show Orbit status in SQL-window winbars.                                                                                                                             |
 | `keymaps`                 | See above                                 | Configurable action mappings.                                                                                                                                        |
 | `icons`                   | Nerd Font glyphs                          | Override tree, schema, Workspace, result, and Structure-panel icons shown above. The legacy `query` key supplies `query_block` when the precise key is omitted.     |
+
+Orbit colors semantic icons independently from their labels. Dark backgrounds use Catppuccin Mocha colors and light backgrounds use Catppuccin Latte colors; the palette is reapplied after `:colorscheme`. Override any group through normal Neovim highlight configuration, for example:
+
+```lua
+vim.api.nvim_set_hl(0, "OrbitIconTable", { fg = "#89b4fa" })
+vim.api.nvim_set_hl(0, "OrbitIconView", { fg = "#b4befe" })
+vim.api.nvim_set_hl(0, "OrbitIconColumn", { fg = "#a6e3a1" })
+```
+
+Available groups are `OrbitIconWorkspace`, `OrbitIconProfile`, `OrbitIconSchema`, `OrbitIconTable`, `OrbitIconView`, `OrbitIconColumn`, `OrbitIconFolder`, `OrbitIconKey`, `OrbitIconIndex`, `OrbitIconQuery`, `OrbitIconResult`, `OrbitIconClause`, `OrbitIconCTE`, `OrbitIconDDL`, `OrbitIconDML`, `OrbitIconSelect`, and `OrbitIconOther`.
 
 Within `structure_view`, `show_ddl`, `show_dml`, `show_select`, and `show_other` each control a complete statement subtree. `group_by_type` places enabled, non-empty categories in DDL, DML, SELECT, Other order. `sort_alphabetically` sorts statements within those groups, or across all statements when grouping is disabled; disabling it preserves source order within each group or across the ungrouped list.
 

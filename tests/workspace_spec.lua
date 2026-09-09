@@ -20,6 +20,14 @@ local function line_count(buffer, text)
   return count
 end
 
+local function highlight_range(buffer, group, line)
+  for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(buffer, -1, { line - 1, 0 }, { line - 1, -1 }, { details = true })) do
+    if mark[4].hl_group == group then
+      return mark[3], mark[4].end_col
+    end
+  end
+end
+
 return {
   ["workspace.open creates a dedicated tabpage"] = function()
     local original = vim.api.nvim_get_current_tabpage()
@@ -173,13 +181,16 @@ return {
     end
 
     local ok, err = xpcall(function()
-      state = workspace.open({ profile_path = path })
+      state = workspace.open({ profile_path = path, icons = { schema = "" } })
       vim.api.nvim_set_current_win(state.sidebar_window)
       mouse_line = assert(line_number(state.sidebar, "double-click-tree"))
       vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<2-LeftMouse>", true, false, true), "mx", false)
       assert(vim.wait(100, function()
         return line_number(state.sidebar, "main") ~= nil
       end))
+      local schema_line = assert(line_number(state.sidebar, "main"))
+      local schema_start, schema_end = highlight_range(state.sidebar, "OrbitIconSchema", schema_line)
+      assert(schema_start == 6 and schema_end == 6 + #"")
 
       double_click("main")
       assert(line_number(state.sidebar, "tables 1"))
@@ -324,6 +335,10 @@ return {
       "Profiles:",
       "  > @ local (sqlite)",
     }), vim.inspect(lines))
+    local title_start, title_end = highlight_range(state.sidebar, "OrbitIconWorkspace", 4)
+    assert(title_start == 0 and title_end == 1)
+    local profile_start, profile_end = highlight_range(state.sidebar, "OrbitIconProfile", 7)
+    assert(profile_start == 4 and profile_end == 5)
 
     vim.api.nvim_set_current_win(state.sidebar_window)
     vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "local")), 0 })
@@ -441,6 +456,155 @@ return {
       assert(vim.b[buffer].orbit_workspace_tab == state.tabpage)
       assert(vim.api.nvim_buf_get_lines(buffer, 0, 1, false)[1] == "SELECT 'weekly';")
     end, debug.traceback)
+    if state and vim.api.nvim_tabpage_is_valid(state.tabpage) then
+      workspace.close(state.tabpage)
+    end
+    vim.api.nvim_set_current_tabpage(original_tabpage)
+    assert(ok, err)
+  end,
+
+  ["workspace saves a query into a selected saved query directory"] = function()
+    local original_tabpage = vim.api.nvim_get_current_tabpage()
+    local original_select = vim.ui.select
+    local original_input = vim.ui.input
+    local directory = vim.fn.tempname()
+    local nested = directory .. "/reports/daily"
+    assert(vim.fn.mkdir(nested, "p") == 1)
+    local state
+    local selected_label
+    local ok, err = xpcall(function()
+      state = workspace.open({
+        profile_path = vim.fn.tempname(),
+        saved_query_dirs = { { name = "Team queries", path = directory } },
+      })
+      local buffer = vim.api.nvim_win_get_buf(state.query_window)
+      vim.api.nvim_buf_set_lines(buffer, 0, -1, false, { "SELECT 42;" })
+      vim.b[buffer].orbit_profile = "local"
+      state.filter = "not-the-new-file"
+      vim.ui.select = function(items, options, callback)
+        for _, item in ipairs(items) do
+          if item.path == nested then
+            selected_label = options.format_item(item)
+            callback(item)
+            return
+          end
+        end
+        error("Nested saved query directory missing")
+      end
+      vim.ui.input = function(options, callback)
+        assert(options.default == "query.sql")
+        callback("answer")
+      end
+
+      workspace.save_query(buffer)
+
+      assert(selected_label == "Team queries / reports / daily")
+      assert(vim.api.nvim_buf_get_name(buffer) == nested .. "/answer.sql")
+      assert(vim.b[buffer].orbit_profile == "local")
+      assert(not vim.bo[buffer].modified)
+      assert(vim.fn.readfile(nested .. "/answer.sql")[1] == "SELECT 42;")
+      assert(state.filter == "")
+      assert(vim.api.nvim_buf_get_lines(state.sidebar, 2, 3, false)[1] == "Filter: ")
+      assert(line_number(state.sidebar, "reports"))
+      assert(line_number(state.sidebar, "daily"))
+      assert(line_number(state.sidebar, "answer.sql"))
+
+      vim.api.nvim_buf_set_lines(buffer, 0, -1, false, { "SELECT 84;" })
+      vim.api.nvim_buf_call(buffer, function()
+        vim.cmd.write()
+      end)
+      assert(vim.fn.readfile(nested .. "/answer.sql")[1] == "SELECT 84;")
+    end, debug.traceback)
+    vim.ui.select = original_select
+    vim.ui.input = original_input
+    if state and vim.api.nvim_tabpage_is_valid(state.tabpage) then
+      workspace.close(state.tabpage)
+    end
+    vim.api.nvim_set_current_tabpage(original_tabpage)
+    assert(ok, err)
+  end,
+
+  ["workspace protects existing saved queries and rejects invalid names"] = function()
+    local original_tabpage = vim.api.nvim_get_current_tabpage()
+    local original_input = vim.ui.input
+    local original_confirm = vim.fn.confirm
+    local original_notify = vim.notify
+    local directory = vim.fn.tempname()
+    assert(vim.uv.fs_mkdir(directory, 448))
+    vim.fn.writefile({ "SELECT 'existing';" }, directory .. "/existing.sql")
+    local state
+    local prompts = { "../outside", "bad\nname", "existing.sql", "existing.sql" }
+    local confirmations = { 2, 1 }
+    local notifications = {}
+    local ok, err = xpcall(function()
+      state = workspace.open({
+        profile_path = vim.fn.tempname(),
+        saved_query_dirs = { { name = "Personal", path = directory } },
+      })
+      local buffer = vim.api.nvim_win_get_buf(state.query_window)
+      vim.api.nvim_buf_set_lines(buffer, 0, -1, false, { "SELECT 'replacement';" })
+      vim.ui.input = function(_, callback)
+        callback(table.remove(prompts, 1))
+      end
+      vim.fn.confirm = function(message, choices, default)
+        assert(message:match("existing%.sql"))
+        assert(choices == "&Overwrite\n&Cancel")
+        assert(default == 2)
+        return table.remove(confirmations, 1)
+      end
+      vim.notify = function(message, level)
+        table.insert(notifications, { message = message, level = level })
+      end
+
+      workspace.save_query(buffer)
+      assert(vim.fn.readfile(directory .. "/existing.sql")[1] == "SELECT 'existing';")
+      assert(vim.api.nvim_buf_get_name(buffer) == "")
+
+      workspace.save_query(buffer)
+      assert(vim.fn.readfile(directory .. "/existing.sql")[1] == "SELECT 'existing';")
+      assert(vim.api.nvim_buf_get_name(buffer) == "")
+
+      workspace.save_query(buffer)
+      assert(vim.fn.readfile(directory .. "/existing.sql")[1] == "SELECT 'existing';")
+      assert(vim.api.nvim_buf_get_name(buffer) == "")
+
+      workspace.save_query(buffer)
+      assert(vim.fn.readfile(directory .. "/existing.sql")[1] == "SELECT 'replacement';")
+      assert(vim.api.nvim_buf_get_name(buffer) == directory .. "/existing.sql")
+      assert(notifications[1].message:match("filename"))
+      assert(notifications[1].level == vim.log.levels.ERROR)
+    end, debug.traceback)
+    vim.ui.input = original_input
+    vim.fn.confirm = original_confirm
+    vim.notify = original_notify
+    if state and vim.api.nvim_tabpage_is_valid(state.tabpage) then
+      workspace.close(state.tabpage)
+    end
+    vim.api.nvim_set_current_tabpage(original_tabpage)
+    assert(ok, err)
+  end,
+
+  ["workspace save requires an owned query buffer and a saved query location"] = function()
+    local original_tabpage = vim.api.nvim_get_current_tabpage()
+    local original_notify = vim.notify
+    local notifications = {}
+    local state
+    local ok, err = xpcall(function()
+      state = workspace.open({ profile_path = vim.fn.tempname(), saved_query_dirs = {} })
+      vim.notify = function(message, level)
+        table.insert(notifications, { message = message, level = level })
+      end
+      workspace.save_query(vim.api.nvim_win_get_buf(state.query_window))
+      assert(notifications[1].message:match("saved_query_dirs"))
+      assert(notifications[1].level == vim.log.levels.ERROR)
+
+      local unrelated = vim.api.nvim_create_buf(true, false)
+      workspace.save_query(unrelated)
+      assert(notifications[2].message:match("Workspace query buffer"))
+      assert(notifications[2].level == vim.log.levels.ERROR)
+      vim.api.nvim_buf_delete(unrelated, { force = true })
+    end, debug.traceback)
+    vim.notify = original_notify
     if state and vim.api.nvim_tabpage_is_valid(state.tabpage) then
       workspace.close(state.tabpage)
     end
@@ -683,6 +847,7 @@ return {
     local ok, err = xpcall(function()
       state = workspace.open({
         profile_path = vim.fn.tempname(),
+        icons = { folder = "󰉋", saved_query = "󰆼" },
         saved_query_dirs = {
           { name = "Work SQL", path = first },
           { name = "Personal SQL", path = second },
@@ -700,6 +865,8 @@ return {
       assert(not line_number(state.sidebar, "nested"))
       assert(not line_number(state.sidebar, "second.sql"))
       assert(not line_number(state.sidebar, "first.sql"))
+      local folder_start, folder_end = highlight_range(state.sidebar, "OrbitIconFolder", work_line)
+      assert(folder_start == 4 and folder_end == 4 + #"󰉋")
 
       vim.api.nvim_set_current_win(state.sidebar_window)
       vim.api.nvim_win_set_cursor(state.sidebar_window, { work_line, 0 })
@@ -707,7 +874,9 @@ return {
       assert(line_number(state.sidebar, "nested"))
       vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "Personal SQL")), 0 })
       vim.api.nvim_feedkeys("l", "mx", false)
-      assert(line_number(state.sidebar, "second.sql"))
+      local saved_line = assert(line_number(state.sidebar, "second.sql"))
+      local query_start, query_end = highlight_range(state.sidebar, "OrbitIconQuery", saved_line)
+      assert(query_start == 4 and query_end == 4 + #"󰆼")
       vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "Nested SQL")), 0 })
       vim.api.nvim_feedkeys("l", "mx", false)
       assert(line_count(state.sidebar, "first.sql") == 1)
@@ -733,6 +902,277 @@ return {
       workspace.close(state.tabpage)
     end
     vim.api.nvim_set_current_tabpage(original)
+    assert(ok, err)
+  end,
+
+  ["workspace renames an open saved query without losing edits"] = function()
+    local original_tabpage = vim.api.nvim_get_current_tabpage()
+    local original_select = vim.ui.select
+    local original_input = vim.ui.input
+    local profile_path = vim.fn.tempname()
+    local directory = vim.fn.tempname()
+    local source = directory .. "/original.sql"
+    local destination = directory .. "/renamed.sql"
+    assert(vim.uv.fs_mkdir(directory, 448))
+    vim.fn.writefile({ "SELECT 'disk';" }, source)
+    assert(profiles.write(profile_path, {
+      version = 1,
+      profiles = { { name = "saved-actions", kind = "sqlite", options = { path = "/tmp/orbit-actions.db" } } },
+    }))
+    local state
+    local query_buffer
+    local actions
+    local ok, err = xpcall(function()
+      state = workspace.open({
+        profile_path = profile_path,
+        saved_query_dirs = { { name = "Library", path = directory } },
+      })
+      vim.api.nvim_set_current_win(state.sidebar_window)
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "saved-actions")), 0 })
+      vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<CR>", true, false, true), "mx", false)
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "Library")), 0 })
+      vim.api.nvim_feedkeys("l", "mx", false)
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "original.sql")), 0 })
+      vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<CR>", true, false, true), "mx", false)
+      query_buffer = vim.api.nvim_get_current_buf()
+      vim.api.nvim_buf_set_lines(query_buffer, 0, -1, false, { "SELECT 'edited';" })
+
+      vim.api.nvim_set_current_win(state.sidebar_window)
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "original.sql")), 0 })
+      state.filter = "original"
+      vim.ui.select = function(items, options, callback)
+        assert(options.prompt == "Saved query action:")
+        actions = items
+        for _, action in ipairs(items) do
+          if action.id == "rename" then
+            callback(action)
+            return
+          end
+        end
+        error("Rename action missing")
+      end
+      vim.ui.input = function(options, callback)
+        assert(options.prompt == "Rename saved query: ")
+        assert(options.default == "original")
+        callback("renamed")
+      end
+
+      vim.api.nvim_feedkeys("a", "mx", false)
+
+      assert(#actions == 5)
+      assert(vim.uv.fs_stat(source) == nil)
+      assert(vim.fn.readfile(destination)[1] == "SELECT 'disk';")
+      assert(vim.api.nvim_buf_get_name(query_buffer) == destination)
+      assert(vim.api.nvim_buf_get_lines(query_buffer, 0, 1, false)[1] == "SELECT 'edited';")
+      assert(vim.bo[query_buffer].modified)
+      assert(vim.b[query_buffer].orbit_profile == "saved-actions")
+      assert(state.filter == "")
+      assert(line_number(state.sidebar, "renamed.sql"))
+    end, debug.traceback)
+    vim.ui.select = original_select
+    vim.ui.input = original_input
+    if query_buffer and vim.api.nvim_buf_is_valid(query_buffer) then
+      vim.bo[query_buffer].modified = false
+    end
+    if state and vim.api.nvim_tabpage_is_valid(state.tabpage) then
+      workspace.close(state.tabpage)
+    end
+    vim.api.nvim_set_current_tabpage(original_tabpage)
+    assert(ok, err)
+  end,
+
+  ["workspace moves a saved query to another configured location without overwriting"] = function()
+    local original_tabpage = vim.api.nvim_get_current_tabpage()
+    local original_select = vim.ui.select
+    local original_notify = vim.notify
+    local original_link = vim.uv.fs_link
+    local original_unlink = vim.uv.fs_unlink
+    local source_directory = vim.fn.tempname()
+    local destination_root = vim.fn.tempname()
+    local destination_directory = destination_root .. "/nested"
+    local source = source_directory .. "/move-me.sql"
+    local destination = destination_directory .. "/move-me.sql"
+    assert(vim.uv.fs_mkdir(source_directory, 448))
+    assert(vim.fn.mkdir(destination_directory, "p") == 1)
+    vim.fn.writefile({ "SELECT 'move';" }, source)
+    local state
+    local query_buffer
+    local notifications = {}
+    local choose_destination = false
+    local ok, err = xpcall(function()
+      state = workspace.open({
+        profile_path = vim.fn.tempname(),
+        saved_query_dirs = {
+          { name = "Source", path = source_directory },
+          { name = "Destination", path = destination_root },
+          { name = "Nested destination", path = destination_directory },
+        },
+      })
+      vim.api.nvim_set_current_win(state.query_window)
+      vim.cmd.edit(vim.fn.fnameescape(source))
+      query_buffer = vim.api.nvim_get_current_buf()
+      vim.api.nvim_buf_set_lines(query_buffer, 0, -1, false, { "SELECT 'unsaved move';" })
+      vim.api.nvim_set_current_win(state.sidebar_window)
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "Source")), 0 })
+      vim.api.nvim_feedkeys("l", "mx", false)
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "move-me.sql")), 0 })
+      vim.ui.select = function(items, options, callback)
+        if not choose_destination then
+          assert(options.prompt == "Saved query action:")
+          choose_destination = true
+          for _, action in ipairs(items) do
+            if action.id == "move" then
+              callback(action)
+              return
+            end
+          end
+          error("Move action missing")
+        end
+        assert(options.prompt == "Move saved query to:")
+        for _, directory in ipairs(items) do
+          if directory.path == destination_directory then
+            callback(directory)
+            return
+          end
+        end
+        error("Destination location missing")
+      end
+      vim.notify = function(message, level)
+        table.insert(notifications, { message = message, level = level })
+      end
+      vim.uv.fs_link = function()
+        return nil, "EXDEV: cross-device link not permitted", "EXDEV"
+      end
+
+      vim.api.nvim_feedkeys("a", "mx", false)
+
+      assert(vim.uv.fs_stat(source) == nil)
+      assert(vim.fn.readfile(destination)[1] == "SELECT 'move';")
+      assert(vim.api.nvim_buf_get_name(query_buffer) == destination)
+      assert(vim.api.nvim_buf_get_lines(query_buffer, 0, 1, false)[1] == "SELECT 'unsaved move';")
+      assert(vim.bo[query_buffer].modified)
+      assert(state.filter == "")
+      assert(line_number(state.sidebar, "Destination"))
+      assert(line_number(state.sidebar, "move-me.sql"))
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "Nested destination")), 0 })
+      vim.api.nvim_feedkeys("l", "mx", false)
+      assert(line_count(state.sidebar, "move-me.sql") == 2)
+
+      vim.fn.writefile({ "SELECT 'replacement';" }, source)
+      choose_destination = false
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "Source")), 0 })
+      vim.api.nvim_feedkeys("r", "mx", false)
+      vim.api.nvim_feedkeys("l", "mx", false)
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "move-me.sql")), 0 })
+      vim.api.nvim_feedkeys("a", "mx", false)
+      assert(vim.fn.readfile(source)[1] == "SELECT 'replacement';")
+      assert(vim.fn.readfile(destination)[1] == "SELECT 'move';")
+      assert(notifications[#notifications].message:match("already exists"), vim.inspect(notifications))
+
+      local cleanup_source = source_directory .. "/cleanup.sql"
+      local cleanup_destination = destination_directory .. "/cleanup.sql"
+      vim.fn.writefile({ "SELECT 'cleanup';" }, cleanup_source)
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "Source")), 0 })
+      vim.api.nvim_feedkeys("r", "mx", false)
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "cleanup.sql")), 0 })
+      choose_destination = false
+      vim.uv.fs_unlink = function(path)
+        if path == cleanup_source then
+          return nil, "EACCES: permission denied", "EACCES"
+        end
+        return original_unlink(path)
+      end
+      vim.api.nvim_feedkeys("a", "mx", false)
+      assert(vim.fn.readfile(cleanup_source)[1] == "SELECT 'cleanup';")
+      assert(vim.uv.fs_stat(cleanup_destination) == nil)
+      assert(notifications[#notifications].message:match("permission denied"), vim.inspect(notifications))
+    end, debug.traceback)
+    vim.ui.select = original_select
+    vim.notify = original_notify
+    vim.uv.fs_link = original_link
+    vim.uv.fs_unlink = original_unlink
+    if query_buffer and vim.api.nvim_buf_is_valid(query_buffer) then
+      vim.bo[query_buffer].modified = false
+    end
+    if state and vim.api.nvim_tabpage_is_valid(state.tabpage) then
+      workspace.close(state.tabpage)
+    end
+    vim.api.nvim_set_current_tabpage(original_tabpage)
+    assert(ok, err)
+  end,
+
+  ["workspace deletes an open saved query but preserves its buffer"] = function()
+    local original_tabpage = vim.api.nvim_get_current_tabpage()
+    local original_select = vim.ui.select
+    local original_confirm = vim.fn.confirm
+    local profile_path = vim.fn.tempname()
+    local directory = vim.fn.tempname()
+    local source = directory .. "/delete-me.sql"
+    assert(vim.uv.fs_mkdir(directory, 448))
+    vim.fn.writefile({ "SELECT 'disk';" }, source)
+    vim.fn.writefile({ "SELECT 'next';" }, directory .. "/delete-next.sql")
+    assert(profiles.write(profile_path, {
+      version = 1,
+      profiles = { { name = "delete-profile", kind = "sqlite", options = { path = "/tmp/orbit-delete.db" } } },
+    }))
+    local state
+    local query_buffer
+    local ok, err = xpcall(function()
+      state = workspace.open({
+        profile_path = profile_path,
+        saved_query_dirs = { { name = "Library", path = directory } },
+      })
+      vim.api.nvim_set_current_win(state.sidebar_window)
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "delete-profile")), 0 })
+      vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<CR>", true, false, true), "mx", false)
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "Library")), 0 })
+      vim.api.nvim_feedkeys("l", "mx", false)
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "delete-me.sql")), 0 })
+      vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<CR>", true, false, true), "mx", false)
+      query_buffer = vim.api.nvim_get_current_buf()
+      vim.api.nvim_buf_set_lines(query_buffer, 0, -1, false, { "SELECT 'unsaved';" })
+
+      vim.api.nvim_set_current_win(state.sidebar_window)
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "delete-me.sql")), 0 })
+      state.filter = "delete"
+      vim.ui.select = function(items, options, callback)
+        assert(options.prompt == "Saved query action:")
+        for _, action in ipairs(items) do
+          if action.id == "delete" then
+            callback(action)
+            return
+          end
+        end
+        error("Delete action missing")
+      end
+      vim.fn.confirm = function(message, choices, default)
+        assert(message:match("delete%-me%.sql"))
+        assert(message:match("unsaved edits"))
+        assert(choices == "&Delete\n&Cancel")
+        assert(default == 2)
+        return 1
+      end
+
+      vim.api.nvim_feedkeys("a", "mx", false)
+
+      assert(vim.uv.fs_stat(source) == nil)
+      assert(vim.api.nvim_buf_get_name(query_buffer) == "")
+      assert(vim.api.nvim_buf_get_lines(query_buffer, 0, 1, false)[1] == "SELECT 'unsaved';")
+      assert(vim.bo[query_buffer].modified)
+      assert(vim.b[query_buffer].orbit_profile == "delete-profile")
+      assert(state.filter == "delete")
+      local cursor = vim.api.nvim_win_get_cursor(state.sidebar_window)[1]
+      assert(state.nodes[cursor] and state.nodes[cursor].name == "delete-next.sql")
+    end, debug.traceback)
+    vim.ui.select = original_select
+    vim.fn.confirm = original_confirm
+    if query_buffer and vim.api.nvim_buf_is_valid(query_buffer) then
+      vim.bo[query_buffer].modified = false
+    end
+    if state and vim.api.nvim_tabpage_is_valid(state.tabpage) then
+      workspace.close(state.tabpage)
+    end
+    vim.api.nvim_set_current_tabpage(original_tabpage)
     assert(ok, err)
   end,
 

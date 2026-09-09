@@ -43,6 +43,20 @@ local function icon_for(node, icons)
 	return icons[node.kind]
 end
 
+local function icon_group_for(node)
+	if node.kind == "group" or node.kind == "statement" then
+		local category = node.category == "SELECT" and "Select" or node.category
+		return "OrbitIcon" .. category
+	end
+	if node.kind == "query" then
+		return "OrbitIconQuery"
+	end
+	if node.kind == "with" or node.kind == "cte" then
+		return "OrbitIconCTE"
+	end
+	return "OrbitIcon" .. node.kind:sub(1, 1):upper() .. node.kind:sub(2)
+end
+
 -- Return whether a possibly-nil window handle still names a live Neovim window.
 -- Centralizing this guard keeps stale handles from reaching stricter API calls.
 local function valid_window(window)
@@ -274,10 +288,18 @@ local function render(state, selected_id)
 				marker = collapsed and state.icons.collapsed or state.icons.expanded
 				marker = marker .. " "
 			end
-			local prefix = string.rep("  ", depth) .. marker .. icon_for(node, state.icons) .. " "
+			local icon = icon_for(node, state.icons)
+			local icon_col = #(string.rep("  ", depth) .. marker)
+			local prefix = string.rep("  ", depth) .. marker .. icon .. " "
 			-- Keep SQL labels intact; nowrap plus horizontal scrolling makes content
 			-- inspectable without changing the panel's configured geometry.
 			table.insert(lines, prefix .. node.label)
+			table.insert(highlights, {
+				line = #lines,
+				group = icon_group_for(node),
+				col_start = icon_col,
+				col_end = icon_col + #icon,
+			})
 			nodes[#lines] = { node = node, parent_id = parent_id, statement = statement }
 			id_to_line[node.id] = #lines
 			if has_children and not collapsed then
@@ -302,18 +324,25 @@ local function render(state, selected_id)
 	vim.bo[state.buffer].modifiable = true
 	vim.api.nvim_buf_set_lines(state.buffer, 0, -1, false, lines)
 	vim.bo[state.buffer].modifiable = false
-	vim.api.nvim_buf_clear_namespace(state.buffer, -1, 0, -1)
-	for _, highlight in ipairs(highlights) do
-		vim.api.nvim_buf_add_highlight(state.buffer, -1, highlight.group, highlight.line - 1, 0, -1)
-	end
-	-- If the deepest source node is hidden by a collapsed parent, highlight that
-	-- nearest visible parent instead of losing source position feedback entirely.
+	-- Resolve the visible source node before painting so CursorLine contributes
+	-- its background first and the narrower icon highlight retains its color.
 	local highlight_id = current_id
 	while highlight_id and not id_to_line[highlight_id] do
 		highlight_id = parents[highlight_id]
 	end
+	vim.api.nvim_buf_clear_namespace(state.buffer, -1, 0, -1)
 	if highlight_id then
 		vim.api.nvim_buf_add_highlight(state.buffer, -1, "OrbitStructureCurrent", id_to_line[highlight_id] - 1, 0, -1)
+	end
+	for _, highlight in ipairs(highlights) do
+		vim.api.nvim_buf_add_highlight(
+			state.buffer,
+			-1,
+			highlight.group,
+			highlight.line - 1,
+			highlight.col_start or 0,
+			highlight.col_end or -1
+		)
 	end
 	-- Explicit tree actions preserve their selected node. Ordinary refreshes track
 	-- the source cursor, matching the panel's role as an outline of that buffer.

@@ -1,5 +1,79 @@
 # Orbit.nvim v0.1 Plan
 
+## Semantic Icon Colors
+
+- [x] Add focused coverage for icon-only highlights in the Workspace and Structure panel.
+- [x] Define semantic icon highlight groups using Catppuccin Mocha for dark backgrounds and Latte for light backgrounds.
+- [x] Apply each highlight to the icon's exact byte range without changing existing row highlights or configured glyphs.
+- [x] Document highlight customization and run complete verification.
+
+### Settled Design
+
+- Orbit remains dependency-free; `nvim-web-devicons` and `mini.icons` are not required for database-specific icons.
+- Existing `icons` values remain strings and all current icon overrides continue to work.
+- Icon groups use Catppuccin colors by default while remaining user-overridable through normal Neovim highlight configuration.
+- Disclosure markers keep their existing appearance; semantic object and Structure icons receive color.
+
+### Review
+
+- Workspace and Structure icons now use semantic, icon-only highlight ranges; disclosure markers and labels retain their existing highlights.
+- Mocha and Latte defaults follow `background`, survive colorscheme changes, and update without replacing user-owned highlight groups.
+- Coverage verifies multibyte Nerd Font byte ranges, nested Workspace offsets, saved-query icons, and Structure current-row precedence.
+- Verification: `nvim --headless -u NONE -l tests/run.lua` and `git diff --check` pass. `stylua` is unavailable.
+
+## Saved Query Save Command
+
+- [x] Add failing coverage for location and directory selection, filename normalization, overwrite protection, and cancellation.
+- [x] Implement `:OrbitSave` for Workspace query buffers while preserving buffer identity and profile binding.
+- [x] Refresh and reveal the saved query in the Workspace sidebar after a successful save.
+- [x] Document the command and run complete verification.
+
+### Settled Design
+
+- `:OrbitSave` acts as Save As for any query buffer owned by a Workspace; existing saved queries retain normal `:w` behavior.
+- Saving keeps the current buffer and its profile binding, gives it the chosen file name, and makes later `:w` write that file.
+- Users choose from every configured Saved query location and its existing descendant directories; no directories are created.
+- The filename prompt defaults to the current basename or `query.sql`, appends `.sql` when omitted, and cannot contain a path.
+- Existing destinations require explicit overwrite confirmation, with cancellation as the default.
+- A successful save rescans the affected location and expands the selected directory's ancestors so the file is visible immediately.
+- Empty queries are saveable. With no configured locations, Orbit reports how to configure `saved_query_dirs`.
+
+### Review
+
+- `:OrbitSave` presents every available Saved query location and existing descendant directory, appends `.sql`, rejects path/control characters, and confirms overwrites.
+- Successful saves retain the current buffer and profile binding, support later `:w`, rescan the selected location, clear an incompatible filter, and reveal the saved file.
+- Descendant symlinks and symlink destinations are excluded so the picker cannot redirect a save outside the selected directory.
+- Verification: `nvim --headless -u NONE -l tests/run.lua` and `git diff --check` pass. Independent standards and specification reviews found no remaining actionable issues. `stylua` is not installed.
+
+## Saved Query File Management
+
+- [x] Add focused regression coverage for the saved-query action menu and rename, move, and delete flows.
+- [x] Implement safe saved-query filesystem operations, including stale-source checks, conflict refusal, and cross-filesystem move fallback.
+- [x] Keep loaded query buffers synchronized with rename, move, and delete operations without losing edits or profile bindings.
+- [x] Refresh overlapping saved query locations, reveal successful rename/move destinations, and retain useful sidebar focus after deletion.
+- [x] Update Workspace help and README documentation, then run formatting, the complete test suite, and diff checks.
+
+### Settled Design
+
+- Orbit is a focused organizer for reusable `.sql` files inside configured saved query locations, not a general filesystem manager.
+- Saved queries are managed items; directories are existing organizational containers and move destinations. Orbit does not create, rename, or delete directories.
+- Context-sensitive `a` opens Open, Preview, Rename, Move, and Delete actions for a saved query while retaining connector actions for schema objects. `<CR>` and `P` remain direct shortcuts.
+- Rename prompts with the current filename stem, appends `.sql` when omitted, and uses the same filename validation as `:OrbitSave`.
+- Move offers every existing directory across all configured saved query locations, including roots and nested directories.
+- Rename and Move refuse existing destinations. A successful operation clears the filter, expands the destination ancestors, and reveals the saved query.
+- An open saved query follows its renamed or moved path while preserving buffer identity, cursor position, unsaved edits, Workspace ownership, and profile binding.
+- Delete always requires confirmation. If the saved query is open, its contents remain in the same unnamed query buffer; modified content remains modified. The sidebar retains its filter and focuses the nearest remaining item.
+- Move creates its destination exclusively so it cannot overwrite a raced file. It uses a hard link on the same filesystem and an exclusive copy fallback otherwise, removes the source only after success, and cleans up the destination if source removal fails.
+- Every configured location containing the old or new path is rescanned so overlapping saved query locations remain consistent. Symbolic-link and stale-node protections continue to prevent mutations through unsupported entries.
+
+### Review
+
+- Saved-query `a` actions now open, preview, rename, move, and delete reusable `.sql` files while keeping the existing `<CR>` and `P` shortcuts and connector action menu.
+- Rename and Move create destinations exclusively, preserve loaded buffers and unsaved edits, reject conflicts and stale directories, support cross-filesystem copies, and refresh overlapping locations before revealing the result.
+- Confirmed deletion preserves loaded contents in an unnamed query buffer, rejects a file replaced during confirmation, retains the filter, and focuses the nearest remaining node.
+- Coverage exercises the action menu, filename normalization, conflict refusal, modified buffers, overlapping roots, successful cross-filesystem fallback, cleanup after source-removal failure, and deletion focus.
+- Verification: `nvim --headless -u NONE -l tests/run.lua` and `git diff --check` pass. `stylua` is not installed in this environment.
+
 ## MySQL README Onboarding
 
 - [x] Close the MySQL profile details block consistently with the other connectors.

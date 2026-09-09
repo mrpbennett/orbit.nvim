@@ -6,6 +6,8 @@ All notable changes to Orbit.nvim are documented in this file.
 
 ### Added
 
+- Added `:OrbitSave` to save Workspace query buffers into configured saved-query locations or existing subdirectories, then reveal the saved file in the Workspace tree.
+- Added saved-query actions for opening, previewing, renaming, moving among existing directories in configured locations, and confirmed deletion while preserving loaded buffer contents and unsaved edits.
 - Added a MySQL 8.x connector backed by Oracle MySQL or MariaDB CLI clients, with TCP and Unix-socket profiles, client-managed credentials, family-specific TLS validation, and retained XML sessions.
 - Added MySQL schema browsing, backtick-qualified completion, columns, primary keys, foreign keys, indexes, view definitions, object actions, and editable table results. Failed editable batches terminate the client so MySQL rolls back before Orbit reconnects.
 - Added connector-selected MySQL tokenization for backtick identifiers, quoted strings, backslash escapes, and MySQL line-comment rules without changing other SQL dialects.

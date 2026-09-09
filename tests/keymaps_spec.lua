@@ -8,6 +8,7 @@ return {
     vim.bo[buffer].filetype = "sql"
     orbit.setup()
 
+    assert(vim.fn.exists(":OrbitSave") == 2)
     assert(vim.fn.maparg("<leader>E", "n", false, true).rhs == "<Cmd>OrbitExecute<CR>")
     assert(vim.fn.maparg("<leader>E", "x", false, true).rhs == ":<C-u>'<,'>OrbitExecute<CR>")
     assert(vim.fn.maparg("<leader>X", "n", false, true).rhs == "<Cmd>OrbitCancel<CR>")
