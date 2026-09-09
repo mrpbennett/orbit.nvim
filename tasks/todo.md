@@ -1091,3 +1091,39 @@ Plan: `~/.claude/plans/sprightly-seeking-blanket.md`. Replaces the two single-li
 - The documented legacy `icons.query` key supplies `icons.query_block` until the canonical key is explicitly configured. Repeated and failed setup calls preserve that precedence correctly.
 - README configuration and Structure-panel guidance list the new defaults, while the domain glossary now defines query block, common table expression, and clause.
 - Verification: `nvim --headless -u NONE -l tests/run.lua` and `git diff --check` passed. Independent review found no remaining issues. `stylua` is not installed in this environment.
+
+## Schema Namespace Icon Plan
+
+- [x] Add a configurable `icons.schema` default for catalog/schema namespace rows.
+- [x] Render the schema icon independently from the expand/collapse marker.
+- [x] Cover the default and custom rendering behavior with regression tests.
+- [x] Document the option and run the full verification suite.
+
+### Settled Design
+
+- Catalog and schema components remain one namespace row, matching the existing schema grouping model.
+- `icons.schema` defaults to ``; `icons.profile` remains the icon for connection-profile rows.
+
+### Review
+
+- Schema namespace rows now show a semantic icon after their disclosure marker in both collapsed and expanded states.
+- User configuration can override `icons.schema` without changing other tree markers or profile icons.
+- Verification: `nvim --headless -u NONE -l tests/run.lua` and `git diff --check` passed. Independent standards and spec reviews found no remaining actionable issues. `stylua` is not installed in this environment.
+
+## Collapsed Table Group Icon Plan
+
+- [x] Render `icons.with` beside the table group's disclosure marker.
+- [x] Keep collapsed and expanded disclosure markers visible for table and view groups.
+- [x] Add regression coverage for collapsed and expanded groups.
+- [x] Run the full test suite and review the final diff.
+
+### Settled Design
+
+- A collapsed table group renders exactly as `> 󰙅 tables 10` before indentation.
+- Expanded table groups retain `icons.with` beside `icons.expanded`; view groups continue using only the standard markers.
+
+### Review
+
+- Table groups use `icons.with` as a semantic icon beside their standard disclosure marker.
+- Regression tests cover collapsed and expanded table/view groups and their child object icons.
+- Verification: `nvim --headless -u NONE -l tests/run.lua` and `git diff --check` passed. Independent review found no remaining actionable issues.

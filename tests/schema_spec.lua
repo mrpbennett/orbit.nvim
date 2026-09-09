@@ -364,7 +364,7 @@ return {
       name = "large-trino-schema",
       options = { catalog = "hive" },
     }, "", {
-      icons = { collapsed = ">", column = "C", expanded = "v", folder = "F", result = "R", table = "T", view = "V" },
+      icons = { collapsed = ">", column = "C", expanded = "v", folder = "F", result = "R", schema = "S", table = "T", view = "V" },
     })
     local elapsed_ms = (vim.uv.hrtime() - started_at) / 1e6
 

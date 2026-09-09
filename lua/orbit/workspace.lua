@@ -79,8 +79,10 @@ local fallback_icons = {
 	query = "+",
 	result = "=",
 	saved_query = "#",
+	schema = "@",
 	table = "#",
 	view = "~",
+	with = "+",
 	workspace = "*",
 }
 

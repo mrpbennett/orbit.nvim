@@ -125,6 +125,7 @@ M.config = {
 		query_block = "󰆋",
 		result = "󰎟",
 		saved_query = "󰆼",
+		schema = "",
 		statement_ddl = "󰒓",
 		statement_dml = "󰏫",
 		statement_other = "󰌋",

@@ -14,6 +14,7 @@ return {
     assert(orbit.config.icons.clause == "󰅪")
     assert(orbit.config.icons.cte == "󰌷")
     assert(orbit.config.icons.query_block == "󰆋")
+    assert(orbit.config.icons.schema == "")
     assert(orbit.config.icons.statement_ddl == "󰒓")
     assert(orbit.config.icons.statement_dml == "󰏫")
     assert(orbit.config.icons.statement_other == "󰌋")

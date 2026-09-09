@@ -11,3 +11,4 @@
 - Group a cohesive family of new display controls under one configuration object instead of expanding the top-level setup API with parallel fields.
 - For README connector additions, verify the requested profile object is complete and visibly placed in the rendered connector details, not merely described elsewhere.
 - In README requirement tables, name and link each required CLI explicitly so the dependency is as visible as the surrounding entries.
+- When a screenshot is paired with an exact desired row, implement that literal output before generalizing the visual pattern to sibling rows.

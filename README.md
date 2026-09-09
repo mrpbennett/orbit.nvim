@@ -574,6 +574,7 @@ require("orbit").setup({
     query_block = "󰆋",
     result = "󰎟",
     saved_query = "󰆼",
+    schema = "",
     statement_ddl = "󰒓",
     statement_dml = "󰏫",
     statement_other = "󰌋",

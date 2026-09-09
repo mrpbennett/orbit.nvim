@@ -7,8 +7,10 @@ local icons = {
   folder = "+",
   index = "I",
   key = "K",
+  schema = "@",
   table = "#",
   view = "~",
+  with = "W",
 }
 
 local profile = { kind = "sqlite", name = "fixture", options = {} }
@@ -79,21 +81,21 @@ return {
     local second = { catalog = "a", schema = "b.c", name = "second", type = "table" }
     schema_tree.set_tables(tree, { first })
     local lines, nodes = schema_tree.lines(tree, profile, "", { icons = icons })
-    assert(lines[1] == "> a.b.c")
+    assert(lines[1] == "> @ a.b.c")
     schema_tree.toggle(tree, nodes[1])
     _, nodes = schema_tree.lines(tree, profile, "", { icons = icons })
     schema_tree.toggle(tree, nodes[2])
 
     schema_tree.set_tables(tree, { first, second })
     lines, nodes = schema_tree.lines(tree, profile, "", { icons = icons })
-    assert(lines[1] == '> "a"."b.c"', vim.inspect(lines))
-    assert(lines[2] == 'v "a.b"."c"', vim.inspect(lines))
+    assert(lines[1] == '> @ "a"."b.c"', vim.inspect(lines))
+    assert(lines[2] == 'v @ "a.b"."c"', vim.inspect(lines))
     assert(nodes[4].row == first, "the first namespace's object group stays expanded")
 
     lines = schema_tree.lines(tree, profile, "second", { icons = icons })
-    assert(lines[1] == 'v "a"."b.c"')
+    assert(lines[1] == 'v @ "a"."b.c"')
     lines, nodes = schema_tree.lines(tree, profile, "", { icons = icons })
-    assert(lines[1] == '> "a"."b.c"', "filtering must not overwrite expansion choices")
+    assert(lines[1] == '> @ "a"."b.c"', "filtering must not overwrite expansion choices")
     assert(nodes[4].row == first)
   end,
 
@@ -107,7 +109,7 @@ return {
     local lines, nodes, _, has_matches = schema_tree.lines(tree, profile, "", { icons = icons })
 
     assert(has_matches)
-    assert(lines[1]:match("^> main$"), vim.inspect(lines))
+    assert(lines[1] == "> @ main", vim.inspect(lines))
     assert(nodes[1].kind == "schema" and nodes[1].name == "main")
     assert(#lines == 1, "collapsed schema should not reveal its groups")
   end,
@@ -123,11 +125,16 @@ return {
     schema_tree.toggle(tree, collapsed_nodes[1])
     local lines, nodes = schema_tree.lines(tree, profile, "", { icons = icons })
 
-    assert(lines[1]:match("^v main$"))
-    assert(lines[2]:match("tables 1$"))
-    assert(lines[3]:match("views 1$"))
+    assert(lines[1] == "v @ main")
+    assert(lines[2] == "  > W tables 1")
+    assert(lines[3] == "  > views 1")
     assert(nodes[2].kind == "group" and nodes[2].group == "tables")
     assert(nodes[3].kind == "group" and nodes[3].group == "views")
+
+    schema_tree.toggle(tree, nodes[3])
+    lines = schema_tree.lines(tree, profile, "", { icons = icons })
+    assert(lines[3] == "  v views 1")
+    assert(lines[4] == "    > ~ active_sessions")
   end,
 
   ["schema_tree.toggle expands an object group to reveal its tables"] = function()
@@ -137,7 +144,8 @@ return {
 
     local lines, nodes = schema_tree.lines(tree, profile, "", { icons = icons })
 
-    assert(lines[3]:match("sessions$"))
+    assert(lines[2] == "  v W tables 1")
+    assert(lines[3] == "    > # sessions")
     assert(nodes[3].kind == "table")
     assert(nodes[3].row.name == "sessions")
   end,
