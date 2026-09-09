@@ -40,13 +40,13 @@ Orbit runs statements through your existing database CLI, retains one connection
 - No required third-party Neovim plugins.
 - The CLI required by each connection profile:
 
-| Profile kind | CLI                                                                    | Notes                                     |
-| ------------ | ---------------------------------------------------------------------- | ----------------------------------------- |
-| `trino`      | [`trino`](https://trino.io/docs/current/client/cli.html)               | Orbit requests JSON output.               |
-| `sqlite`     | `sqlite3`                                                              | Requires a build that supports `-json`.   |
-| `postgres`   | [`psql`](https://www.postgresql.org/docs/current/app-psql.html)        | Requires a version that supports `--csv`. |
-| `mysql`      | Oracle [`mysql`](https://dev.mysql.com/doc/refman/8.4/en/mysql.html) 8.x or MariaDB [`mariadb`](https://mariadb.com/docs/server/clients-and-utilities/mariadb-client/mariadb-command-line-client) | Connects to MySQL 8.x servers using XML. |
-| `vertica`    | [`vsql`](https://docs.vertica.com/24.3.x/en/connecting-to/using-vsql/) | Uses HTML table output.                   |
+| Profile kind | CLI                                                                                                                                                                                               | Notes                                     |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| `trino`      | [`trino`](https://trino.io/docs/current/client/cli.html)                                                                                                                                          | Orbit requests JSON output.               |
+| `sqlite`     | `sqlite3`                                                                                                                                                                                         | Requires a build that supports `-json`.   |
+| `postgres`   | [`psql`](https://www.postgresql.org/docs/current/app-psql.html)                                                                                                                                   | Requires a version that supports `--csv`. |
+| `mysql`      | Oracle [`mysql`](https://dev.mysql.com/doc/refman/8.4/en/mysql.html) 8.x or MariaDB [`mariadb`](https://mariadb.com/docs/server/clients-and-utilities/mariadb-client/mariadb-command-line-client) | Connects to MySQL 8.x servers using XML.  |
+| `vertica`    | [`vsql`](https://docs.vertica.com/24.3.x/en/connecting-to/using-vsql/)                                                                                                                            | Uses HTML table output.                   |
 
 ## Installation
 
@@ -77,13 +77,13 @@ If a query buffer has no profile, executing it opens profile selection and retri
 
 ### Supported Connectors
 
-| Kind       | Required options            | Optional options                                                                                                 | Schema support                                                                                                           |
-| ---------- | --------------------------- | ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `trino`    | `server`, `user`, `catalog` | `schema`, `schema_patterns`, `executable`, `arguments`, `confirm_mutations`                                      | Tables, views, and columns from `information_schema`. Omitting `schema` browses the catalog except `information_schema`. |
-| `sqlite`   | `path`                      | `schema_patterns`, `executable`, `arguments`, `confirm_mutations`                                                | Tables and views from `sqlite_master`, plus columns from `PRAGMA table_info`, under `main`.                              |
-| `postgres` | `database`                  | `schema_patterns`, `host`, `port`, `user`, `password`, `sslmode`, `executable`, `arguments`, `confirm_mutations` | Tables and views outside PostgreSQL system schemas, plus columns, primary keys, foreign keys, and indexes.               |
-| `mysql`    | `database`                  | `schema_patterns`, `host`, `port`, `socket`, `user`, `client_family`, `sslmode`, `executable`, `arguments`, `confirm_mutations` | MySQL 8.x tables and views, plus columns, primary keys, foreign keys, indexes, and view definitions.                 |
-| `vertica`  | `host`, `user`, `database`  | `schema_patterns`, `port`, `password`, `sslmode`, `executable`, `arguments`, `confirm_mutations`                 | User tables and views, plus columns, primary keys, foreign keys, projections, and view definitions.                      |
+| Kind       | Required options            | Optional options                                                                                                                | Schema support                                                                                                           |
+| ---------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `trino`    | `server`, `user`, `catalog` | `schema`, `schema_patterns`, `executable`, `arguments`, `confirm_mutations`                                                     | Tables, views, and columns from `information_schema`. Omitting `schema` browses the catalog except `information_schema`. |
+| `sqlite`   | `path`                      | `schema_patterns`, `executable`, `arguments`, `confirm_mutations`                                                               | Tables and views from `sqlite_master`, plus columns from `PRAGMA table_info`, under `main`.                              |
+| `postgres` | `database`                  | `schema_patterns`, `host`, `port`, `user`, `password`, `sslmode`, `executable`, `arguments`, `confirm_mutations`                | Tables and views outside PostgreSQL system schemas, plus columns, primary keys, foreign keys, and indexes.               |
+| `mysql`    | `database`                  | `schema_patterns`, `host`, `port`, `socket`, `user`, `client_family`, `sslmode`, `executable`, `arguments`, `confirm_mutations` | MySQL 8.x tables and views, plus columns, primary keys, foreign keys, indexes, and view definitions.                     |
+| `vertica`  | `host`, `user`, `database`  | `schema_patterns`, `port`, `password`, `sslmode`, `executable`, `arguments`, `confirm_mutations`                                | User tables and views, plus columns, primary keys, foreign keys, projections, and view definitions.                      |
 
 `executable` replaces the CLI binary and `arguments` adds an array of string arguments before Orbit's generated arguments. This is useful for wrappers or CLI-specific authentication flags. For SQLite, PostgreSQL, MySQL, and Vertica, Orbit retains one interactive CLI connection per profile; statements, schema browsing, and completion prewarming share it and are serialized per profile. A changed profile definition, failed CLI, `:OrbitDisconnect`, or Neovim exit closes the connection; the next request reconnects automatically. Trino statements instead run one `trino` CLI invocation per statement, serialized per profile, because the `trino` CLI does not flush its output while held open on a retained connection.
 
@@ -377,8 +377,8 @@ From a workspace query buffer, `/` focuses the workspace filter. Elsewhere, `/` 
 | `:'<,'>OrbitExecute`   | Execute the selected line range.                                |
 | `:OrbitCancel`         | Cancel the statement running in the current buffer.             |
 | `:OrbitDisconnect`     | Close the connection for the current buffer's profile.          |
-| `:OrbitStructure`      | Toggle the current query buffer's Structure panel.               |
-| `:OrbitSave`           | Save a Workspace query buffer into a saved query location.       |
+| `:OrbitStructure`      | Toggle the current query buffer's Structure panel.              |
+| `:OrbitSave`           | Save a Workspace query buffer into a saved query location.      |
 | `:OrbitWorkspace`      | Open the workspace or toggle its profile/schema browser.        |
 | `:OrbitWorkspaceClose` | Close the Orbit workspace tabpage.                              |
 
@@ -390,15 +390,15 @@ Whole-buffer execution rejects ambiguous multi-statement content. Select the exa
 
 Orbit installs the following defaults:
 
-| Mode and scope          | Default      | Action                                                   |
-| ----------------------- | ------------ | -------------------------------------------------------- |
-| Normal, global          | `<leader>D`  | Open the workspace or toggle its profile/schema browser. |
-| Normal, SQL buffer      | `<leader>E`  | Execute the buffer statement.                            |
-| Visual, SQL buffer      | `<leader>E`  | Execute the visual selection.                            |
-| Normal, Structure panel | `<leader>E`  | Execute the highlighted Structure element.               |
-| Normal, SQL buffer      | `<leader>P`  | Select a connection profile.                             |
-| Normal, SQL buffer      | `<leader>X`  | Cancel the running statement.                            |
-| Normal, SQL buffer      | Disabled     | Toggle the Structure panel (`structure = false`).        |
+| Mode and scope          | Default     | Action                                                   |
+| ----------------------- | ----------- | -------------------------------------------------------- |
+| Normal, global          | `<leader>D` | Open the workspace or toggle its profile/schema browser. |
+| Normal, SQL buffer      | `<leader>E` | Execute the buffer statement.                            |
+| Visual, SQL buffer      | `<leader>E` | Execute the visual selection.                            |
+| Normal, Structure panel | `<leader>E` | Execute the highlighted Structure element.               |
+| Normal, SQL buffer      | `<leader>P` | Select a connection profile.                             |
+| Normal, SQL buffer      | `<leader>X` | Cancel the running statement.                            |
+| Normal, SQL buffer      | Disabled    | Toggle the Structure panel (`structure = false`).        |
 
 Configure action mappings through `keymaps`. `execute` also applies in the Structure panel; `cancel`, `select_profile`, and the disabled-by-default `structure` action are buffer-local in SQL buffers, while `workspace` is global. Set an action to `false` to disable it.
 
@@ -416,46 +416,75 @@ require("orbit").setup({
 
 ### Workspace Sidebar
 
-| Key    | Action                                                                                                      |
-| ------ | ----------------------------------------------------------------------------------------------------------- |
-| `l`    | Expand the selected profile, schema, object group, table metadata folder, or object.                        |
-| `h`    | Collapse the selected node.                                                                                 |
-| `<CR>` | Select and bind a profile to the current query buffer, or open a saved query bound to the selected profile. |
-| `n`    | Create a query buffer bound to the selected profile.                                                        |
-| `s`    | Open a bound sample statement for the selected table or view.                                               |
-| `a`    | Select an action for the selected table, view, or saved query.                                               |
-| `y`    | Copy the qualified selected table or view name.                                                             |
-| `P`    | Preview the selected saved query without opening or binding it.                                             |
-| `/`    | Focus the filter from the sidebar or a Workspace query buffer.                                             |
-| `r`    | Reload the profile file and refresh the selected profile schema, or rescan saved queries.                   |
-| `Z`    | Collapse the open profile schema tree.                                                                      |
-| `<2-LeftMouse>` | Activate the clicked node; expandable nodes toggle, profiles bind, and saved queries open.              |
-| `?`    | Show help.                                                                                                  |
-| `q`    | Close the workspace.                                                                                        |
+| Key             | Action                                                                                                      |
+| --------------- | ----------------------------------------------------------------------------------------------------------- |
+| `l`             | Expand the selected profile, schema, object group, table metadata folder, or object.                        |
+| `h`             | Collapse the selected node.                                                                                 |
+| `<CR>`          | Select and bind a profile to the current query buffer, or open a saved query bound to the selected profile. |
+| `n`             | Create a query buffer bound to the selected profile.                                                        |
+| `s`             | Open a bound sample statement for the selected table or view.                                               |
+| `a`             | Select an action for the selected table, view, or saved query.                                              |
+| `y`             | Copy the qualified selected table or view name.                                                             |
+| `P`             | Preview the selected saved query without opening or binding it.                                             |
+| `/`             | Focus the filter from the sidebar or a Workspace query buffer.                                              |
+| `r`             | Reload the profile file and refresh the selected profile schema, or rescan saved queries.                   |
+| `Z`             | Collapse the open profile schema tree.                                                                      |
+| `<2-LeftMouse>` | Activate the clicked node; expandable nodes toggle, profiles bind, and saved queries open.                  |
+| `?`             | Show help.                                                                                                  |
+| `q`             | Close the workspace.                                                                                        |
 
 While editing the Workspace filter, press `<Esc>` to finish filtering. In a saved-query preview, `q` or `<Esc>` closes the preview. In Workspace help, `q`, `?`, or `<Esc>` closes the help window.
 
 Expanding a table reveals its available metadata folders. SQLite, PostgreSQL, and MySQL provide columns, primary keys, foreign keys, and indexes; Vertica provides columns, primary keys, foreign keys, and projections. Each folder loads on demand. Views remain under the schema's `views` group and expose their columns.
 
+### Saved Queries
+
+![saved](./assets/savedqueries.png)
+
+Saved queries are `.sql` files kept in named directories that appear as their own section in the Workspace sidebar. Configure one or more via `saved_query_dirs`:
+
+```lua
+require("orbit").setup({
+  saved_query_dirs = {
+    { Personal = "~/sql/personal" },
+    { Team = "~/projects/app/sql" },
+  },
+})
+```
+
+To add a query, run `:OrbitSave` from a Workspace query buffer. It prompts for a destination directory (when more than one is configured) and a filename, then writes the buffer's contents there.
+
+In the sidebar, pressing `<CR>` on a saved query opens it bound to its profile, and pressing `a` on a saved query brings up an action menu:
+
+| Action  | Effect                                         |
+| ------- | ---------------------------------------------- |
+| Open    | Open the query bound to its profile.           |
+| Preview | Show the query's contents without opening it.  |
+| Rename  | Rename the file in place.                      |
+| Move    | Move the file to another configured directory. |
+| Delete  | Remove the file after confirmation.            |
+
+Pressing `P` previews a saved query directly, without going through the menu. Pressing `r` rescans all configured directories, picking up files added or removed outside of Neovim.
+
 ### Structure Panel
 
-![structure panel](./assets/structure_panel.png)
+![structure panel](./assets/structure.png)
 
 `:OrbitStructure` opens a fixed-width panel at the far-right edge of the current tabpage and focuses it. Running the command again closes the panel. The panel works in ordinary SQL tabs and in the Orbit Workspace, follows the active query buffer, and updates as statements are edited.
 
 By default, statements are grouped under expanded `DDL`, `DML`, `SELECT`, and `Other` headings and sorted alphabetically within each group. Each row keeps its expand/collapse marker and adds a semantic icon distinguishing category groups, statement categories, `WITH` containers, CTEs, query blocks, and clauses. Statement parents start collapsed. A leading `WITH` clause expands into its named CTEs, and each CTE owns one query block per top-level `UNION`, `INTERSECT`, or `EXCEPT` branch. Query blocks expose their `SELECT`, `FROM`, `WHERE`, `GROUP BY`, `HAVING`, `WINDOW`, `ORDER BY`, `LIMIT`, and `OFFSET` clauses. Parenthesized `SELECT` and `WITH` blocks recurse beneath their owning clause, while ordinary function calls and grouped expressions remain inline. The outer query block appears beside the `WITH` container. Orbit ignores comments in labels and highlights the deepest visible element containing the query-buffer cursor.
 
-| Key     | Action                                                        |
-| ------- | ------------------------------------------------------------- |
-| `h`     | Collapse the selected node, or move to its parent.             |
-| `l`     | Expand the selected node, or move to its first child.          |
-| `j`, `k` | Move through visible tree nodes.                              |
-| `zh`, `zl` | Scroll horizontally through a complete SQL label.           |
+| Key         | Action                                                                          |
+| ----------- | ------------------------------------------------------------------------------- |
+| `h`         | Collapse the selected node, or move to its parent.                              |
+| `l`         | Expand the selected node, or move to its first child.                           |
+| `j`, `k`    | Move through visible tree nodes.                                                |
+| `zh`, `zl`  | Scroll horizontally through a complete SQL label.                               |
 | `<leader>E` | Execute the highlighted element using the configured `keymaps.execute` mapping. |
-| `<CR>`  | Return to the query buffer and navigate to the selected element. |
-| `/`     | Filter statement labels using case-insensitive substring matching. |
-| `<Esc>` | Clear the filter, or close the panel when no filter is active. |
-| `q`     | Close the panel and return to the query buffer.               |
+| `<CR>`      | Return to the query buffer and navigate to the selected element.                |
+| `/`         | Filter statement labels using case-insensitive substring matching.              |
+| `<Esc>`     | Clear the filter, or close the panel when no filter is active.                  |
+| `q`         | Close the panel and return to the query buffer.                                 |
 
 Executing a statement, query block, or `SELECT` clause uses that element's exact source range. Other rows execute their containing top-level statement. Extracted query blocks and clauses are not guaranteed to be independently valid, so connector errors are shown through the normal diagnostic split.
 
@@ -463,12 +492,12 @@ Structure parsing is dependency-free and tolerant of incomplete SQL. It outlines
 
 ### Result Grid
 
-| Key                | Action                                                                            |
-| ------------------ | --------------------------------------------------------------------------------- |
-| `h`, `j`, `k`, `l` | Move between cells.                                                               |
-| `<CR>`             | Inspect a read-only value, or edit the focused cell in an editable grid.          |
-| `y`                | Copy the raw selected value.                                                      |
-| `q`                | Close the standalone grid, or return to the query editor in a Workspace.          |
+| Key                | Action                                                                   |
+| ------------------ | ------------------------------------------------------------------------ |
+| `h`, `j`, `k`, `l` | Move between cells.                                                      |
+| `<CR>`             | Inspect a read-only value, or edit the focused cell in an editable grid. |
+| `y`                | Copy the raw selected value.                                             |
+| `q`                | Close the standalone grid, or return to the query editor in a Workspace. |
 
 Workspace sample statements for MySQL, PostgreSQL, and SQLite base tables become editable when Orbit can load a primary key. Ad-hoc statements, views, Trino, Vertica, and tables without a primary key remain read-only.
 
@@ -621,7 +650,7 @@ require("orbit").setup({
 | `workspace_result_ratio`  | `0.30`                                    | Fraction of editor height used by workspace results, with a six-line minimum.                                                                                        |
 | `winbar`                  | `false`                                   | Show Orbit status in SQL-window winbars.                                                                                                                             |
 | `keymaps`                 | See above                                 | Configurable action mappings.                                                                                                                                        |
-| `icons`                   | Nerd Font glyphs                          | Override tree, schema, Workspace, result, and Structure-panel icons shown above. The legacy `query` key supplies `query_block` when the precise key is omitted.     |
+| `icons`                   | Nerd Font glyphs                          | Override tree, schema, Workspace, result, and Structure-panel icons shown above. The legacy `query` key supplies `query_block` when the precise key is omitted.      |
 
 Orbit colors semantic icons independently from their labels. Dark backgrounds use Catppuccin Mocha colors and light backgrounds use Catppuccin Latte colors; the palette is reapplied after `:colorscheme`. Override any group through normal Neovim highlight configuration, for example:
 
