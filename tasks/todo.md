@@ -1220,3 +1220,26 @@ Plan: `~/.claude/plans/sprightly-seeking-blanket.md`. Replaces the two single-li
 - Table groups use `icons.with` as a semantic icon beside their standard disclosure marker.
 - Regression tests cover collapsed and expanded table/view groups and their child object icons.
 - Verification: `nvim --headless -u NONE -l tests/run.lua` and `git diff --check` passed. Independent review found no remaining actionable issues.
+
+## Trino Complex Result Fix
+
+- [x] Add a shared strict CSV parser by extracting the proven PostgreSQL parser without changing PostgreSQL behavior.
+- [x] Add a validated Trino `output_format` profile option supporting `CSV_HEADER` and `JSON`, defaulting to `CSV_HEADER`.
+- [x] Auto-detect Trino CSV and JSON output in the connector parser without global profile state.
+- [x] Add regression coverage for maps/arrays rendered as CSV text, delimiters, quotes, embedded newlines, empty result sets, and malformed rows.
+- [x] Update user documentation to explain both formats, their tradeoffs, and the default.
+- [x] Run focused tests, the complete headless suite, formatting when available, and whitespace validation.
+
+### Design
+
+- Keep the stock Trino CLI transport and one-shot execution model. Do not introduce JDBC, an HTTP implementation, authentication duplication, or query rewriting.
+- Default to the CLI's supported `CSV_HEADER` output because Trino defaults batch output to CSV and its `FormatUtils.formatValue` path recursively handles maps, arrays, rows, and binary values. The CLI 483 `JSON` printer passes these Java objects to a generator with no `ObjectCodec`, which causes the reported failure before Orbit receives output.
+- Preserve `JSON` as an opt-in for scalar-only statements where native numbers, booleans, structured JSON, and distinct SQL nulls matter more than support for every Trino type.
+- Preserve complex CSV values as the CLI's deterministic display strings. Accept and document the CLI format's unavoidable ambiguity: both SQL `NULL` and an empty string arrive as an empty quoted CSV field.
+- Keep connector parsing strict: malformed CSV or a data row whose width differs from the header must return a useful parse error rather than silently shifting cells.
+
+### Review
+
+- Trino profiles now use the CLI's complex-type-safe `CSV_HEADER` printer by default and can opt back into `JSON`; the connector detects and parses either result without shared mutable state.
+- PostgreSQL and Trino share one strict CSV parser. PostgreSQL retains its quoted-empty versus unquoted-NULL behavior, while Trino preserves the CLI's unavoidable empty-cell ambiguity.
+- Verification: `nvim --headless -u NONE -l tests/run.lua` and `git diff --check` passed. Trino CLI 483 confirms `CSV_HEADER` and `JSON` are supported and that batch mode defaults to CSV. Independent review found no remaining functional blockers after its low-severity parser and coverage findings were addressed. `stylua` is not installed.

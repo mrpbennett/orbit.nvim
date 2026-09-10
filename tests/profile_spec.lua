@@ -180,7 +180,7 @@ return {
     assert(profiles.load(path))
   end,
 
-  ["Trino connector builds an interactive command"] = function()
+  ["Trino connector defaults to CSV_HEADER output"] = function()
     local command = assert(connector("trino").prepare({
         server = "https://trino.example.test:8443",
         user = "orbit",
@@ -195,10 +195,95 @@ return {
       "--catalog", "hive",
       "--schema", "default",
       "--no-progress",
-      "--output-format", "JSON",
+      "--output-format", "CSV_HEADER",
       "--execute", "SELECT 1",
     })
   end,
+
+	["Trino connector supports JSON output"] = function()
+		local command = assert(connector("trino").prepare({
+			server = "https://trino.example.test:8443",
+			user = "orbit",
+			catalog = "hive",
+			output_format = "JSON",
+		}, "SELECT 1"))
+
+		assert(command[10] == "JSON")
+	end,
+
+	["Trino output format is validated"] = function()
+		for _, format in ipairs({ "CSV_HEADER", "JSON" }) do
+			local valid = write_profiles({
+				version = 1,
+				profiles = {
+					{
+						name = "analytics",
+						kind = "trino",
+						options = {
+							server = "https://trino.example.test:8443",
+							user = "orbit",
+							catalog = "hive",
+							output_format = format,
+						},
+					},
+				},
+			})
+			assert(profiles.load(valid))
+		end
+
+		for _, format in ipairs({ "ALIGNED", 42 }) do
+			local invalid = write_profiles({
+				version = 1,
+				profiles = {
+					{
+						name = "analytics",
+						kind = "trino",
+						options = {
+							server = "https://trino.example.test:8443",
+							user = "orbit",
+							catalog = "hive",
+							output_format = format,
+						},
+					},
+				},
+			})
+			local document, err = profiles.load(invalid)
+			assert(document == nil and err:match("CSV_HEADER"))
+		end
+	end,
+
+	["Trino connector parses complex CSV values and JSON rows"] = function()
+		local trino = connector("trino")
+		local csv_rows = assert(trino.parse(table.concat({
+			'"id","metadata","note","empty"',
+			'"1","{source=trino, tags=[a, b]}","first line',
+			'second ""line""",""',
+			"",
+		}, "\n")))
+		assert_equal(csv_rows, {
+			{ id = "1", metadata = "{source=trino, tags=[a, b]}", note = 'first line\nsecond "line"', empty = "" },
+		})
+		assert_equal(assert(trino.parse('{"id":1,"missing":null}\n')), { { id = 1, missing = vim.NIL } })
+		assert_equal(assert(trino.parse('"id","metadata"\n')), {})
+		assert_equal(assert(trino.parse('"null_value","empty"\r\n"",""\r\n')), {
+			{ null_value = "", empty = "" },
+		})
+	end,
+
+	["Trino connector rejects malformed CSV output"] = function()
+		local trino = connector("trino")
+		local rows, width_err = trino.parse('"id","metadata"\n"1"\n')
+		assert(rows == nil and width_err:match("expected 2"))
+
+		local quoted, quote_err = trino.parse('"id"\n"unterminated\n')
+		assert(quoted == nil and quote_err:match("unterminated"))
+
+		local carriage, carriage_err = trino.parse('"id"\n"one"\rtwo\n')
+		assert(carriage == nil and carriage_err:match("carriage return"))
+
+		local trailing, trailing_err = trino.parse('"id"\n"one"two\n')
+		assert(trailing == nil and trailing_err:match("after closing quote"))
+	end,
 
   ["connectors own object naming"] = function()
     local sqlite = connector("sqlite")

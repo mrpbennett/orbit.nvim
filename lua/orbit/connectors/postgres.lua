@@ -41,6 +41,7 @@
 -- ============================================================================
 
 local M = {}
+local csv = require("orbit.connectors.utils.csv")
 
 -- Appends every item in `values` onto the end of `arguments`, in order.
 -- Used throughout this file to build up psql command-line argument lists
@@ -503,14 +504,9 @@ end
 -- through M.prepare, comes back as CSV text on stdout, and this function
 -- turns that CSV text into the row data the results grid actually displays.
 --
--- This is a small hand-written character-by-character CSV parser (not a
--- regex or a library) because CSV quoting rules aren't regular: a quoted
--- field can contain commas, newlines, and escaped quotes ("" means a
--- literal "), so a simple string.gmatch split on "," or "\n" would corrupt
--- data any time a cell contains one of those characters. Walking the string
--- one character at a time and tracking "am I currently inside a quoted
--- field?" as a piece of state is a minimal example of what's usually called
--- a state machine: fixed byte, fixed transition rules.
+-- The shared parser handles CSV's stateful quoting rules, including commas,
+-- newlines, and doubled quotes inside values. PostgreSQL's unquoted empty
+-- fields are mapped to vim.NIL, while quoted empty strings remain strings.
 --
 -- Params: output - the full CSV text (header row + data rows) from psql.
 -- Returns: a Lua array of row tables. Each row table maps column name
@@ -518,102 +514,7 @@ end
 --   string, or the special `vim.NIL` sentinel representing a SQL NULL.
 -- Side effects: none (pure parsing).
 function M.parse(output)
-	-- Preserve quoted empty strings separately from unquoted SQL NULL fields in psql's CSV output.
-	local records, record, field = {}, {}, {}
-	-- `quoted` remembers whether the field we're currently building started
-	-- with a '"' (so `""`, a quoted empty string, can later be told apart
-	-- from a genuinely empty/NULL field). `in_quotes` is the state-machine
-	-- flag: true while we're scanning characters that are "inside" an open
-	-- pair of quotes, where commas/newlines are just literal characters
-	-- rather than field/record separators.
-	local quoted, in_quotes, index = false, false, 1
-
-	-- Closes off the field currently being built: records its accumulated
-	-- text plus whether it was quoted, then resets the buffers so the next
-	-- field starts fresh.
-	local function finish_field()
-		table.insert(record, { value = table.concat(field), quoted = quoted })
-		field, quoted = {}, false
-	end
-	-- Closes off the current field (there's always at least one, even on an
-	-- empty line) and then the current record (row of fields), appending it
-	-- to `records` and starting a new one.
-	local function finish_record()
-		finish_field()
-		table.insert(records, record)
-		record = {}
-	end
-
-	while index <= #output do
-		local character = output:sub(index, index)
-		if in_quotes then
-			-- Inside a quoted field: a doubled quote ("") is CSV's escape
-			-- sequence for a single literal quote character in the data, so we
-			-- emit one '"' and skip both characters. A lone quote closes the
-			-- field's quoted section (note we stay "inside" the field itself
-			-- until a comma/newline is seen next — a field could in theory have
-			-- trailing unquoted characters after the closing quote, though psql
-			-- itself doesn't produce that).
-			if character == '"' and output:sub(index + 1, index + 1) == '"' then
-				table.insert(field, '"')
-				index = index + 1
-			elseif character == '"' then
-				in_quotes = false
-			else
-				-- Any other character, including a literal comma or newline, is
-				-- just data while inside quotes.
-				table.insert(field, character)
-			end
-		elseif character == '"' and #field == 0 then
-			-- A quote at the very start of a field (nothing accumulated yet)
-			-- begins a quoted field. Note this deliberately doesn't trigger for a
-			-- quote appearing after other characters, since psql's CSV output
-			-- only ever quotes a field from its first character.
-			quoted, in_quotes = true, true
-		elseif character == "," then
-			finish_field()
-		elseif character == "\n" then
-			finish_record()
-		elseif character ~= "\r" then
-			-- Skip bare "\r" (part of Windows-style "\r\n" line endings) so it
-			-- doesn't get treated as data; everything else is ordinary field text.
-			table.insert(field, character)
-		end
-		index = index + 1
-	end
-	-- The loop above only finishes a field/record when it sees a delimiter;
-	-- the very last field/record in the input has no trailing comma/newline
-	-- to trigger that, so it must be flushed manually here. The three-part
-	-- check (leftover text, a quoted-but-empty field, or a record that
-	-- already has some fields) covers "there's still something pending."
-	if #field > 0 or quoted or #record > 0 then
-		finish_record()
-	end
-	if #records == 0 then
-		return {}
-	end
-
-	-- The first record is the CSV header row (column names); every
-	-- subsequent record is a data row. Build one Lua table per data row,
-	-- keyed by the corresponding header's text.
-	local headers, rows = records[1], {}
-	for record_index = 2, #records do
-		local row = {}
-		for column_index, header in ipairs(headers) do
-			local field_value = records[record_index][column_index] or {}
-			-- Postgres/psql's CSV output can't otherwise distinguish an empty
-			-- string value ('') from a SQL NULL, because both would just render
-			-- as an empty cell — UNLESS the value was quoted, which only happens
-			-- for a real empty string, never for NULL. So: an empty, *unquoted*
-			-- field means NULL (mapped to vim.NIL); an empty, *quoted* field
-			-- means a genuine empty string.
-			row[header.value] = field_value.value == "" and not field_value.quoted and vim.NIL
-				or field_value.value
-				or ""
-		end
-		table.insert(rows, row)
-	end
-	return rows
+	return csv.parse(output, { unquoted_empty_is_null = true })
 end
 
 return M

@@ -6,6 +6,7 @@ All notable changes to Orbit.nvim are documented in this file.
 
 ### Added
 
+- Added a Trino `output_format` profile option with `CSV_HEADER` and `JSON` choices.
 - Added `:OrbitSave` to save Workspace query buffers into configured saved-query locations or existing subdirectories, then reveal the saved file in the Workspace tree.
 - Added saved-query actions for opening, previewing, renaming, moving among existing directories in configured locations, and confirmed deletion while preserving loaded buffer contents and unsaved edits.
 - Added a MySQL 8.x connector backed by Oracle MySQL or MariaDB CLI clients, with TCP and Unix-socket profiles, client-managed credentials, family-specific TLS validation, and retained XML sessions.
@@ -14,15 +15,18 @@ All notable changes to Orbit.nvim are documented in this file.
 
 ### Changed
 
+- Trino profiles now default to `CSV_HEADER` output so maps, arrays, rows, and binary values can be displayed through the stock CLI. `JSON` remains available for scalar result fidelity.
 - Schema browser labels now quote identifier segments when distinct catalog/schema combinations would otherwise look identical. Ordinary labels remain unchanged, and disambiguated labels stay stable while filtering.
 
 ### Fixed
 
+- Prevented Trino statements containing map or other container values from failing in the CLI's JSON serializer before Orbit receives their results.
 - Prevented distinct schema objects with identical dotted labels, such as `"a.b"."c"` and `"a"."b.c"`, from sharing cached metadata or receiving each other's column completions.
 - Kept colliding catalog/schema groups separate and made schema browser expansion and metadata state independent of display labels.
 
 ### Tests
 
+- Added Trino result-format coverage for profile validation, command construction, complex CSV values, JSON rows, and malformed CSV output.
 - Added regression coverage for independent in-flight and cached metadata, column completion, metadata categories, namespace grouping, quoted-label collisions, and expansion across filtering and label changes.
 - Added MySQL coverage for profile and TLS validation, client command construction, XML framing and parsing, schema capabilities, mutations, qualified completion, and dialect tokenization.
 

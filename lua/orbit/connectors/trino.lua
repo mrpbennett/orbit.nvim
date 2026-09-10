@@ -49,6 +49,7 @@
 -- results back into the database (no primary-key based UPDATE/INSERT/DELETE
 -- generation), so those hooks are simply omitted.
 local M = {}
+local csv = require("orbit.connectors.utils.csv")
 
 -- Appends every item of `values` onto the end of `arguments`, in place.
 -- Small helper used throughout this file to build up CLI argument lists
@@ -99,6 +100,7 @@ function M.validate_options(profile_name, options)
     catalog = true,
     confirm_mutations = true,
     executable = true,
+    output_format = true,
     schema = true,
     schema_patterns = true,
     server = true,
@@ -111,6 +113,9 @@ function M.validate_options(profile_name, options)
   end
   if options.schema ~= nil and type(options.schema) ~= "string" then
     return nil, string.format("profile %q options.schema must be a string", profile_name)
+  end
+  if options.output_format ~= nil and options.output_format ~= "CSV_HEADER" and options.output_format ~= "JSON" then
+    return nil, string.format('profile %q options.output_format must be "CSV_HEADER" or "JSON"', profile_name)
   end
   if options.schema_patterns ~= nil then
     if type(options.schema_patterns) ~= "table" or vim.islist(options.schema_patterns) then
@@ -140,9 +145,9 @@ end
 --   statement - the raw SQL text to execute.
 -- Returns: an array of strings suitable for vim.system()/vim.fn.jobstart(),
 -- e.g. { "trino", "--server", ..., "--execute", statement }.
--- `--output-format JSON` tells the CLI to print results as JSON so this
--- module's parsing (delegated to lua/orbit/adapters.lua's generic JSON
--- parser, since this file defines no M.parse) can read them back reliably.
+-- CSV_HEADER is the safe default because the Trino CLI formats every result
+-- type as text before quoting it. JSON preserves native scalar values, but the
+-- stock CLI cannot serialize maps and other Java container values.
 -- No side effects - this only builds a table describing a command; runner.lua
 -- is responsible for actually spawning it.
 function M.prepare(options, statement)
@@ -158,10 +163,26 @@ function M.prepare(options, statement)
   end
   append(command, {
     "--no-progress",
-    "--output-format", "JSON",
+    "--output-format", options.output_format or "CSV_HEADER",
     "--execute", statement,
   })
   return command
+end
+
+-- Both supported formats identify themselves in their first byte: Trino's
+-- JSON mode emits one object per line, while CSV_HEADER quotes every header.
+-- Detecting the format here keeps parser selection local to this connector and
+-- allows profiles using different formats to execute concurrently.
+function M.parse(output)
+  local trimmed = vim.trim(output or "")
+  if trimmed == "" then
+    return {}
+  end
+  local first = trimmed:sub(1, 1)
+  if first == "{" or first == "[" then
+    return require("orbit.adapters").parse(trimmed)
+  end
+  return csv.parse(output)
 end
 
 -- Renders a fully-qualified "catalog.schema.table" name for a discovered

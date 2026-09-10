@@ -4,7 +4,7 @@
 
 Your database revolves around your editor, not the other way around.
 
-Orbit runs statements through your existing database CLI, retains one connection per profile where the CLI supports it, keeps profiles per query buffer, browses schemas, completes cached objects, and renders JSON results in a navigable grid.
+Orbit runs statements through your existing database CLI, retains one connection per profile where the CLI supports it, keeps profiles per query buffer, browses schemas, completes cached objects, and renders normalized results in a navigable grid.
 
 ![preview](./assets/preview.png)
 
@@ -286,18 +286,17 @@ Oracle MySQL clients support `disabled`, `preferred`, `required`, `verify_ca`, a
     {
       "name": "analytics",
       "kind": "trino",
-      "arguments": ["--password"]
       "options": {
         "server": "https://trino.example.com:8443",
         "user": "alice",
         "catalog": "hive",
         "schema": "analytics",
+        "arguments": ["--password"],
+        "output_format": "CSV_HEADER",
         "schema_patterns": {
           "hive": ["analytics", "reporting"],
           "iceberg": []
-          // add more catalogs as needed...
-          // see Trino Multi-Catalog Schema Browser
-        },
+        }
       }
     }
   ]
@@ -321,6 +320,26 @@ Trino profiles still require `catalog` as the CLI's default catalog, but `schema
 ```
 
 An empty array, such as `"catalog_1": []`, includes every non-system schema from that catalog. Omit a catalog entirely to hide it.
+
+Trino defaults to `"output_format": "CSV_HEADER"`. This supports every Trino result type, including maps, arrays, rows, and binary values, by displaying the CLI's text representation. CSV represents both SQL `NULL` and an empty string as an empty cell. Set `"output_format": "JSON"` when preserving native scalar values and distinct nulls is more important and statements do not return maps or other complex container types; the stock Trino CLI cannot serialize those values in JSON mode.
+
+Set `output_format` inside the Trino profile's `options` object. Use the default for statements that may return complex values:
+
+```json
+{
+  "output_format": "CSV_HEADER"
+}
+```
+
+Switch to JSON for scalar-only results:
+
+```json
+{
+  "output_format": "JSON"
+}
+```
+
+Run `:OrbitProfiles`, change the value in the profile's existing `options` object, and save the profile file. The next statement uses the new format. Omitting `output_format` is equivalent to `"CSV_HEADER"`.
 </details>
 
 ### Authentication

@@ -12,3 +12,4 @@
 - For README connector additions, verify the requested profile object is complete and visibly placed in the rendered connector details, not merely described elsewhere.
 - In README requirement tables, name and link each required CLI explicitly so the dependency is as visible as the surrounding entries.
 - When a screenshot is paired with an exact desired row, implement that literal output before generalizing the visual pattern to sibling rows.
+- When a safer transport has fidelity tradeoffs, preserve the existing transport as an explicit profile choice instead of forcing every user onto one representation.
