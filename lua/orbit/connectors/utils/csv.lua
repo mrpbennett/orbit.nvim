@@ -61,6 +61,16 @@ function M.parse(output, options)
 	end
 
 	local headers, rows = records[1], {}
+	local seen_headers = {}
+	for _, header in ipairs(headers) do
+		if header.value == "" then
+			return nil, "CLI output is not valid CSV: column names must not be empty"
+		end
+		if seen_headers[header.value] then
+			return nil, "CLI output is not valid CSV: duplicate column name " .. string.format("%q", header.value)
+		end
+		seen_headers[header.value] = true
+	end
 	for record_index = 2, #records do
 		local fields = records[record_index]
 		if #fields ~= #headers then

@@ -1040,8 +1040,11 @@ return {
       vim.notify = function(message, level)
         table.insert(notifications, { message = message, level = level })
       end
-      vim.uv.fs_link = function()
-        return nil, "EXDEV: cross-device link not permitted", "EXDEV"
+      vim.uv.fs_link = function(source_path, destination_path)
+        if destination_path == destination or destination_path == cleanup_destination then
+          return nil, "EXDEV: cross-device link not permitted", "EXDEV"
+        end
+        return original_link(source_path, destination_path)
       end
 
       vim.api.nvim_feedkeys("a", "mx", false)
@@ -1077,7 +1080,7 @@ return {
       vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "cleanup.sql")), 0 })
       choose_destination = false
       vim.uv.fs_unlink = function(path)
-        if path == cleanup_source then
+        if path:find("/.orbit%-") then
           return nil, "EACCES: permission denied", "EACCES"
         end
         return original_unlink(path)

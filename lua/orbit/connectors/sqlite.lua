@@ -43,6 +43,7 @@
 -- SQLite "connection" is just a local file path).
 local M = {}
 local schema_pattern = require("orbit.connectors.utils.schema_pattern")
+local metadata = require("orbit.connectors.metadata")
 
 -- Appends every item of `values` onto the end of `arguments`, in place.
 -- Small helper for building up CLI argument lists piece by piece.
@@ -194,20 +195,17 @@ end
 -- `nil` if the marker hasn't shown up in `output` yet (caller should keep
 -- waiting for more stdout data).
 function M.session_output(output, marker)
-	local marker_at = output:find(marker, 1, true)
-	if not marker_at then
-		-- Marker hasn't printed yet - this request's output isn't complete.
+	local document = '[{"__orbit_marker":"' .. marker .. '"}]'
+	local start_at, end_at = output:find(document, 1, true)
+	if not start_at then
+		-- The complete marker document has not printed yet.
 		return nil
 	end
-	-- Walk backwards from the marker to the start of the JSON array ("[") that
-	-- sqlite3's `-json` mode wraps every result set in, so the returned slice
-	-- is exactly the JSON for this statement and excludes the marker query's
-	-- own (irrelevant) JSON output.
-	local start = output:sub(1, marker_at):match(".*()%[")
-	if not start then
+	local line_ending = output:sub(end_at + 1):match("^\r?\n")
+	if not line_ending then
 		return nil
 	end
-	return output:sub(1, start - 1)
+	return output:sub(1, start_at - 1), end_at + #line_ending
 end
 
 -- Builds the SQL/PRAGMA statement used to discover schema metadata for the
@@ -261,15 +259,13 @@ end
 -- schema object `row`. Every object gets "columns"; only real tables (not
 -- views) additionally get primary key, foreign key, and index categories,
 -- since those PRAGMAs are meaningful only for tables.
--- Returns: a list of { id = string, label = string } tables.
+-- Returns category descriptors with identity, label, and presentation rules.
 function M.metadata_categories(_, row)
-	local categories = {
-		{ id = "columns", label = "columns" },
-	}
+	local categories = { metadata.category("columns") }
 	if row.type == "table" then
-		table.insert(categories, { id = "primary_keys", label = "primary keys" })
-		table.insert(categories, { id = "foreign_keys", label = "foreign keys" })
-		table.insert(categories, { id = "indexes", label = "indexes" })
+		table.insert(categories, metadata.category("primary_keys"))
+		table.insert(categories, metadata.category("foreign_keys"))
+		table.insert(categories, metadata.category("indexes"))
 	end
 	return categories
 end

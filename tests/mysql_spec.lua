@@ -78,7 +78,10 @@ return {
 		local output = result("SELECT marker", row('<field name="__orbit_frame">orbit_marker:BEGIN</field>'))
 			.. result("SELECT 1", row('<field name="value">1</field>'))
 			.. result("SELECT marker", row('<field name="__orbit_frame">orbit_marker:END</field>'))
-		assert(connector.session_output(output, "orbit_marker") == result("SELECT marker", row('<field name="__orbit_frame">orbit_marker:BEGIN</field>')) .. result("SELECT 1", row('<field name="value">1</field>')))
+		local framed_output, consumed = connector.session_output(output, "orbit_marker")
+		assert(framed_output == result("SELECT marker", row('<field name="__orbit_frame">orbit_marker:BEGIN</field>')) .. result("SELECT 1", row('<field name="value">1</field>')))
+		assert(consumed == #output)
+		assert(connector.session_output(output:sub(1, -3), "orbit_marker") == nil)
 	end,
 
 	["MySQL XML parsing preserves text values and rejects unsafe responses"] = function()
@@ -102,6 +105,20 @@ return {
 
 		local failure, failure_err = connector.parse(framed(nil, nil, row('<field name="Level">Error</field>\n<field name="Code">1146</field>\n<field name="Message">missing table</field>')))
 		assert(failure == nil and failure_err == "MySQL error 1146: missing table")
+
+		for _, invalid in ipairs({
+			result("duplicate", row('<field name="id">1</field><field name="id">2</field>')),
+			result("empty", row('<field name="">1</field>')),
+			'<?xml version="1.0"?>\n<resultset><row><field name="id">1</field></row>',
+			result("field", row('<field name="id">missing close')),
+			result("shape", row('<field name="id">1</field>') .. row('<field name="name">Ada</field>')),
+			result("character", row('<field name="value">&#0;</field>')),
+			result("character", row('<field name="value">&#x110000;</field>')),
+			result("empty row", row("")),
+		}) do
+			local rows, err = connector.parse(invalid)
+			assert(rows == nil and err, invalid)
+		end
 	end,
 
 	["MySQL connector exposes names, schema metadata, actions, and editable mutations"] = function()

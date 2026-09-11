@@ -47,6 +47,9 @@ local M = {}
 --                        session_for).
 --   sequence           - monotonically increasing counter used to build
 --                        unique markers.
+--   stdout             - unconsumed bytes from the process's continuous
+--                        stdout stream. Connector framing removes complete
+--                        prefixes while preserving bytes for the next request.
 local sessions = {}
 
 -- Complete a request's callback exactly once, no matter how it finishes.
@@ -81,6 +84,7 @@ local function fail(session, err)
 	local active = session.active
 	session.active = nil
 	session.process = nil
+	session.stdout = ""
 	if active then
 		finish(active, nil, err)
 	end
@@ -124,18 +128,29 @@ local function start_next(session)
 			stdin = true,
 			-- This callback fires every time the process writes to stdout. We
 			-- can't assume one call = one complete response (output can arrive
-			-- in arbitrary chunks), so we accumulate everything into
-			-- session.active.output and ask the connector whether the unique
-			-- marker for the active request has appeared yet -- only then do we
-			-- know the CLI has finished printing this statement's result.
+			-- in arbitrary chunks), so session.stdout retains unconsumed bytes.
+			-- The Connector returns only after the complete marker record arrives,
+			-- along with the byte count Session can remove before advancing.
 			stdout = function(err, data)
-				if err or not data or not session.active then
+				if err or not data then
 					return
 				end
-				session.active.output = session.active.output .. data
-				local output = session.connector.session_output(session.active.output, session.active.marker)
+				session.stdout = session.stdout .. data
+				if not session.active then
+					return
+				end
+				local output, consumed = session.connector.session_output(session.stdout, session.active.marker)
 				if output then
+					if type(consumed) ~= "number" or consumed % 1 ~= 0 or consumed < 1 or consumed > #session.stdout then
+						local process = session.process
+						fail(session, "connector returned invalid session framing")
+						if process then
+							process:kill(15)
+						end
+						return
+					end
 					local request = session.active
+					session.stdout = session.stdout:sub(consumed + 1)
 					session.active = nil
 					local request_err = request.stderr ~= "" and vim.trim(request.stderr) or nil
 					if session.connector.session_error then
@@ -228,6 +243,7 @@ local function session_for(profile, connector)
 			queue = {},
 			signature = signature,
 			sequence = 0,
+			stdout = "",
 		}
 		sessions[profile.name] = session
 	end
@@ -254,7 +270,6 @@ function M.run(profile, connector, statement, callback)
 		callback = callback,
 		-- The unique sentinel delimits one response in a long-lived CLI output stream.
 		marker = string.format("__orbit_%s_%d_%d", profile.name:gsub("[^%w]", "_"), vim.uv.hrtime(), session.sequence),
-		output = "",
 		stderr = "",
 		statement = statement,
 	}

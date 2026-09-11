@@ -33,10 +33,10 @@
 --       information_schema to fetch that metadata. Called by
 --       lua/orbit/schema_cache.lua whenever the sidebar/completion needs to
 --       (re)discover tables or columns.
---   * metadata_categories(options, row) -> list of {id, label}
+--   * metadata_categories(options, row) -> category descriptors
 --       Tells the UI which extra detail categories (columns, primary keys,
---       etc.) can be shown for a given schema object. Trino only supports
---       "columns" here (no primary/foreign key or index introspection).
+--       etc.) can be shown and how their rows are presented. Trino only
+--       supports "columns" here (no primary/foreign key or index introspection).
 --   * object_actions(options, row, limit) -> list of action tables | nil, err
 --       Builds the context-menu actions offered for a table/view in the
 --       sidebar (e.g. "open a sample SELECT", "show columns").
@@ -50,6 +50,7 @@
 -- generation), so those hooks are simply omitted.
 local M = {}
 local csv = require("orbit.connectors.utils.csv")
+local metadata = require("orbit.connectors.metadata")
 
 -- Appends every item of `values` onto the end of `arguments`, in place.
 -- Small helper used throughout this file to build up CLI argument lists
@@ -384,9 +385,9 @@ end
 -- foreign key, or index introspection support, unlike postgres.lua and
 -- sqlite.lua), so this always returns the same single-item list regardless
 -- of arguments.
--- Returns: a list of { id = string, label = string } tables.
+-- Returns category descriptors with identity, label, and presentation rules.
 function M.metadata_categories()
-  return { { id = "columns", label = "columns" } }
+  return { metadata.category("columns") }
 end
 
 -- Builds the list of context-menu actions the sidebar offers for a

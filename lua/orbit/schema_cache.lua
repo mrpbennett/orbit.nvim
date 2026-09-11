@@ -36,19 +36,10 @@
 local adapters = require("orbit.adapters")
 local runner = require("orbit.runner")
 local schema = require("orbit.schema")
+local metadata = require("orbit.connectors.metadata")
 
 local M = {}
 local profiles = {}
--- The set of metadata "categories" this module knows how to cache/route,
--- beyond plain columns (which gets its own dedicated M.load_columns path).
--- Kept in sync with what connectors advertise via metadata_categories().
-local metadata_categories = {
-  columns = true,
-  foreign_keys = true,
-  indexes = true,
-  primary_keys = true,
-  projections = true,
-}
 
 -- Looks up (creating if necessary) the cache state for one connection
 -- `profile`, discarding any previous cache if the profile's kind/options
@@ -272,7 +263,11 @@ local function connector_for_metadata(profile, row, category, callback)
     end
   end
   vim.schedule(function()
-    callback({})
+    if metadata.known(category) then
+      callback({})
+    else
+      callback(nil, "unknown table metadata category: " .. tostring(category))
+    end
   end)
 end
 
@@ -368,22 +363,15 @@ end
 -- Parameters:
 --   profile  - the connection profile to query.
 --   row      - the table/view row the metadata belongs to.
---   category - one of the keys in the module-level `metadata_categories`
---              table: "columns", "primary_keys", "foreign_keys", "indexes", "projections".
+--   category - a category recognized by the Connector metadata module.
 --   options  - optional table; `options.refresh = true` forces a reload.
 --   callback - optional function(rows, err), called asynchronously.
 -- Side effects: may run a real schema query. Calls back with an error if
--- `category` isn't one of the known categories, or with an empty list if
+-- `category` isn't recognized, or with an empty list if
 -- the connector doesn't support this category for this object.
 function M.load_metadata(profile, row, category, options, callback)
   options = options or {}
   callback = callback or function() end
-  if not metadata_categories[category] then
-    vim.schedule(function()
-      callback(nil, "unknown table metadata category: " .. tostring(category))
-    end)
-    return
-  end
   if category == "columns" then
     return M.load_columns(profile, row, options, callback)
   end

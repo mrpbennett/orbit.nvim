@@ -1,6 +1,8 @@
 -- Vertica connector backed by the vsql command-line client.
 local M = {}
-local null_marker = "__ORBIT_NULL__"
+-- A process-local sentinel makes collision with a real cell value negligible;
+-- a fixed public sentinel would silently convert that literal value to NULL.
+local null_marker = "__ORBIT_NULL_" .. tostring(vim.uv.hrtime()) .. tostring({}):gsub("[^%w]", "") .. "__"
 
 local function append(arguments, values)
   for _, value in ipairs(values) do
@@ -21,6 +23,8 @@ local function qualified(row)
 end
 
 local schema_pattern = require("orbit.connectors.utils.schema_pattern")
+local metadata = require("orbit.connectors.metadata")
+local entities = require("orbit.connectors.utils.entities")
 
 local function schema_filter(schemas)
   local clause = schema_pattern.sql_clause("table_schema", schemas)
@@ -93,12 +97,23 @@ function M.session_request(statement, marker)
 end
 
 function M.session_output(output, marker)
-  local marker_at = output:find(marker, 1, true)
+  local marker_at = output:find(">" .. marker .. "</td>", 1, true)
   if not marker_at then
     return nil
   end
   local start = output:sub(1, marker_at):match(".*()<table[%s>]")
-  return start and output:sub(1, start - 1) or nil
+  if not start or not output:sub(start, marker_at):match("<th[^>]*>__orbit_marker</th>") then
+    return nil
+  end
+  local _, table_end = output:find("</table>", marker_at, true)
+  if not table_end then
+    return nil
+  end
+  local line_ending = output:sub(table_end + 1):match("^\r?\n")
+  if not line_ending then
+    return nil
+  end
+  return output:sub(1, start - 1), table_end + #line_ending
 end
 
 function M.environment(options)
@@ -167,12 +182,12 @@ function M.schema_statement(options, node)
 end
 
 function M.metadata_categories(_, row)
-  local categories = { { id = "columns", label = "columns" } }
+  local categories = { metadata.category("columns") }
   if row.type == "table" then
     append(categories, {
-      { id = "primary_keys", label = "primary keys" },
-      { id = "foreign_keys", label = "foreign keys" },
-      { id = "projections", label = "projections" },
+      metadata.category("primary_keys"),
+      metadata.category("foreign_keys"),
+      metadata.category("projections"),
     })
   end
   return categories
@@ -204,43 +219,102 @@ function M.object_actions(options, row, limit)
 end
 
 local function unescape(value)
-  value = value:gsub("&quot;", '"'):gsub("&apos;", "'"):gsub("&lt;", "<"):gsub("&gt;", ">")
-  value = value:gsub("&#x([%x]+);", function(number)
-    return vim.fn.nr2char(tonumber(number, 16))
-  end):gsub("&#(%d+);", function(number)
-    return vim.fn.nr2char(tonumber(number))
-  end)
-  return value:gsub("&amp;", "&")
+  return entities.decode(value, "Vertica HTML")
 end
 
 function M.parse(output)
-  local table_output = output:match("<table[^>]*>(.-)</table>")
-  if not table_output then
+  local trimmed = vim.trim(output or "")
+  if trimmed == "" then
     return {}
   end
-  local records = {}
-  for row in table_output:gmatch("<tr[^>]*>(.-)</tr>") do
-    local record = {}
-    local tag = row:find("<th[^>]*>") and "th" or "td"
-    for value in row:gmatch("<" .. tag .. "[^>]*>(.-)</" .. tag .. ">") do
-      table.insert(record, { tag = tag, value = unescape(value) })
-    end
-    if #record > 0 then
-      table.insert(records, record)
-    end
+  local table_start, table_end, table_output = trimmed:find("^<table[^>]*>(.*)</table>$")
+  if not table_start or table_end ~= #trimmed then
+    return nil, "invalid Vertica HTML output"
   end
-  if #records == 0 or records[1][1].tag ~= "th" then
-    return {}
+
+  local records, offset = {}, 1
+  while offset <= #table_output do
+    local whitespace = table_output:sub(offset):match("^%s*") or ""
+    offset = offset + #whitespace
+    if offset > #table_output then
+      break
+    end
+    local row_start, row_open_end = table_output:sub(offset):find("^<tr[^>]*>")
+    if not row_start then
+      return nil, "invalid Vertica HTML row"
+    end
+    row_start, row_open_end = offset + row_start - 1, offset + row_open_end - 1
+    local row_close, row_close_end = table_output:find("</tr>", row_open_end + 1, true)
+    if not row_close then
+      return nil, "incomplete Vertica HTML row"
+    end
+    local row_body = table_output:sub(row_open_end + 1, row_close - 1)
+    local record, cell_offset = {}, 1
+    while cell_offset <= #row_body do
+      local cell_whitespace = row_body:sub(cell_offset):match("^%s*") or ""
+      cell_offset = cell_offset + #cell_whitespace
+      if cell_offset > #row_body then
+        break
+      end
+      local cell_start, cell_open_end, tag = row_body:sub(cell_offset):find("^<(t[hd])[^>]*>")
+      if not cell_start then
+        return nil, "invalid Vertica HTML cell"
+      end
+      cell_start, cell_open_end = cell_offset + cell_start - 1, cell_offset + cell_open_end - 1
+      local cell_close, cell_close_end = row_body:find("</" .. tag .. ">", cell_open_end + 1, true)
+      if not cell_close then
+        return nil, "incomplete Vertica HTML cell"
+      end
+      local encoded = row_body:sub(cell_open_end + 1, cell_close - 1)
+      if encoded:find("<", 1, true) then
+        return nil, "invalid Vertica HTML cell value"
+      end
+      local value, value_err = unescape(encoded)
+      if value == nil then
+        return nil, value_err
+      end
+      table.insert(record, { tag = tag, value = value })
+      cell_offset = cell_close_end + 1
+    end
+    if #record == 0 then
+      return nil, "Vertica HTML rows must contain cells"
+    end
+    table.insert(records, record)
+    offset = row_close_end + 1
   end
+  if #records == 0 then
+    return nil, "Vertica HTML output has no header row"
+  end
+
+  local headers, seen_headers = records[1], {}
+  for _, header in ipairs(headers) do
+    if header.tag ~= "th" then
+      return nil, "Vertica HTML header row must contain only headings"
+    end
+    if header.value == "" then
+      return nil, "Vertica HTML column names must not be empty"
+    end
+    if seen_headers[header.value] then
+      return nil, "duplicate Vertica HTML column " .. string.format("%q", header.value)
+    end
+    seen_headers[header.value] = true
+  end
+
   local rows = {}
   for row_index = 2, #records do
+    if #records[row_index] ~= #headers then
+      return nil, string.format("Vertica HTML row %d has %d cells; expected %d", row_index - 1, #records[row_index], #headers)
+    end
     local row = {}
-    for column_index, header in ipairs(records[1]) do
-      local value = records[row_index][column_index] and records[row_index][column_index].value
-      if value == nil or value == null_marker then
+    for column_index, header in ipairs(headers) do
+      local cell = records[row_index][column_index]
+      if cell.tag ~= "td" then
+        return nil, "Vertica HTML data rows must contain only cells"
+      end
+      if cell.value == null_marker then
         row[header.value] = vim.NIL
       else
-        row[header.value] = value
+        row[header.value] = cell.value
       end
     end
     table.insert(rows, row)

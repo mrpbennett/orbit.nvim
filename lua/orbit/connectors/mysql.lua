@@ -2,6 +2,8 @@
 local M = { sql_dialect = "mysql" }
 
 local mutation_sql = require("orbit.connectors.utils.mutation_sql")
+local metadata = require("orbit.connectors.metadata")
+local entities = require("orbit.connectors.utils.entities")
 
 local function append(target, values)
 	for _, value in ipairs(values) do
@@ -153,15 +155,23 @@ function M.session_request(statement, marker)
 end
 
 function M.session_output(output, marker)
-	-- Wait for the complete ending marker document, then return only documents
-	-- belonging to the user request; the session module starts a fresh buffer
-	-- for the next queued request.
-	local marker_at = output:find(marker .. ":END", 1, true)
+	-- A marker value alone is not a complete frame: wait through the enclosing
+	-- resultset so no trailing XML can be attributed to the next request.
+	local marker_field = '<field name="__orbit_frame">' .. marker .. ":END</field>"
+	local marker_at = output:find(marker_field, 1, true)
 	if not marker_at then
 		return nil
 	end
 	local document_at = output:sub(1, marker_at):match(".*()<%?xml")
-	return document_at and output:sub(1, document_at - 1) or nil
+	local _, result_end = output:find("</resultset>", marker_at, true)
+	if not document_at or not result_end then
+		return nil
+	end
+	local line_ending = output:sub(result_end + 1):match("^\r?\n")
+	if not line_ending then
+		return nil
+	end
+	return output:sub(1, document_at - 1), result_end + #line_ending
 end
 
 function M.session_error(stderr)
@@ -224,12 +234,12 @@ function M.schema_statement(options, node)
 end
 
 function M.metadata_categories(_, row)
-	local categories = { { id = "columns", label = "columns" } }
+	local categories = { metadata.category("columns") }
 	if row.type == "table" then
 		append(categories, {
-			{ id = "primary_keys", label = "primary keys" },
-			{ id = "foreign_keys", label = "foreign keys" },
-			{ id = "indexes", label = "indexes" },
+			metadata.category("primary_keys"),
+			metadata.category("foreign_keys"),
+			metadata.category("indexes"),
 		})
 	end
 	return categories
@@ -274,43 +284,71 @@ function M.mutation_statement(options, target, changes)
 end
 
 local function unescape(value)
-	value = value:gsub("&#x([%x]+);", function(number)
-		return vim.fn.nr2char(tonumber(number, 16))
-	end):gsub("&#(%d+);", function(number)
-		return vim.fn.nr2char(tonumber(number))
-	end)
-	value = value:gsub("&quot;", '"'):gsub("&apos;", "'"):gsub("&lt;", "<"):gsub("&gt;", ">")
-	return value:gsub("&amp;", "&")
+	return entities.decode(value, "MySQL XML")
 end
 
 -- Decode one flat client-XML row while preserving the distinction between a
 -- self-closing SQL NULL field and an ordinary empty element.
 local function parse_row(xml)
-	local parsed = {}
+	local parsed, names = {}, {}
 	local offset = 1
-	while true do
-		local start_at, end_at, attributes = xml:find("<field%s+([^>]*)>", offset)
-		if not start_at then
+	while offset <= #xml do
+		local whitespace = xml:sub(offset):match("^%s*") or ""
+		offset = offset + #whitespace
+		if offset > #xml then
 			break
 		end
-		local name = attributes:match('name="(.-)"')
-		if name then
-			if attributes:match("/%s*$") then
-				parsed[unescape(name)] = attributes:match('xsi:nil="true"') and vim.NIL or ""
-				offset = end_at + 1
-			else
-				local close_at, close_end = xml:find("</field>", end_at + 1, true)
-				if not close_at then
-					break
-				end
-				parsed[unescape(name)] = unescape(xml:sub(end_at + 1, close_at - 1))
-				offset = close_end + 1
-			end
-		else
-			offset = end_at + 1
+		local start_at, end_at, attributes = xml:sub(offset):find("^<field%s+([^>]*)>")
+		if not start_at then
+			return nil, nil, "invalid MySQL XML field"
 		end
+		start_at, end_at = offset + start_at - 1, offset + end_at - 1
+		local encoded_name = attributes:match('name="(.-)"')
+		if not encoded_name then
+			return nil, nil, "MySQL XML field has no name"
+		end
+		local name, name_err = unescape(encoded_name)
+		if not name then
+			return nil, nil, name_err
+		end
+		if name == "" then
+			return nil, nil, "MySQL XML field name must not be empty"
+		end
+		if parsed[name] ~= nil then
+			return nil, nil, "duplicate MySQL XML field " .. string.format("%q", name)
+		end
+		local value
+		if attributes:match("/%s*$") then
+			value = attributes:match('xsi:nil="true"') and vim.NIL or ""
+			offset = end_at + 1
+		else
+			local close_at, close_end = xml:find("</field>", end_at + 1, true)
+			if not close_at then
+				return nil, nil, "incomplete MySQL XML field"
+			end
+			local encoded_value = xml:sub(end_at + 1, close_at - 1)
+			if encoded_value:find("<", 1, true) then
+				return nil, nil, "invalid MySQL XML field value"
+			end
+			local value_err
+			value, value_err = unescape(encoded_value)
+			if value == nil then
+				return nil, nil, value_err
+			end
+			offset = close_end + 1
+		end
+		parsed[name] = value
+		table.insert(names, name)
 	end
-	return parsed
+	if #names == 0 then
+		return nil, nil, "MySQL XML rows must contain fields"
+	end
+	return parsed, names
+end
+
+local function skip_whitespace(value, offset)
+	local whitespace = value:sub(offset):match("^%s*") or ""
+	return offset + #whitespace
 end
 
 function M.parse(output)
@@ -320,13 +358,58 @@ function M.parse(output)
 	if not output or output:match("^%s*$") then
 		return {}
 	end
-	local documents = {}
-	for attributes, body in output:gmatch("<resultset%s*([^>]*)>(.-)</resultset>") do
-		local rows = {}
-		for row_xml in body:gmatch("<row>(.-)</row>") do
-			rows[#rows + 1] = parse_row(row_xml)
+	local documents, offset = {}, 1
+	while true do
+		offset = skip_whitespace(output, offset)
+		if offset > #output then
+			break
 		end
-		documents[#documents + 1] = rows
+		if output:sub(offset, offset + 4) == "<?xml" then
+			local declaration_end = output:find("?>", offset + 5, true)
+			if not declaration_end then
+				return nil, "incomplete MySQL XML declaration"
+			end
+			offset = skip_whitespace(output, declaration_end + 2)
+		end
+		local open_start, open_end = output:sub(offset):find("^<resultset%s*[^>]*>")
+		if not open_start then
+			return nil, "invalid MySQL XML output"
+		end
+		open_start, open_end = offset + open_start - 1, offset + open_end - 1
+		local close_start, close_end = output:find("</resultset>", open_end + 1, true)
+		if not close_start then
+			return nil, "incomplete MySQL XML resultset"
+		end
+		local body = output:sub(open_end + 1, close_start - 1)
+		local rows, body_offset, expected_names = {}, 1, nil
+		while true do
+			body_offset = skip_whitespace(body, body_offset)
+			if body_offset > #body then
+				break
+			end
+			local row_start, row_open_end = body:sub(body_offset):find("^<row>")
+			if not row_start then
+				return nil, "invalid MySQL XML row"
+			end
+			row_start, row_open_end = body_offset + row_start - 1, body_offset + row_open_end - 1
+			local row_close, row_close_end = body:find("</row>", row_open_end + 1, true)
+			if not row_close then
+				return nil, "incomplete MySQL XML row"
+			end
+			local row, names, row_err = parse_row(body:sub(row_open_end + 1, row_close - 1))
+			if not row then
+				return nil, row_err
+			end
+			local shape = table.concat(names, "\0")
+			if expected_names and shape ~= expected_names then
+				return nil, "MySQL XML rows have inconsistent columns"
+			end
+			expected_names = expected_names or shape
+			table.insert(rows, row)
+			body_offset = row_close_end + 1
+		end
+		table.insert(documents, rows)
+		offset = close_end + 1
 	end
 	if #documents == 0 then
 		return nil, "invalid MySQL XML output"

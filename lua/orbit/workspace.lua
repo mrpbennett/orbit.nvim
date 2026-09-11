@@ -63,6 +63,7 @@ local feedback = require("orbit.feedback")
 local results = require("orbit.results")
 local adapters = require("orbit.adapters")
 local runner = require("orbit.runner")
+local saved_queries = require("orbit.saved_queries")
 
 local M = {}
 local FILTER_LINE = 3
@@ -140,51 +141,7 @@ local object_name = schema_tree.object_name
 -- sorted so subdirectories come before files, and alphabetically
 -- (case-insensitive) within each group.
 -- Side effects: none (pure filesystem read); does not touch buffers.
-local function discover_saved_queries(directory, root_path)
-	root_path = root_path or directory
-	local function scan(path)
-		-- vim.uv is Neovim's bundled libuv bindings -- fs_scandir/fs_scandir_next
-		-- give a low-level, non-blocking-capable directory listing API (used
-		-- here synchronously) similar to opendir/readdir in C.
-		local handle = vim.uv.fs_scandir(path)
-		if not handle then
-			return {}
-		end
-
-		local entries = {}
-		while true do
-			local name, kind = vim.uv.fs_scandir_next(handle)
-			if not name then
-				break
-			end
-			local entry_path = path .. "/" .. name
-			if kind == "directory" then
-				local children = scan(entry_path)
-				-- Empty directories add no actionable node, while directories sort before SQL files.
-				if #children > 0 then
-					table.insert(entries, {
-						kind = "saved_directory",
-						name = name,
-						path = entry_path,
-						root_path = root_path,
-						children = children,
-					})
-				end
-			elseif kind == "file" and name:lower():sub(-4) == ".sql" then
-				table.insert(entries, { kind = "saved_query", name = name, path = entry_path, root_path = root_path })
-			end
-		end
-		table.sort(entries, function(left, right)
-			if left.kind ~= right.kind then
-				return left.kind == "saved_directory"
-			end
-			return left.name:lower() < right.name:lower()
-		end)
-		return entries
-	end
-
-	return scan(directory)
-end
+local discover_saved_queries = saved_queries.discover
 
 -- Decide whether a saved-query node (a file or a directory) should be
 -- shown given the current sidebar filter text.
@@ -223,130 +180,25 @@ end
 -- symlinks are excluded, matching discovery and keeping writes within the
 -- directory the user selected.
 local function saved_query_directories(state)
-	local directories = {}
-	local function scan(location, path, segments, ancestors)
-		table.insert(directories, {
-			ancestors = vim.deepcopy(ancestors),
-			label = location.name .. (#segments > 0 and " / " .. table.concat(segments, " / ") or ""),
-			location = location,
-			path = path,
-		})
-		local handle = vim.uv.fs_scandir(path)
-		if not handle then
-			return
-		end
-		local children = {}
-		while true do
-			local name, kind = vim.uv.fs_scandir_next(handle)
-			if not name then
-				break
-			end
-			if kind == "directory" then
-				table.insert(children, name)
-			end
-		end
-		table.sort(children, function(left, right)
-			local left_lower, right_lower = left:lower(), right:lower()
-			return left_lower == right_lower and left < right or left_lower < right_lower
-		end)
-		for _, name in ipairs(children) do
-			local child_path = path .. "/" .. name
-			local child_segments = vim.list_extend(vim.deepcopy(segments), { name })
-			local child_ancestors = vim.list_extend(vim.deepcopy(ancestors), { child_path })
-			scan(location, child_path, child_segments, child_ancestors)
-		end
-	end
-
-	for _, location in ipairs(state.saved_query_locations) do
-		local stat = vim.uv.fs_stat(location.path)
-		if stat and stat.type == "directory" then
-			scan(location, location.path, {}, { location.path })
-		end
-	end
-	return directories
+	return saved_queries.directories(state.saved_query_locations)
 end
 
 -- Saved queries accept file names, not paths. Keeping this validation shared
 -- prevents Rename and OrbitSave from drifting into subtly different rules.
 local function saved_query_filename(filename, operation)
-	if
-		filename:match("^%s*$")
-		or filename == "."
-		or filename == ".."
-		or filename:find("[/\\%c]")
-	then
+	local normalized = saved_queries.filename(filename)
+	if not normalized then
 		vim.notify(operation .. " filename must be a file name without a path", vim.log.levels.ERROR)
 		return
 	end
-	if filename:lower():sub(-4) ~= ".sql" then
-		filename = filename .. ".sql"
-	end
-	return filename
-end
-
-local function loaded_buffer(path)
-	for _, buffer in ipairs(vim.api.nvim_list_bufs()) do
-		if
-			vim.api.nvim_buf_is_valid(buffer)
-			and vim.api.nvim_buf_is_loaded(buffer)
-			and vim.api.nvim_buf_get_name(buffer) == path
-		then
-			return buffer
-		end
-	end
-end
-
-local function saved_query_directory_available(directory)
-	local stat = directory.path == directory.location.path and vim.uv.fs_stat(directory.path)
-		or vim.uv.fs_lstat(directory.path)
-	if not stat or stat.type ~= "directory" then
-		return false
-	end
-	local root = vim.uv.fs_realpath(directory.location.path)
-	local path = vim.uv.fs_realpath(directory.path)
-	if not root or not path then
-		return false
-	end
-	local root_prefix = root:sub(-1) == "/" and root or root .. "/"
-	return path == root or path:sub(1, #root_prefix) == root_prefix
+	return normalized
 end
 
 -- Locations may overlap lexically or through symlinked configured roots.
 -- Rescanning every configured root is the only reliable way to update every
 -- visible occurrence after the old path may already have disappeared.
 local function refresh_saved_query_paths(state, _)
-	for _, location in ipairs(state.saved_query_locations) do
-		location.children = discover_saved_queries(location.path)
-	end
-end
-
--- Create the destination exclusively before removing the source. A hard link
--- is cheap and preserves metadata on one filesystem; copyfile handles EXDEV
--- and filesystems that do not support hard links. Both paths refuse overwrite.
-local function move_saved_query_file(source, destination)
-	local linked, link_error, link_name = vim.uv.fs_link(source, destination)
-	if not linked then
-		if link_name == "EEXIST" then
-			return nil, "destination already exists: " .. destination
-		end
-		local copied, copy_error, copy_name = vim.uv.fs_copyfile(source, destination, { excl = true })
-		if not copied then
-			if copy_name == "EEXIST" then
-				return nil, "destination already exists: " .. destination
-			end
-			return nil, string.format("%s; copy fallback failed: %s", link_error, copy_error)
-		end
-	end
-	local removed, remove_error = vim.uv.fs_unlink(source)
-	if removed then
-		return true
-	end
-
-	local cleaned, cleanup_error = vim.uv.fs_unlink(destination)
-	if cleaned then
-		return nil, remove_error
-	end
-	return nil, string.format("%s; also failed to remove copied destination: %s", remove_error, cleanup_error)
+	saved_queries.refresh(state.saved_query_locations)
 end
 
 -- The heart of the sidebar UI: rebuild the entire tree of text lines from
@@ -1065,45 +917,14 @@ local function relocate_saved_query(state, node, destination, directory, operati
 	if workspaces[state.tabpage] ~= state then
 		return
 	end
-	local source_stat = vim.uv.fs_lstat(node.path)
-	if not source_stat or source_stat.type ~= "file" then
-		vim.notify(operation .. " failed: the saved query no longer exists", vim.log.levels.ERROR)
-		return
-	end
-	if not saved_query_directory_available(directory) then
-		vim.notify(operation .. " failed: destination directory is no longer available", vim.log.levels.ERROR)
-		return
-	end
-	if destination == node.path then
+	local relocated, detail, error_kind = saved_queries.relocate(node, destination, directory)
+	if relocated and detail == "unchanged" then
 		vim.notify("Saved query is already at " .. destination)
 		return
 	end
-	if vim.uv.fs_lstat(destination) then
-		vim.notify(operation .. " failed: destination already exists: " .. destination, vim.log.levels.ERROR)
+	if not relocated then
+		vim.notify(operation .. (error_kind == "buffer" and " " or " failed: ") .. detail, vim.log.levels.ERROR)
 		return
-	end
-
-	local source_buffer = loaded_buffer(node.path)
-	local destination_buffer = loaded_buffer(destination)
-	if destination_buffer and destination_buffer ~= source_buffer then
-		vim.notify(operation .. " failed: destination is already loaded: " .. destination, vim.log.levels.ERROR)
-		return
-	end
-
-	local moved, move_error = move_saved_query_file(node.path, destination)
-	if not moved then
-		vim.notify(operation .. " failed: " .. tostring(move_error), vim.log.levels.ERROR)
-		return
-	end
-	if source_buffer then
-		local renamed, rename_error = pcall(vim.api.nvim_buf_set_name, source_buffer, destination)
-		if not renamed then
-			local rolled_back, rollback_error = move_saved_query_file(destination, node.path)
-			local detail = rolled_back and "filesystem change was rolled back"
-				or "rollback also failed: " .. tostring(rollback_error)
-			vim.notify(operation .. " failed to update the open buffer: " .. tostring(rename_error) .. "; " .. detail, vim.log.levels.ERROR)
-			return
-		end
 	end
 
 	refresh_saved_query_paths(state, { node.path, destination })
@@ -1161,51 +982,28 @@ local function delete_saved_query(state, node)
 	if workspaces[state.tabpage] ~= state then
 		return
 	end
-	local source_stat = vim.uv.fs_lstat(node.path)
-	if not source_stat or source_stat.type ~= "file" then
-		vim.notify("Delete saved query failed: the saved query no longer exists", vim.log.levels.ERROR)
+	local deletion, deletion_error = saved_queries.deletion(node)
+	if not deletion then
+		vim.notify("Delete saved query failed: " .. deletion_error, vim.log.levels.ERROR)
 		return
 	end
 
-	local buffer = loaded_buffer(node.path)
 	local message = "Delete saved query " .. node.path .. "?"
-	if buffer and vim.bo[buffer].modified then
+	if deletion.buffer and deletion.modified then
 		message = message .. "\nThis query has unsaved edits; its buffer will be kept unnamed."
-	elseif buffer then
+	elseif deletion.buffer then
 		message = message .. "\nIts open buffer will be kept unnamed."
 	end
 	if vim.fn.confirm(message, "&Delete\n&Cancel", 2) ~= 1 then
-		return
-	end
-	local confirmed_stat = vim.uv.fs_lstat(node.path)
-	if
-		not confirmed_stat
-		or confirmed_stat.type ~= "file"
-		or confirmed_stat.dev ~= source_stat.dev
-		or confirmed_stat.ino ~= source_stat.ino
-	then
-		vim.notify("Delete saved query failed: the file changed while awaiting confirmation", vim.log.levels.ERROR)
 		return
 	end
 
 	local row = vim.api.nvim_win_is_valid(state.sidebar_window)
 			and vim.api.nvim_win_get_cursor(state.sidebar_window)[1]
 		or 1
-	if buffer then
-		local unnamed, unnamed_error = pcall(vim.api.nvim_buf_set_name, buffer, "")
-		if not unnamed then
-			vim.notify("Delete saved query failed to preserve its open buffer: " .. tostring(unnamed_error), vim.log.levels.ERROR)
-			return
-		end
-	end
-	local removed, remove_error = vim.uv.fs_unlink(node.path)
+	local removed, remove_error, error_kind = saved_queries.delete(node.path, deletion)
 	if not removed then
-		local restored, restore_error
-		if buffer then
-			restored, restore_error = pcall(vim.api.nvim_buf_set_name, buffer, node.path)
-		end
-		local detail = buffer and not restored and "; buffer name restore failed: " .. tostring(restore_error) or ""
-		vim.notify("Delete saved query failed: " .. tostring(remove_error) .. detail, vim.log.levels.ERROR)
+		vim.notify("Delete saved query " .. (error_kind == "buffer" and "" or "failed: ") .. remove_error, vim.log.levels.ERROR)
 		return
 	end
 
@@ -1821,7 +1619,7 @@ function M.save_query(buffer)
 			vim.notify("OrbitSave query buffer is no longer in its Workspace", vim.log.levels.ERROR)
 			return
 		end
-		if not saved_query_directory_available(directory) then
+		if not saved_queries.directory_available(directory) then
 			vim.notify("OrbitSave destination directory is no longer available", vim.log.levels.ERROR)
 			return
 		end
@@ -1843,19 +1641,15 @@ function M.save_query(buffer)
 				vim.notify("OrbitSave query buffer is no longer in its Workspace", vim.log.levels.ERROR)
 				return
 			end
-			if not saved_query_directory_available(directory) then
+			if not saved_queries.directory_available(directory) then
 				vim.notify("OrbitSave destination directory is no longer available", vim.log.levels.ERROR)
 				return
 			end
 
 			local destination = directory.path .. "/" .. filename
-			local destination_stat = vim.uv.fs_lstat(destination)
-			if destination_stat and destination_stat.type == "link" then
-				vim.notify("OrbitSave will not replace a symbolic link", vim.log.levels.ERROR)
-				return
-			end
-			if destination_stat and destination_stat.type ~= "file" then
-				vim.notify("OrbitSave destination is not a file: " .. destination, vim.log.levels.ERROR)
+			local destination_stat, destination_error = saved_queries.save_destination(destination)
+			if destination_error then
+				vim.notify("OrbitSave " .. destination_error, vim.log.levels.ERROR)
 				return
 			end
 			if
@@ -1864,36 +1658,17 @@ function M.save_query(buffer)
 			then
 				return
 			end
-			local confirmed_destination = vim.uv.fs_lstat(destination)
-			if
-				(destination_stat == nil and confirmed_destination ~= nil)
-				or (destination_stat ~= nil and confirmed_destination == nil)
-				or (
-					destination_stat
-					and confirmed_destination
-					and (
-						destination_stat.type ~= confirmed_destination.type
-						or destination_stat.dev ~= confirmed_destination.dev
-						or destination_stat.ino ~= confirmed_destination.ino
-					)
-				)
-			then
-				vim.notify("OrbitSave destination changed while awaiting confirmation", vim.log.levels.ERROR)
-				return
-			end
-
-			local ok, err = pcall(function()
-				vim.api.nvim_buf_call(buffer, function()
-					vim.api.nvim_cmd({ cmd = "saveas", args = { destination }, bang = destination_stat ~= nil }, {})
-				end)
-			end)
-			if not ok then
-				vim.notify("OrbitSave failed: " .. tostring(err), vim.log.levels.ERROR)
+			local saved, save_error = saved_queries.save(buffer, destination, destination_stat, directory)
+			if not saved then
+				vim.notify("OrbitSave " .. save_error, vim.log.levels.ERROR)
 				return
 			end
 
 			refresh_saved_query_paths(state, { destination })
 			reveal_saved_query(state, directory, destination)
+			if save_error then
+				vim.notify("OrbitSave completed, but " .. save_error, vim.log.levels.WARN)
+			end
 			vim.notify("Orbit query saved: " .. destination)
 		end)
 	end

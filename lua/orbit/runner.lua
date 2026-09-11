@@ -33,7 +33,16 @@ local M = {}
 -- Returns: rows (table) and/or an error string, same contract as
 -- connector.parse/adapters.parse.
 local function parse(connector, output)
-	return connector.parse and connector.parse(output) or adapters.parse(output)
+	local rows, err
+	if connector.parse then
+		rows, err = connector.parse(output)
+	else
+		rows, err = adapters.parse(output)
+	end
+	if not rows then
+		return nil, err
+	end
+	return adapters.normalize(rows)
 end
 
 -- Run a single statement by spawning a brand-new CLI process for it

@@ -42,6 +42,7 @@
 
 local M = {}
 local csv = require("orbit.connectors.utils.csv")
+local metadata = require("orbit.connectors.metadata")
 
 -- Appends every item in `values` onto the end of `arguments`, in order.
 -- Used throughout this file to build up psql command-line argument lists
@@ -295,18 +296,14 @@ end
 --   sentinel), or nil if the sentinel hasn't appeared in `output` yet
 --   (meaning: keep waiting, the statement hasn't finished).
 function M.session_output(output, marker)
-	local marker_at = output:find(marker, 1, true)
-	if not marker_at then
-		return nil
+	for _, newline in ipairs({ "\r\n", "\n" }) do
+		local frame = "__orbit_marker" .. newline .. marker .. newline
+		local start_at, end_at = output:find(frame, 1, true)
+		if start_at and (start_at == 1 or output:sub(start_at - 1, start_at - 1) == "\n") then
+			return output:sub(1, start_at - 1), end_at
+		end
 	end
-	-- Walk backwards from the marker to find where the "__orbit_marker"
-	-- column header (from the sentinel SELECT's CSV output) begins, so we can
-	-- cut it and everything after it off, leaving only the real result.
-	local start = output:sub(1, marker_at):match(".*()__orbit_marker")
-	if not start then
-		return nil
-	end
-	return output:sub(1, start - 1)
+	return nil
 end
 
 -- Builds the environment variables to set on the spawned psql process.
@@ -435,15 +432,14 @@ end
 -- don't apply to views.
 -- Params: _ (options, unused), row - object metadata (row.type is "table"
 --   or "view", etc).
--- Returns: a Lua array of { id, label } tables describing the categories,
---   in display order. The `id` values line up with the node.type values
---   handled by M.schema_statement.
+-- Returns category descriptors in display order. Their ids line up with the
+-- node types handled by M.schema_statement; presentation remains Connector-owned.
 function M.metadata_categories(_, row)
-	local categories = { { id = "columns", label = "columns" } }
+	local categories = { metadata.category("columns") }
 	if row.type == "table" then
-		table.insert(categories, { id = "primary_keys", label = "primary keys" })
-		table.insert(categories, { id = "foreign_keys", label = "foreign keys" })
-		table.insert(categories, { id = "indexes", label = "indexes" })
+		table.insert(categories, metadata.category("primary_keys"))
+		table.insert(categories, metadata.category("foreign_keys"))
+		table.insert(categories, metadata.category("indexes"))
 	end
 	return categories
 end

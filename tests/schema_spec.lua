@@ -34,6 +34,37 @@ local function assert_queued_refresh(load, ordinary_rows, refreshed_rows, assert
 end
 
 return {
+	["schema acquisition accepts an arbitrary Connector-declared metadata category"] = function()
+		local connector = require("orbit.connectors.sqlite")
+		local original_categories = connector.metadata_categories
+		local original_statement = connector.schema_statement
+		local original_run = runner.run
+		connector.metadata_categories = function()
+			return { { id = "triggers", label = "triggers", presentation = {} } }
+		end
+		connector.schema_statement = function(_, node)
+			if node.type == "triggers" then return "SELECT name FROM sqlite_master WHERE type = 'trigger'" end
+			return original_statement({}, node)
+		end
+		runner.run = function(_, statement, callback)
+			assert(statement:match("sqlite_master"))
+			callback({ { name = "audit_orders" } })
+		end
+		local ok, err = xpcall(function()
+			local rows, acquisition_err
+			cache.load_metadata({ name = "custom-metadata", kind = "sqlite", options = { path = ":memory:" } },
+				{ schema = "main", name = "orders", type = "table" }, "triggers", {}, function(result, result_err)
+					rows, acquisition_err = result, result_err
+				end)
+			assert(vim.deep_equal(rows, { { name = "audit_orders" } }))
+			assert(acquisition_err == nil)
+		end, debug.traceback)
+		connector.metadata_categories = original_categories
+		connector.schema_statement = original_statement
+		runner.run = original_run
+		assert(ok, err)
+	end,
+
   ["schema acquisition treats unsupported table metadata as empty"] = function()
     local original_run = runner.run
     runner.run = function()

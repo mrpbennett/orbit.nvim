@@ -17,18 +17,26 @@ All notable changes to Orbit.nvim are documented in this file.
 
 - Trino profiles now default to `CSV_HEADER` output so maps, arrays, rows, and binary values can be displayed through the stock CLI. `JSON` remains available for scalar result fidelity.
 - Schema browser labels now quote identifier segments when distinct catalog/schema combinations would otherwise look identical. Ordinary labels remain unchanged, and disambiguated labels stay stable while filtering.
+- CLI result decoding now fails atomically on malformed or lossy CSV, JSON, XML, and HTML instead of returning partial rows or silently overwriting duplicate headings.
+- Connector metadata declarations now include their presentation rules, allowing the Schema tree to render arbitrary connector-provided categories without shared category-specific formatting.
 
 ### Fixed
 
 - Prevented Trino statements containing map or other container values from failing in the CLI's JSON serializer before Orbit receives their results.
 - Prevented distinct schema objects with identical dotted labels, such as `"a.b"."c"` and `"a"."b.c"`, from sharing cached metadata or receiving each other's column completions.
 - Kept colliding catalog/schema groups separate and made schema browser expansion and metadata state independent of display labels.
+- Prevented retained SQLite, PostgreSQL, MySQL, and Vertica sessions from advancing until the complete marker record is consumed, so chunked trailing bytes cannot contaminate the next statement.
+- Restricted completion aliases to the cursor's query block, set-operation branch, JOIN position, and valid correlated scopes, including correct non-`LATERAL` and `LATERAL` derived-table behavior.
+- Hardened saved-query Save, Rename, Move, and Delete against stale files, replaced paths, symlink escapes, and raced destinations while preserving open-buffer identity and unsaved edits.
+- Rejected duplicate or empty headings, invalid encoded entities, malformed XML/HTML rows, and inconsistent tabular widths before they can reach a Result grid.
 
 ### Tests
 
 - Added Trino result-format coverage for profile validation, command construction, complex CSV values, JSON rows, and malformed CSV output.
 - Added regression coverage for independent in-flight and cached metadata, column completion, metadata categories, namespace grouping, quoted-label collisions, and expansion across filtering and label changes.
 - Added MySQL coverage for profile and TLS validation, client command construction, XML framing and parsing, schema capabilities, mutations, qualified completion, and dialect tokenization.
+- Added every-byte retained-frame coverage for SQLite, PostgreSQL, MySQL, and Vertica, including residual stream preservation between queued statements.
+- Added focused coverage for Saved query filesystem transactions, strict output normalization, arbitrary Connector metadata categories, and query-block-local Completion.
 
 ## 0.2.5 - 2026-09-07
 

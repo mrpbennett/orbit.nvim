@@ -1,5 +1,69 @@
 # Orbit.nvim v0.1 Plan
 
+## Architecture Review 2026-09-11
+
+- [x] Scan recent connector, Workspace/Schema browser, and SQL-analysis hot spots using the domain model and deletion test.
+- [x] Validate deepening candidates against existing ADRs, tests, and prior architecture work.
+- [x] Produce, verify, and open a temporary HTML report with before/after visuals.
+
+### Review
+
+- Report: `/tmp/architecture-review-20260911-164648.html`; opened in the existing browser session.
+- Top recommendation: deepen retained Statement framing so Session advances only after a Connector adapter's complete marker record is consumed.
+- Existing Saved query location and hand-rolled tokenizer ADRs were preserved; prior Schema acquisition, Schema object identity, Connector resolution, and Result grid work was not re-suggested.
+- Verification: `nvim --headless -u NONE -l tests/run.lua`, `xmllint --html --noout`, and `git diff --check` pass. `tidy` is unavailable.
+
+## Architecture Deepening 2026-09-11
+
+- [x] Make retained Session framing consume complete marker records before queue advancement, with chunk-split regression coverage for every retained Connector adapter.
+- [x] Enforce lossless, atomic Result-row normalization across CSV, JSON, XML, and HTML Connector output.
+- [x] Deepen Saved query discovery and filesystem mutation behavior behind a focused module interface while preserving Workspace interaction and ADR-0001.
+- [x] Resolve Completion visibility by query block and correlated outer scope while preserving tolerant hand-rolled SQL analysis under ADR-0002.
+- [x] Keep Table metadata presentation meaning with Connector-owned category declarations while Schema tree retains generic rendering.
+- [x] Run focused and complete verification, inspect the diff, and complete an independent standards/specification review.
+
+### Settled Design
+
+- Deepen existing modules and seams; add no adapter seam where only one implementation exists.
+- Preserve all current user behavior except incorrect retained framing, lossy output acceptance, and query-block scope leakage.
+- Keep ordered Saved query locations, the hand-rolled tokenizer, Connector-local backend knowledge, and Workspace-owned Neovim interaction.
+
+### Review
+
+- Session now owns residual stdout and advances only after each Connector consumes a complete marker record; every byte split is covered for SQLite, PostgreSQL, MySQL, and Vertica.
+- Result normalization rejects duplicate/empty headings, malformed records, invalid entities, inconsistent tabular rows, and non-object JSON rows without returning partial data.
+- Saved query discovery and mutations now live in `orbit.saved_queries`; source/root identities are pinned, files are quarantined, relocation copies through exclusive descriptors, and saves publish private writes through exclusive links.
+- Completion resolves aliases by query block, set branch, JOIN position, and valid correlation, including non-LATERAL/LATERAL derived tables and compound ordering.
+- Connector metadata descriptors now own presentation through `orbit.connectors.metadata`; Schema tree renders them generically and Schema acquisition accepts arbitrary declared categories.
+- Verification: `nvim --headless -u NONE -l tests/run.lua` and `git diff --check` pass. Final independent review returned `CLEAN`. `stylua` is unavailable.
+
+## Architecture Deepening Documentation
+
+- [x] Correct README transport, Saved query safety, Completion scope, and malformed-result behavior.
+- [x] Record every user-visible architecture deepening change under `Unreleased` in `CHANGELOG.md`.
+- [x] Run the full suite and documentation whitespace checks.
+
+### Review
+
+- README now reflects Trino's default output, identity-safe Saved query mutations, query-block-local Completion, and strict malformed-result rejection.
+- `CHANGELOG.md` records retained framing, normalized output, Saved query safety, Completion scoping, Connector metadata presentation, and their regression coverage under `Unreleased`.
+- Verification: `nvim --headless -u NONE -l tests/run.lua` and `git diff --check` pass.
+
+## Microsoft SQL Server Connector Research
+
+- [x] Inspect Orbit's connector, retained-session, result, profile-security, schema-acquisition, and test boundaries.
+- [x] Compare first-party SQL Server transports with ODBC and FreeTDS alternatives on Arch Linux, macOS, and Windows.
+- [x] Define a minimal connector architecture, connection-profile shape, authentication/TLS policy, packaging matrix, and verification plan.
+- [x] Record the findings in `docs/mssql-connector-research.md` and verify the documentation diff.
+
+### Review
+
+- Recommended an Orbit-owned retained helper built with Microsoft's pure-Go `go-mssqldb` driver. This avoids making unsupported Arch ODBC packages or platform-specific native libraries runtime dependencies.
+- Rejected `sqlcmd` as the primary machine transport because its documented tabular output can wrap, truncate, pad, and cannot losslessly delimit arbitrary cell content; its JSON mode does not convert arbitrary result sets to JSON.
+- Scoped the MVP to SQL authentication and Windows integrated authentication over TCP, secure TLS defaults, read-only Result grids, basic schema acquisition and object actions, and explicit rejection of multiple row-producing result sets and duplicate column names.
+- Identified Windows profile-file permission handling as a release blocker independent of SQL Server support because Orbit currently requires exact POSIX mode `0600`.
+- Verification: primary-source links and repository references were checked; `git diff --check` passes. No implementation or live SQL Server test was performed.
+
 ## README Keybinding Audit
 
 - [x] Update the configurable-mapping table to show every supported action, including the disabled-by-default Structure mapping.
@@ -82,7 +146,7 @@
 - Rename and Move refuse existing destinations. A successful operation clears the filter, expands the destination ancestors, and reveals the saved query.
 - An open saved query follows its renamed or moved path while preserving buffer identity, cursor position, unsaved edits, Workspace ownership, and profile binding.
 - Delete always requires confirmation. If the saved query is open, its contents remain in the same unnamed query buffer; modified content remains modified. The sidebar retains its filter and focuses the nearest remaining item.
-- Move creates its destination exclusively so it cannot overwrite a raced file. It uses a hard link on the same filesystem and an exclusive copy fallback otherwise, removes the source only after success, and cleans up the destination if source removal fails.
+- Move creates its destination through an exclusive file descriptor so it cannot overwrite a raced file, removes the quarantined source only after buffer synchronization succeeds, and verifies file identity during cleanup and rollback.
 - Every configured location containing the old or new path is rescanned so overlapping saved query locations remain consistent. Symbolic-link and stale-node protections continue to prevent mutations through unsupported entries.
 
 ### Review

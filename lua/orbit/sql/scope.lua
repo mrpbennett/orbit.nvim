@@ -71,6 +71,7 @@ local JOIN_NOISE_WORDS = {
 	CROSS = true,
 	OUTER = true,
 	NATURAL = true,
+	LATERAL = true,
 }
 
 -- Keywords that end a statement's clause region without introducing a new
@@ -87,6 +88,15 @@ local CLAUSE_TERMINATORS = {
 	OFFSET = true,
 	FETCH = true,
 	HAVING = true,
+	UNION = true,
+	INTERSECT = true,
+	EXCEPT = true,
+}
+
+-- Set operators split one parenthesis level into independent query branches.
+-- A table introduced on one side is not visible on the other side, even
+-- though both sides have the same tokenizer depth.
+local SET_OPERATOR_WORDS = {
 	UNION = true,
 	INTERSECT = true,
 	EXCEPT = true,
@@ -120,6 +130,7 @@ local ALIAS_STOP_WORDS = {
 	CROSS = true,
 	OUTER = true,
 	NATURAL = true,
+	LATERAL = true,
 }
 
 -- Keywords that end a FROM-family region (i.e. the table list is over and a
@@ -670,6 +681,158 @@ local function resolve_alias_scope(tokens, from_i, to_j, depth, cte_names)
 	return entries
 end
 
+-- Returns the closing parenthesis paired with `open_index`, or one position
+-- past the token stream when SQL is incomplete and no closing token exists.
+-- Opening and closing parens carry their surrounding depth, so this remains
+-- reliable without requiring a complete parse tree.
+local function closing_paren(tokens, open_index)
+	local depth = tokens[open_index].depth
+	for k = open_index + 1, #tokens do
+		local tok = tokens[k]
+		if tok.type == "punct" and tok.text == ")" and tok.depth == depth - 1 then
+			return k
+		end
+	end
+	return #tokens + 1
+end
+
+-- Narrows one parenthesized query block to the set-operation branch that
+-- contains `anchor_index`. UNION/INTERSECT/EXCEPT siblings share a tokenizer
+-- depth, so depth alone is not a sufficient visibility boundary.
+local function set_branch_bounds(tokens, from_i, to_j, depth, anchor_index)
+	local branch_start, branch_end = from_i, to_j
+	for k = from_i, to_j do
+		local tok = tokens[k]
+		if tok.depth == depth and tok.type == "identifier" and SET_OPERATOR_WORDS[upper(tok)] then
+			if k <= anchor_index then
+				branch_start = k + 1
+			else
+				branch_end = k - 1
+				break
+			end
+		end
+	end
+	return branch_start, branch_end
+end
+
+-- A subquery in FROM/JOIN is isolated unless SQL marks it LATERAL. Scalar and
+-- predicate subqueries remain correlated with their enclosing query blocks.
+local function previous_code_token(tokens, index)
+	index = index - 1
+	while tokens[index] and tokens[index].type == "comment" do
+		index = index - 1
+	end
+	return tokens[index], index
+end
+
+local function is_non_lateral_derived_table(tokens, open_index)
+	local previous = previous_code_token(tokens, open_index)
+	if previous and previous.type == "identifier" and upper(previous) == "LATERAL" then
+		return false
+	end
+	if previous and previous.type == "identifier" and (upper(previous) == "FROM" or upper(previous) == "JOIN") then
+		return true
+	end
+	if previous and previous.type == "punct" and previous.text == "," then
+		local clause, depth = classify_clause(tokens, open_index - 1)
+		return clause == "from_family" and depth == previous.depth
+	end
+	return false
+end
+
+-- Resolves aliases from the cursor's query block and then each correlated
+-- outer block. The opening parenthesis of a child is the anchor in its parent,
+-- which selects the correct parent set branch. Empty parenthesis levels are
+-- retained in the walk so extra grouping around an incomplete subquery does
+-- not hide a valid outer query.
+local function resolve_visible_aliases(tokens, body_start, cursor_index, clause, clause_depth, cte_names)
+	local entries = {}
+	local depth = clause_depth or 0
+	local anchor_index = cursor_index
+	local enclosing_search_index = cursor_index
+	local scope_end
+	local local_clause = clause
+	local immediate_open = enclosing_open_paren(tokens, cursor_index)
+	if
+		immediate_open
+		and tokens[immediate_open].depth > depth
+		and is_non_lateral_derived_table(tokens, immediate_open)
+	then
+		depth = tokens[immediate_open].depth
+	end
+
+	while depth >= 0 do
+		local container_start, container_end, open_index
+		if depth == 0 then
+			container_start, container_end = body_start, #tokens
+			-- A CTE body occurs before the main statement body and cannot be
+			-- correlated with the statement that follows its closing paren.
+			if anchor_index < container_start then
+				break
+			end
+		else
+			open_index = enclosing_open_paren(tokens, enclosing_search_index)
+			if not open_index then
+				break
+			end
+			container_start = open_index + 1
+			container_end = closing_paren(tokens, open_index) - 1
+		end
+
+		local branch_start, branch_end =
+			set_branch_bounds(tokens, container_start, container_end, depth, anchor_index)
+		if scope_end then
+			branch_end = math.min(branch_end, scope_end)
+		end
+		if local_clause == "on" then
+			branch_end = math.min(branch_end, anchor_index)
+		end
+		for _, entry in ipairs(resolve_alias_scope(tokens, branch_start, branch_end, depth, cte_names)) do
+			table.insert(entries, entry)
+		end
+
+		if depth == 0 then
+			break
+		end
+		if is_non_lateral_derived_table(tokens, open_index) then
+			break
+		end
+		local previous, previous_index = previous_code_token(tokens, open_index)
+		scope_end = previous and previous.type == "identifier" and upper(previous) == "LATERAL" and previous_index - 1 or nil
+		local parent_clause = classify_clause(tokens, open_index - 1)
+		anchor_index = open_index
+		enclosing_search_index = open_index - 1
+		depth = depth - 1
+		local_clause = parent_clause
+	end
+
+	return entries
+end
+
+local function is_compound_order_by(tokens, cursor_index, clause, depth)
+	if clause ~= "order_by" then
+		return false
+	end
+	local first = 1
+	if (depth or 0) > 0 then
+		local open_index = enclosing_open_paren(tokens, cursor_index)
+		while open_index and tokens[open_index].depth > depth do
+			open_index = enclosing_open_paren(tokens, open_index - 1)
+		end
+		if not open_index or tokens[open_index].depth ~= depth then
+			return false
+		end
+		first = open_index + 1
+	end
+	for index = first, cursor_index do
+		local token = tokens[index]
+		if token.depth == (depth or 0) and token.type == "identifier" and SET_OPERATOR_WORDS[upper(token)] then
+			return true
+		end
+	end
+	return false
+end
+
 -- Skips a leading `WITH name AS (...) [, name2 AS (...)]` block, returning
 -- the set of CTE names and the index the real statement body starts at.
 --
@@ -764,27 +927,13 @@ function M.analyze(statement_tokens, cursor_index, touching)
 	local qualifier = extract_qualifier(statement_tokens, cursor_index, touching)
 	local clause, clause_depth = classify_clause(statement_tokens, cursor_index)
 
-	-- Always resolve the outermost (depth 0) FROM-family tables — those are
-	-- visible everywhere in the statement (e.g. from inside a subquery's
-	-- WHERE clause, an outer table can still be referenced — this is what
-	-- SQL calls a "correlated subquery").
-	local alias_scope = resolve_alias_scope(statement_tokens, body_start, #statement_tokens, 0, cte_names)
-	if clause_depth and clause_depth ~= 0 then
-		-- The cursor is inside a nested subquery (clause_depth > 0): also
-		-- resolve that subquery's OWN FROM-family tables at its depth, and
-		-- put them first in the list. Order matters to callers like
-		-- find_scope_entry in completion.lua, which take the first
-		-- matching alias — so if an inner table's alias happens to shadow
-		-- an outer one, the inner (more locally relevant) table wins.
-		local inner = resolve_alias_scope(statement_tokens, body_start, #statement_tokens, clause_depth, cte_names)
-		local merged = {}
-		for _, entry in ipairs(inner) do
-			table.insert(merged, entry)
-		end
-		for _, entry in ipairs(alias_scope) do
-			table.insert(merged, entry)
-		end
-		alias_scope = merged
+	-- Query blocks are visited nearest-first so a local alias shadows the same
+	-- alias in any correlated outer block. Set-operation siblings and sibling
+	-- parenthesized subqueries are deliberately excluded.
+	local alias_scope =
+		resolve_visible_aliases(statement_tokens, body_start, cursor_index, clause, clause_depth, cte_names)
+	if is_compound_order_by(statement_tokens, cursor_index, clause, clause_depth) then
+		alias_scope = {}
 	end
 
 	return { clause = clause, qualifier = qualifier, alias_scope = alias_scope }

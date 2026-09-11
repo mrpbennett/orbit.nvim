@@ -191,49 +191,27 @@ end
 
 -- Format a single metadata entry (e.g. one column, one foreign key) as a
 -- human-readable label for display in the tree.
--- Parameters: category - the metadata category id string (e.g. "columns",
--- "primary_keys", "foreign_keys", "indexes", "projections"); row - the metadata entry's
--- own data (shape depends on category, as returned by the connector's
--- metadata-fetching query).
--- Returns: a display string. Falls back to vim.inspect(row) (a generic
--- Lua-table-to-string dump) for any category this function doesn't
--- specifically know how to format.
+-- Parameters: category - the Connector's category descriptor; row - one
+-- metadata entry returned by that Connector.
+-- Returns: the descriptor's display label, or a generic inspected value when
+-- an older descriptor has no presentation formatter.
 local function metadata_label(category, row)
-	if category == "columns" then
-		return string.format("%s  %s", row.name, row.type or "")
-	end
-	if category == "primary_keys" then
-		return string.format("primary key #%s (%s)", row.pk, row.name)
-	end
-	if category == "foreign_keys" then
-		return string.format("foreign key #%s (%s) -> %s (%s)", row.id, row["from"], row.table, row.to)
-	end
-	if category == "indexes" then
-		return row.name
-	end
-	if category == "projections" then
-		return row.name
-	end
-	return vim.inspect(row)
+	local presentation = category.presentation or {}
+	return presentation.format and presentation.format(row) or vim.inspect(row)
 end
 
 -- Pick which icon (from the plugin's configured `icons` table, see
 -- M.config.icons in orbit/init.lua) to show next to a metadata entry line,
 -- based on its category.
 -- Parameters: icons - the icons table from plugin config; category - the
--- metadata category id.
--- Returns: an icon string. Falls back to icons.folder for key/index
--- categories that don't have their own dedicated icon configured, and to
--- icons.result as a generic fallback for unrecognized categories.
+-- Connector's category descriptor.
+-- Returns the first configured icon named by the descriptor, then the generic
+-- Result icon when none of its preferred icons are configured.
 local function metadata_entry_icon(icons, category)
-	if category == "columns" then
-		return icons.column
-	end
-	if category == "primary_keys" or category == "foreign_keys" then
-		return icons.key or icons.folder
-	end
-	if category == "indexes" then
-		return icons.index or icons.folder
+	for _, name in ipairs((category.presentation or {}).icons or {}) do
+		if icons[name] then
+			return icons[name]
+		end
 	end
 	return icons.result
 end
@@ -250,16 +228,7 @@ local function add_icon_highlight(highlights, line, group, col_start, icon)
 end
 
 local function metadata_icon_group(category)
-	if category == "columns" then
-		return "OrbitIconColumn"
-	end
-	if category == "primary_keys" or category == "foreign_keys" then
-		return "OrbitIconKey"
-	end
-	if category == "indexes" then
-		return "OrbitIconIndex"
-	end
-	return "OrbitIconResult"
+	return (category.presentation or {}).icon_highlight or "OrbitIconResult"
 end
 
 -- Render the entire schema tree (for one profile) into plain text lines,
@@ -417,19 +386,19 @@ function M.lines(tree, profile, filter, options)
 												lines,
 												string.format(
 													"        %s %s",
-													metadata_entry_icon(icons, category.id),
-													metadata_label(category.id, entry)
+													metadata_entry_icon(icons, category),
+													metadata_label(category, entry)
 												)
 											)
-											local entry_icon = metadata_entry_icon(icons, category.id)
+											local entry_icon = metadata_entry_icon(icons, category)
 											table.insert(highlights, {
-												group = category.id == "columns" and "OrbitColumn" or "OrbitTable",
+												group = (category.presentation or {}).row_highlight or "OrbitTable",
 												line = #lines,
 											})
 											add_icon_highlight(
 												highlights,
 												#lines,
-												metadata_icon_group(category.id),
+												metadata_icon_group(category),
 												#"        ",
 												entry_icon
 											)

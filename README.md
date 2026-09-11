@@ -42,7 +42,7 @@ Orbit runs statements through your existing database CLI, retains one connection
 
 | Profile kind | CLI                                                                                                                                                                                               | Notes                                     |
 | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
-| `trino`      | [`trino`](https://trino.io/docs/current/client/cli.html)                                                                                                                                          | Orbit requests JSON output.               |
+| `trino`      | [`trino`](https://trino.io/docs/current/client/cli.html)                                                                                                                                          | Defaults to CSV with headers; JSON is optional. |
 | `sqlite`     | `sqlite3`                                                                                                                                                                                         | Requires a build that supports `-json`.   |
 | `postgres`   | [`psql`](https://www.postgresql.org/docs/current/app-psql.html)                                                                                                                                   | Requires a version that supports `--csv`. |
 | `mysql`      | Oracle [`mysql`](https://dev.mysql.com/doc/refman/8.4/en/mysql.html) 8.x or MariaDB [`mariadb`](https://mariadb.com/docs/server/clients-and-utilities/mariadb-client/mariadb-command-line-client) | Connects to MySQL 8.x servers using XML.  |
@@ -473,6 +473,8 @@ require("orbit").setup({
 
 To add a query, run `:OrbitSave` from a Workspace query buffer. It prompts for a destination directory (when more than one is configured) and a filename, then writes the buffer's contents there.
 
+Save, Rename, Move, and Delete revalidate the selected location and file identity before changing anything. Orbit refuses stale or replaced files, never follows descendant symlinks, creates destinations exclusively, and keeps an open buffer synchronized with a successful filesystem change.
+
 In the sidebar, pressing `<CR>` on a saved query opens it bound to its profile, and pressing `a` on a saved query brings up an action menu:
 
 | Action  | Effect                                         |
@@ -581,7 +583,7 @@ Once wired up, suggestions appear automatically as you type, no manual trigger n
 - Trino catalogs configured as top-level `schema_patterns` keys are offered alongside direct relation suggestions. Selecting a catalog and schema completes progressively (`catalog.` → `catalog.schema.` → `catalog.schema.table`); without `schema_patterns`, only the profile's default `catalog` is offered.
 - Columns in the `SELECT` list, `WHERE`, `ON`, `GROUP BY`, `ORDER BY`, `INSERT INTO t (...)`, and `UPDATE t SET ...`.
 - Table aliases: `SELECT u.| FROM users u` resolves `u` to `users`'s columns, including old-style comma joins (`FROM a, b`). With more than one table in scope, unqualified columns are offered from every table, each annotated with its source alias.
-- The alias/table scope is limited to the statement your cursor is in; other statements in the same buffer (separated by `;`) never leak into it. CTEs and derived tables (`FROM (SELECT ...) sub`) are recognized so they don't break parsing, but don't offer column completion.
+- Alias/table scope is limited to the query block and set-operation branch containing the cursor, plus SQL-visible correlated outer blocks. Sibling subqueries and `UNION`/`INTERSECT`/`EXCEPT` branches do not leak aliases; `JOIN ... ON` sees only tables introduced so far; non-`LATERAL` derived tables are isolated, while `LATERAL` derived tables see preceding sources. CTEs and derived tables (`FROM (SELECT ...) sub`) are recognized but do not offer inferred columns.
 - Suggestions are narrowed to whatever you've already typed (case-insensitive prefix match) before being handed to blink.cmp, so its own fuzzy scoring only ever sees genuinely relevant candidates.
 
 Selecting a profile preloads tables and views in the background; expanding it in the Workspace schema browser fills more of the cache. Completion never runs the CLI while you type. SQL keywords and functions, formatting, and highlighting remain the responsibility of your existing SQL tooling.
@@ -597,6 +599,8 @@ Potentially mutating statements require confirmation by default. A single `SELEC
 Result grids are reused per tabpage. They show up to `result_limit` rows and truncate displayed cell text to `max_cell_width` characters while retaining the raw value for copy and inspection.
 
 MySQL XML results preserve SQL `NULL`, empty strings, tabs, line feeds, and ordinary Unicode text. Statements returning multiple row-producing result sets fail explicitly because the Result grid represents one set. Arbitrary binary/BLOB bytes are not guaranteed to round-trip through the CLI XML format. MariaDB servers are rejected rather than treated as compatible MySQL servers.
+
+Orbit rejects malformed or lossy machine output instead of rendering partial rows. This includes incomplete CSV/XML/HTML records, duplicate or empty column headings, invalid encoded entities, inconsistent tabular row widths, and JSON rows that are not objects.
 
 ## Configuration
 

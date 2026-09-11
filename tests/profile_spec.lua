@@ -283,6 +283,11 @@ return {
 
 		local trailing, trailing_err = trino.parse('"id"\n"one"two\n')
 		assert(trailing == nil and trailing_err:match("after closing quote"))
+
+		local duplicate, duplicate_err = trino.parse('"id","id"\n"1","2"\n')
+		assert(duplicate == nil and duplicate_err:match("duplicate column"))
+		local empty, empty_err = trino.parse('""\n"value"\n')
+		assert(empty == nil and empty_err:match("must not be empty"))
 	end,
 
   ["connectors own object naming"] = function()
@@ -346,13 +351,23 @@ return {
 		})
 	end,
 
-  ["adapters.parse accepts JSON arrays and JSON lines"] = function()
+	["adapters.parse accepts JSON arrays and JSON lines"] = function()
     local array = assert(adapters.parse('[{"id":1}]'))
     local lines = assert(adapters.parse('{"id":1}\n{"id":2}\n'))
 
     assert_equal(array, { { id = 1 } })
-    assert_equal(lines, { { id = 1 }, { id = 2 } })
-  end,
+		assert_equal(lines, { { id = 1 }, { id = 2 } })
+	end,
+
+	["adapters.parse rejects lossy or non-row JSON"] = function()
+		for _, output in ipairs({ '[1]', '[[1]]', '{"":1}', '{"id":1,"id":2}', '{"nested":{"id":1,"id":2}}' }) do
+			local rows, err = adapters.parse(output)
+			assert(rows == nil and err, output)
+		end
+		local rows, err = adapters.parse('{"id":1}\n2\n')
+		assert(rows == nil and err)
+		assert_equal(assert(adapters.parse('[{"payload":{"":"value"}}]')), { { payload = { [""] = "value" } } })
+	end,
 
   ["Vertica connector builds secure vsql commands and parses HTML output"] = function()
     local vertica = connector("vertica")
@@ -365,21 +380,41 @@ return {
       sslmode = "require",
     }
 
-    assert_equal(vertica.prepare(options, "SELECT 1"), {
+    local vertica_command = vertica.prepare(options, "SELECT 1")
+    local null_setting = vertica_command[17]
+    assert(null_setting:match("^null=__ORBIT_NULL_"))
+    assert_equal(vertica_command, {
       "vsql", "--dbname", "warehouse", "--host", "vertica.example.test", "--username", "alice",
       "--port", "5433", "--sslmode", "require", "--html", "--quiet", "--pset", "footer=off",
-      "--pset", "null=__ORBIT_NULL__", "--command", "SELECT 1",
+      "--pset", null_setting, "--command", "SELECT 1",
     })
     assert_equal(vertica.environment(options), { VSQL_PASSWORD = "secret" })
     assert(not vim.inspect(vertica.prepare(options, "SELECT 1")):match("secret"))
     assert_equal(vertica.parse([[<table border="1">
 <tr><th>name</th><th>note</th><th>missing</th></tr>
-<tr><td>Ada &amp; Bob</td><td>&lt;line&gt;&#10;next</td><td>__ORBIT_NULL__</td></tr>
+<tr><td>Ada &amp; Bob</td><td>&lt;line&gt;&#10;next</td><td>]] .. null_setting:sub(6) .. [[</td></tr>
 </table>]]), {
       { name = "Ada & Bob", note = "<line>\nnext", missing = vim.NIL },
     })
-    assert(vertica.session_output("<table><tr><td>one</td></tr></table><table><tr><td>__orbit_marker__</td></tr></table>", "__orbit_marker__") == "<table><tr><td>one</td></tr></table>")
-  end,
+		local framed_output = "<table><tr><td>one</td></tr></table>\n<table><tr><th>__orbit_marker</th></tr><tr><td>__orbit_marker__</td></tr></table>\n"
+		local payload, consumed = vertica.session_output(framed_output, "__orbit_marker__")
+		assert(payload == "<table><tr><td>one</td></tr></table>\n" and consumed == #framed_output)
+		assert(vertica.session_output(framed_output:sub(1, -3), "__orbit_marker__") == nil)
+
+		for _, invalid in ipairs({
+			"<table><tr><th>id</th><th>id</th></tr><tr><td>1</td><td>2</td></tr></table>",
+			"<table><tr><th></th></tr><tr><td>1</td></tr></table>",
+			"<table><tr><th>id</th><th>name</th></tr><tr><td>1</td></tr></table>",
+			"<table><tr><th>id</th></tr><tr><td>1</td><td>Ada</td></tr></table>",
+			"<table><tr><th>id</th></tr><tr><td>1</tr></table>",
+			"<table><tr><th>id</th></tr></table><table><tr><th>other</th></tr></table>",
+			"<table><tr><th>value</th></tr><tr><td>&#0;</td></tr></table>",
+			"<table><tr><th>value</th></tr><tr><td>&#x110000;</td></tr></table>",
+		}) do
+			local invalid_rows, invalid_err = vertica.parse(invalid)
+			assert(invalid_rows == nil and invalid_err, invalid)
+		end
+	end,
 
   ["Vertica profiles require connection coordinates and expose catalog metadata"] = function()
     local missing = write_profiles({
@@ -397,12 +432,9 @@ return {
     assert(vertica.schema_statement(options, { type = "primary_keys", name = "orders", schema = "sales" }):match("v_catalog%.primary_keys"))
     assert(vertica.schema_statement(options, { type = "foreign_keys", name = "orders", schema = "sales" }):match("reference_column_name AS \"to\""))
     assert(vertica.schema_statement(options, { type = "projections", name = "orders", schema = "sales" }):match("v_catalog%.projections"))
-    assert(vim.deep_equal(vertica.metadata_categories(options, { type = "table" }), {
-      { id = "columns", label = "columns" },
-      { id = "primary_keys", label = "primary keys" },
-      { id = "foreign_keys", label = "foreign keys" },
-      { id = "projections", label = "projections" },
-    }))
+    local categories = vertica.metadata_categories(options, { type = "table" })
+    assert(table.concat(vim.tbl_map(function(category) return category.id end, categories), ",") == "columns,primary_keys,foreign_keys,projections")
+    assert(categories[4].presentation.format({ name = "orders_super" }) == "orders_super")
     local actions = vertica.object_actions(options, { type = "view", schema = "sales", name = "monthly_orders" }, 25)
     assert(actions[#actions].id == "definition")
     assert(actions[#actions].statement:match("v_catalog%.views"))
@@ -460,20 +492,17 @@ return {
 		local trino_categories = connector("trino").metadata_categories({ catalog = "hive" }, { type = "table" })
 		local postgres_categories = connector("postgres").metadata_categories({ database = "orbit" }, { type = "table" })
 
-    assert(vim.deep_equal(sqlite_categories, {
-      { id = "columns", label = "columns" },
-      { id = "primary_keys", label = "primary keys" },
-      { id = "foreign_keys", label = "foreign keys" },
-      { id = "indexes", label = "indexes" },
-    }))
-    assert(vim.deep_equal(view_categories, { { id = "columns", label = "columns" } }))
-		assert(vim.deep_equal(trino_categories, { { id = "columns", label = "columns" } }))
-		assert(vim.deep_equal(postgres_categories, {
-			{ id = "columns", label = "columns" },
-			{ id = "primary_keys", label = "primary keys" },
-			{ id = "foreign_keys", label = "foreign keys" },
-			{ id = "indexes", label = "indexes" },
-		}))
+		local function ids(categories)
+			return table.concat(vim.tbl_map(function(category) return category.id end, categories), ",")
+		end
+		assert(ids(sqlite_categories) == "columns,primary_keys,foreign_keys,indexes")
+		assert(ids(view_categories) == "columns")
+		assert(ids(trino_categories) == "columns")
+		assert(ids(postgres_categories) == "columns,primary_keys,foreign_keys,indexes")
+		assert(sqlite_categories[1].presentation.format({ name = "id", type = "INTEGER" }) == "id  INTEGER")
+		assert(sqlite_categories[2].presentation.format({ name = "id", pk = 1 }) == "primary key #1 (id)")
+		assert(vim.deep_equal(sqlite_categories[3].presentation.icons, { "key", "folder", "result" }))
+		assert(postgres_categories[4].presentation.icon_highlight == "OrbitIconIndex")
 	end,
 
 	["PostgreSQL profiles validate required and connector-specific options"] = function()

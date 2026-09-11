@@ -1,4 +1,5 @@
 local schema_tree = require("orbit.schema_tree")
+local adapters = require("orbit.adapters")
 
 local icons = {
   collapsed = ">",
@@ -24,6 +25,39 @@ local function expand_tables(tree)
 end
 
 return {
+	["schema_tree renders Connector-declared metadata presentation generically"] = function()
+		local connector = assert(adapters.connector(profile))
+		local original_categories = connector.metadata_categories
+		connector.metadata_categories = function()
+			return { {
+				id = "custom",
+				label = "custom details",
+				presentation = {
+					format = function(entry) return "rendered:" .. entry.value end,
+					icons = { "view" },
+					row_highlight = "OrbitCustom",
+					icon_highlight = "OrbitIconCustom",
+				},
+			} }
+		end
+		local ok, err = xpcall(function()
+			local tree = schema_tree.new()
+			local row = { schema = "main", name = "sessions", type = "table" }
+			schema_tree.set_tables(tree, { row })
+			expand_tables(tree)
+			schema_tree.toggle(tree, { kind = "table", profile = profile, row = row })
+			schema_tree.toggle(tree, { kind = "metadata", profile = profile, row = row, category = { id = "custom" } })
+			schema_tree.set_metadata(tree, row, "custom", { { value = "42" } })
+			local lines, _, highlights = schema_tree.lines(tree, profile, "", { icons = icons })
+			assert(table.concat(lines, "\n"):find("~ rendered:42", 1, true))
+			local groups = {}
+			for _, highlight in ipairs(highlights) do groups[highlight.group] = true end
+			assert(groups.OrbitCustom and groups.OrbitIconCustom)
+		end, debug.traceback)
+		connector.metadata_categories = original_categories
+		assert(ok, err)
+	end,
+
   ["schema_tree disambiguates object labels without changing ordinary names"] = function()
     local tree = schema_tree.new()
     local first = { schema = "a.b", name = "c", type = "table" }

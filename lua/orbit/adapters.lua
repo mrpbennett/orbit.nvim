@@ -25,6 +25,108 @@
 --   M.parse(output) -> rows (array of tables), nil | nil, error_message
 local M = {}
 
+-- Reject duplicate JSON object keys before vim.json.decode overwrites them.
+-- Syntax validation still belongs to the decoder; this scan only preserves
+-- information that would otherwise be lost during decoding.
+local function validate_json_objects(input)
+	local stack = {}
+	local index = 1
+	while index <= #input do
+		local character = input:sub(index, index)
+		if character:match("%s") then
+			index = index + 1
+		elseif character == '"' then
+			local start_at = index
+			index = index + 1
+			while index <= #input do
+				local current = input:sub(index, index)
+				if current == "\\" then
+					index = index + 2
+				elseif current == '"' then
+					break
+				else
+					index = index + 1
+				end
+			end
+			if index > #input then
+				return true -- The JSON decoder reports the syntax error.
+			end
+			local parent = stack[#stack]
+			if parent and parent.kind == "object" and parent.expect_key then
+				local raw = input:sub(start_at, index)
+				local ok, key = pcall(vim.json.decode, raw)
+				if ok then
+					if key == "" and parent.row then
+						return nil, "CLI output is not valid JSON: column names must not be empty"
+					end
+					if parent.keys[key] then
+						return nil, "CLI output is not valid JSON: duplicate property " .. string.format("%q", key)
+					end
+					parent.keys[key] = true
+				end
+				parent.expect_key = false
+			end
+			index = index + 1
+		elseif character == "{" then
+			local parent = stack[#stack]
+			if parent and parent.kind == "array" and parent.root and parent.expect_value then
+				parent.expect_value = false
+			end
+			table.insert(stack, { kind = "object", keys = {}, expect_key = true })
+			index = index + 1
+		elseif character == "[" then
+			local parent = stack[#stack]
+			if parent and parent.kind == "array" and parent.root and parent.expect_value then
+				return nil, "CLI output is not valid JSON: rows must be objects"
+			end
+			table.insert(stack, { kind = "array", root = #stack == 0, expect_value = true })
+			index = index + 1
+		elseif character == "}" or character == "]" then
+			table.remove(stack)
+			index = index + 1
+		elseif character == "," then
+			local parent = stack[#stack]
+			if parent then
+				if parent.kind == "object" then
+					parent.expect_key = true
+				elseif parent.root then
+					parent.expect_value = true
+				end
+			end
+			index = index + 1
+		else
+			local parent = stack[#stack]
+			if parent and parent.kind == "array" and parent.root and parent.expect_value then
+				if character ~= "]" then
+					return nil, "CLI output is not valid JSON: rows must be objects"
+				end
+				parent.expect_value = false
+			end
+			index = index + 1
+		end
+	end
+	return true
+end
+
+-- Enforce the row-map interface after every Connector parser. This is the
+-- final guard before callers treat each entry as a Result row.
+function M.normalize(rows)
+	if type(rows) ~= "table" or not vim.islist(rows) then
+		return nil, "CLI output rows must be a list"
+	end
+	for row_index, row in ipairs(rows) do
+		if type(row) ~= "table" or (next(row) ~= nil and vim.islist(row)) then
+			return nil, string.format("CLI output row %d must be an object", row_index)
+		end
+		for key in pairs(row) do
+			if type(key) ~= "string" or key == "" then
+				return nil, string.format("CLI output row %d has an invalid column name", row_index)
+			end
+		end
+	end
+	return rows
+end
+
 -- This is the normalized connector boundary; backend capabilities are optional by design.
 -- Each entry maps a profile "kind" string (as written by the user in their
 -- profiles.json) to the Lua module responsible for actually talking to that
@@ -149,6 +251,10 @@ function M.parse(output)
 	if output == "" then
 		return {}
 	end
+	local valid, validation_err = validate_json_objects(output)
+	if not valid then
+		return nil, validation_err
+	end
 
 	-- First, try decoding the whole output as one JSON value. pcall is used
 	-- because vim.json.decode raises a Lua error (rather than returning
@@ -162,10 +268,10 @@ function M.parse(output)
 		-- as-is; a single JSON object is wrapped in a one-element array so
 		-- callers always get a list of rows regardless of which shape the
 		-- CLI produced.
-		if vim.islist(decoded) then
-			return decoded
+		if output:sub(1, 1) == "[" then
+			return M.normalize(decoded)
 		end
-		return { decoded }
+		return M.normalize({ decoded })
 	end
 
 	-- The whole-output parse failed (e.g. because the output is
@@ -184,7 +290,7 @@ function M.parse(output)
 		end
 		table.insert(rows, row)
 	end
-	return rows
+	return M.normalize(rows)
 end
 
 return M

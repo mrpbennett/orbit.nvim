@@ -283,6 +283,23 @@ return {
     end)
   end,
 
+	["correlated alias completion prefers the nearest shadowing query block"] = function()
+		local profile = { name = "completion-shadowed-alias", kind = "sqlite", options = { path = "orbit.db" } }
+		local tables = { { name = "outer_table", type = "table" }, { name = "inner_table", type = "table" } }
+		with_acquisition(profile, tables, function(done)
+			cache.load_tables(profile, {}, done)
+		end, function()
+			with_acquisition(profile, { { name = "inner_id", type = "INTEGER" } }, function(done)
+				cache.load_columns(profile, tables[2], {}, done)
+			end, function()
+				local line =
+					"SELECT * FROM outer_table x WHERE EXISTS (SELECT x. FROM inner_table x)"
+				local cursor = #"SELECT * FROM outer_table x WHERE EXISTS (SELECT x."
+				assert(vim.deep_equal(words(completion.items(profile, { line }, 1, cursor)), { "x.inner_id" }))
+			end)
+		end)
+	end,
+
   ["unqualified column completion unions every joined table, annotated by source"] = function()
     local profile = { name = "completion-join", kind = "sqlite", options = { path = "orbit.db" } }
     local orders_columns = { { name = "id", type = "INTEGER" } }
