@@ -298,6 +298,17 @@ local function create_commands()
 		end
 		vim.cmd.edit(M.config.profile_path)
 	end, { desc = "Edit Orbit connection profiles" })
+	vim.api.nvim_create_user_command("OrbitDoctor", function(command)
+		require("orbit.doctor").run(command.args ~= "" and command.args or nil, M.config, function(report, err)
+			vim.notify(report or err, report and vim.log.levels.INFO or vim.log.levels.ERROR, { title = "Orbit Doctor" })
+		end)
+	end, {
+		nargs = "?",
+		complete = function()
+			return require("orbit.doctor").kinds()
+		end,
+		desc = "Diagnose Orbit connectors without connecting",
+	})
 	vim.api.nvim_create_user_command("OrbitStructure", function()
 		structure.toggle(M.config)
 	end, { desc = "Toggle the Orbit Structure panel" })

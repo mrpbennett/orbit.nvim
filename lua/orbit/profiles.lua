@@ -136,7 +136,7 @@ local function validate_profile(profile)
   end
 	-- Only registered database kinds are supported; anything else (typo,
 	-- unsupported future kind, missing field entirely) is rejected up front.
-	if profile.kind ~= "trino" and profile.kind ~= "sqlite" and profile.kind ~= "postgres" and profile.kind ~= "vertica" and profile.kind ~= "mysql" then
+	if profile.kind ~= "trino" and profile.kind ~= "sqlite" and profile.kind ~= "postgres" and profile.kind ~= "vertica" and profile.kind ~= "mysql" and profile.kind ~= "mssql" then
     return nil, string.format("profile %q has unsupported kind %q", profile.name, tostring(profile.kind))
   end
   if type(profile.options) ~= "table" then
@@ -152,6 +152,7 @@ local function validate_profile(profile)
 	local required = profile.kind == "trino" and { "server", "user", "catalog" }
 		or profile.kind == "postgres" and { "database" }
 		or profile.kind == "mysql" and { "database" }
+		or profile.kind == "mssql" and { "host", "database", "user" }
 		or profile.kind == "vertica" and { "host", "user", "database" }
 		or { "path" }
   for _, field in ipairs(required) do

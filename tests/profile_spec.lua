@@ -60,12 +60,52 @@ return {
 		assert(loaded == nil and err:match("options.database"))
 	end,
 
-  ["adapters resolve supported connector kinds and reject unknown kinds"] = function()
+	["MSSQL profiles validate the exact SQL authentication and TLS options"] = function()
+		local base = { host = "sql.example.test", database = "warehouse", user = "orbit" }
+		local valid = write_profiles({
+			version = 1,
+			profiles = { {
+				name = "warehouse-mssql",
+				kind = "mssql",
+				options = vim.tbl_extend("force", base, {
+					port = 1433,
+					password_env = "ORBIT_MSSQL_PASSWORD",
+					trust_server_certificate = false,
+					schema_patterns = { "sales", "report*" },
+					executable = "sqlcmd-dev",
+				}),
+			} },
+		})
+		assert(assert(profiles.load(valid)).profiles[1].kind == "mssql")
+
+		local cases = {
+			{ options = { database = "warehouse", user = "orbit" }, error = "options.host" },
+			{ options = vim.tbl_extend("force", base, { port = 0 }), error = "options.port" },
+			{ options = vim.tbl_extend("force", base, { trust_server_certificate = "yes" }), error = "trust_server_certificate" },
+			{ options = vim.tbl_extend("force", base, { password = "one", password_env = "TWO" }), error = "mutually exclusive" },
+			{ options = vim.tbl_extend("force", base, { certificate = "/tmp/ca.pem" }), error = "unsupported MSSQL option" },
+			{ options = vim.tbl_extend("force", base, { hostname_in_certificate = "sql.internal" }), error = "unsupported MSSQL option" },
+			{ options = vim.tbl_extend("force", base, { encrypt = "optional" }), error = "unsupported MSSQL option" },
+			{ options = vim.tbl_extend("force", base, { arguments = { "--unsafe" } }), error = "unsupported MSSQL option" },
+			{ options = vim.tbl_extend("force", base, { executable = "" }), error = "options.executable" },
+			{ options = vim.tbl_extend("force", base, { confirm_mutations = "no" }), error = "confirm_mutations" },
+			{ options = vim.tbl_extend("force", base, { schema_patterns = {} }), error = "non%-empty array" },
+			{ options = vim.tbl_extend("force", base, { schema_patterns = { "" } }), error = "schema_patterns" },
+		}
+		for _, case in ipairs(cases) do
+			local path = write_profiles({ version = 1, profiles = { { name = "bad-mssql", kind = "mssql", options = case.options } } })
+			local loaded, err = profiles.load(path)
+			assert(loaded == nil and err:match(case.error), tostring(err))
+		end
+	end,
+
+	["adapters resolve supported connector kinds and reject unknown kinds"] = function()
     assert(adapters.connector({ kind = "sqlite" }) == connector("sqlite"))
     assert(adapters.connector({ kind = "postgres" }) == connector("postgres"))
     assert(adapters.connector({ kind = "trino" }) == connector("trino"))
     assert(adapters.connector({ kind = "vertica" }) == connector("vertica"))
 		assert(adapters.connector({ kind = "mysql" }) == connector("mysql"))
+		assert(adapters.connector({ kind = "mssql" }) == connector("mssql"))
     local unknown, err = adapters.connector({ kind = "unknown" })
     assert(unknown == nil)
     assert(err == "unsupported profile kind: unknown")
@@ -294,6 +334,7 @@ return {
     local sqlite = connector("sqlite")
     local postgres = connector("postgres")
     local trino = connector("trino")
+		local mssql = connector("mssql")
 
     assert(sqlite.qualified_name({}, { name = 'a"b' }) == '"a""b"')
     assert(sqlite.completion_word({}, { name = "sessions" }, "") == "sessions")
@@ -305,7 +346,25 @@ return {
     assert(trino.completion_word({ catalog = "hive", schema = "default" }, { catalog = "hive", schema = "default", name = "events" }, "") == "default.events")
     assert(trino.completion_word({ catalog = "hive" }, { catalog = "iceberg", schema = "cleanroom", name = "events" }, "") == "iceberg.cleanroom.events")
     assert(trino.completion_word({}, { name = "events" }, "cleanroom.") == "cleanroom.events")
+		assert(mssql.qualified_name({}, { schema = "Sales]West", name = "Order.Items" }) == "[Sales]]West].[Order.Items]")
+		assert(mssql.completion_word({}, { schema = "dbo", name = "users" }, "dbo.") == "[dbo].[users]")
   end,
+
+	["MSSQL connector builds user-object schema SQL and read-only actions"] = function()
+		local mssql = connector("mssql")
+		local options = { host = "sql.example", database = "warehouse", user = "orbit", schema_patterns = { "sales", "report*" } }
+		local tables = assert(mssql.schema_statement(options, { type = "tables" }))
+		assert(tables:find("FROM sys.tables", 1, true) and tables:find("FROM sys.views", 1, true))
+		assert(tables:find("is_ms_shipped = 0", 1, true))
+		assert(tables:find("schema_name IN ('sales')", 1, true))
+		assert(tables:find("schema_name LIKE 'report%' ESCAPE '\\'", 1, true))
+		local columns = assert(mssql.schema_statement(options, { type = "columns", schema = "a'b", name = "Order]Items" }))
+		assert(columns:find("FROM sys.columns", 1, true) and columns:find("schemas.name = 'a''b'", 1, true))
+		local actions = mssql.object_actions(options, { type = "table", schema = "Sales", name = "Order]Items" }, 25)
+		assert(#actions == 2 and actions[1].statement == "SELECT TOP (25) *\nFROM [Sales].[Order]]Items];")
+		assert(actions[2].id == "columns" and mssql.editable_table == nil and mssql.mutation_statement == nil)
+		assert(mssql.metadata_categories(options, { type = "table" })[1].id == "columns")
+	end,
 
 	["SQLite connector builds a JSON command"] = function()
 		local command = assert(connector("sqlite").prepare({ path = "/tmp/local.db" }, "SELECT 1"))

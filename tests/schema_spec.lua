@@ -34,6 +34,30 @@ local function assert_queued_refresh(load, ordinary_rows, refreshed_rows, assert
 end
 
 return {
+	["MSSQL schema acquisition keeps schema identity for tables and columns"] = function()
+		local profile = { name = "mssql-schema", kind = "mssql", options = { host = "sql.example", database = "warehouse", user = "orbit" } }
+		local original_run = runner.run
+		local statements = {}
+		runner.run = function(received, statement, callback, connector)
+			assert(received == profile and connector == require("orbit.connectors.mssql"))
+			statements[#statements + 1] = statement
+			if #statements == 1 then
+				callback({ { schema = "sales", name = "orders", type = "table" } })
+			else
+				callback({ { name = "id", type = "bigint" } })
+			end
+		end
+		local ok, err = xpcall(function()
+			local tables, columns
+			cache.load_tables(profile, {}, function(rows) tables = rows end)
+			cache.load_columns(profile, { schema = "sales", name = "orders", type = "table" }, {}, function(rows) columns = rows end)
+			assert(tables[1].schema == "sales" and columns[1].name == "id")
+			assert(statements[1]:find("sys.tables", 1, true))
+			assert(statements[2]:find("schemas.name = 'sales'", 1, true))
+		end, debug.traceback)
+		runner.run = original_run
+		assert(ok, err)
+	end,
 	["schema acquisition accepts an arbitrary Connector-declared metadata category"] = function()
 		local connector = require("orbit.connectors.sqlite")
 		local original_categories = connector.metadata_categories

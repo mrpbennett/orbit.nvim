@@ -1,0 +1,96 @@
+local feedback = require("orbit.feedback")
+local profiles = require("orbit.profiles")
+local query = require("orbit.query")
+local results = require("orbit.results")
+local runner = require("orbit.runner")
+local workspace = require("orbit.workspace")
+
+return {
+	["MSSQL mutation confirmation follows CTE verbs and SELECT INTO semantics"] = function()
+		local confirm = require("orbit.connectors.mssql").requires_confirmation
+		local read_only = {
+			"SELECT * FROM [sales].[orders]",
+			"WITH recent AS (SELECT * FROM orders) SELECT * FROM recent",
+			"SELECT 'INTO', [OUTPUT] FROM words; -- MERGE",
+		}
+		local mutating = {
+			"WITH recent AS (SELECT id FROM orders) UPDATE orders SET active = 1 OUTPUT inserted.id",
+			"WITH one AS (SELECT 1 AS id), two AS (SELECT id FROM one) DELETE FROM orders OUTPUT deleted.id",
+			"SELECT * INTO archive FROM orders",
+			"SELECT 1\nDELETE FROM orders",
+			"EXEC dbo.rebuild_cache",
+			"MERGE target USING source ON target.id = source.id WHEN MATCHED THEN UPDATE SET value = source.value",
+			"CREATE TABLE dbo.items (id int)",
+			"DROP VIEW dbo.old_view",
+		}
+		for _, statement in ipairs(read_only) do
+			assert(not confirm(statement), statement)
+		end
+		for _, statement in ipairs(mutating) do
+			assert(confirm(statement), statement)
+		end
+	end,
+	["query propagates ordered Connector columns to rendering"] = function()
+		local original = {
+			connected = runner.connected,
+			finish = feedback.finish,
+			notify = vim.notify,
+			open = results.open,
+			run = runner.run,
+			start = feedback.start,
+			workspace = workspace.is_workspace,
+		}
+		local path = vim.fn.tempname()
+		assert(profiles.write(path, {
+			version = 1,
+			profiles = { { name = "metadata-query", kind = "sqlite", options = { path = ":memory:" } } },
+		}))
+		local buffer = vim.api.nvim_create_buf(false, true)
+		vim.api.nvim_win_set_buf(0, buffer)
+		vim.api.nvim_buf_set_lines(buffer, 0, -1, false, { "SELECT 1" })
+		vim.b[buffer].orbit_profile = "metadata-query"
+		local rendered, completion
+		local notifications = {}
+		local metadata = {
+			columns = { "zeta", "alpha" },
+		}
+
+		runner.connected = function() return false end
+		runner.run = function(_, _, callback)
+			callback({}, nil, metadata)
+			return {}
+		end
+		feedback.start = function() return {} end
+		feedback.finish = function(_, message) completion = message end
+		results.open = function(rows, options) rendered = { rows = rows, options = options } end
+		workspace.is_workspace = function() return false end
+		vim.notify = function(message) table.insert(notifications, message) end
+
+		local ok, test_err = xpcall(function()
+			query.execute(buffer, {
+				confirm_mutations = false,
+				focus_results = false,
+				profile_path = path,
+				result_height = 5,
+				result_limit = 20,
+				max_cell_width = 40,
+			})
+			assert(rendered and #rendered.rows == 0)
+			assert(vim.deep_equal(rendered.options.columns, { "zeta", "alpha" }))
+			assert(vim.deep_equal(notifications, {}))
+			assert(completion:match("0 rows in 0s"), completion)
+		end, debug.traceback)
+
+		runner.connected = original.connected
+		runner.run = original.run
+		feedback.start = original.start
+		feedback.finish = original.finish
+		results.open = original.open
+		workspace.is_workspace = original.workspace
+		vim.notify = original.notify
+		if vim.api.nvim_buf_is_valid(buffer) then
+			vim.api.nvim_buf_delete(buffer, { force = true })
+		end
+		assert(ok, test_err)
+	end,
+}

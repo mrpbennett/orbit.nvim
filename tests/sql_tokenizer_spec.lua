@@ -82,6 +82,26 @@ return {
 		assert(vim.deep_equal(tokenizer.split_qualified([[`sales``west`.`order.item`]]), { "sales`west", "order.item" }))
 		assert(vim.deep_equal(tokenizer.split_qualified("orders"), { "orders" }))
 		assert(vim.deep_equal(tokenizer.split_qualified("catalog.schema.name"), { "catalog", "schema", "name" }))
+		assert(vim.deep_equal(tokenizer.split_qualified("[Sales]]West].[Order.Items]"), { "Sales]West", "Order.Items" }))
+	end,
+
+	["MSSQL mode tokenizes escaped bracket identifiers as one name"] = function()
+		local tokens = tokenizer.tokenize({ "SELECT [semi;]]dot.name] FROM [Sales].[Order.Items];" }, "mssql")
+		assert(tokens[2].type == "quoted_identifier" and tokens[2].text == "[semi;]]dot.name]")
+		assert(tokens[4].type == "quoted_identifier" and tokens[6].type == "quoted_identifier")
+		assert(#vim.tbl_filter(function(token) return token.type == "semicolon" end, tokens) == 1)
+	end,
+
+	["MSSQL batch separator detection ignores strings comments and ordinary names"] = function()
+		assert(tokenizer.has_mssql_batch_separator({ "SELECT 1", "GO -- next batch" }))
+		assert(tokenizer.has_mssql_batch_separator({ "GO 2;" }))
+		assert(tokenizer.has_mssql_batch_separator({ "GO nonsense" }))
+		assert(tokenizer.has_mssql_batch_separator({ "GO /* comment */" }))
+		assert(not tokenizer.has_mssql_batch_separator({ "GO2" }))
+		assert(not tokenizer.has_mssql_batch_separator({ "GO_PROC" }))
+		assert(not tokenizer.has_mssql_batch_separator({ "SELECT 'GO', [GO], go FROM dbo.words -- GO" }))
+		assert(not tokenizer.has_mssql_batch_separator({ "SELECT 'open", "GO", "close'" }))
+		assert(not tokenizer.has_mssql_batch_separator({ "/* open", "GO", "close */ SELECT 1" }))
 	end,
 
 	["MySQL mode recognizes its quoted names, strings, and comments"] = function()
@@ -92,5 +112,10 @@ return {
 		assert(tokens[7].type == "comment")
 		assert(tokens[10].text == "-" and tokens[11].text == "-")
 		assert(tokens[13].type == "semicolon" and tokens[14].type == "comment")
+	end,
+	["MSSQL mode does not treat PostgreSQL dollar quotes as strings"] = function()
+		local tokens = tokenizer.tokenize({ "SELECT $$value; GO$$" }, "mssql")
+		assert(vim.tbl_contains(types(tokens), "semicolon"))
+		assert(not vim.tbl_contains(types(tokens), "string"))
 	end,
 }

@@ -1,11 +1,11 @@
 # Orbit.nvim
 
-Orbit.nvim is a personal Neovim database query workspace for Trino, SQLite, PostgreSQL, and MySQL. It provides statement execution, schema browsing, and formatted query results through backend-specific CLIs.
+Orbit.nvim is a personal Neovim database query workspace for MSSQL, MySQL, PostgreSQL, SQLite, Trino, and Vertica. It provides statement execution, schema browsing, and formatted results through backend-specific Connectors.
 
 ## Language
 
 **Connection profile**:
-A named JSON-defined database target with a `kind` and backend-specific options, containing the settings Orbit.nvim needs to invoke its CLI, including connection credentials where required.
+A named JSON-defined database target with a `kind` and backend-specific options, containing the settings its Connector needs, including connection credentials where required.
 _Avoid_: connection, config, data source
 
 **Connector**:
@@ -30,7 +30,7 @@ A table or view exposed by a connection profile, identified by its catalog, sche
 A recognized kind of metadata for a schema object: columns, primary keys, foreign keys, or indexes. A connector exposes only the categories it supports for that object.
 
 **Qualified name**:
-The canonical SQL-pasteable identifier for a schema object. It is connector-specific: SQLite uses a quoted object name, PostgreSQL uses quoted schema and object names, MySQL uses backtick-quoted database and object names, and Trino uses quoted catalog, schema, and object names.
+The canonical SQL-pasteable identifier for a schema object. It is Connector-specific: MSSQL uses bracket-quoted schema and object names, SQLite uses a quoted object name, PostgreSQL uses quoted schema and object names, MySQL uses backtick-quoted database and object names, and Trino uses quoted catalog, schema, and object names.
 _Avoid_: table name, object path
 
 **Completion qualifier**:
@@ -44,7 +44,7 @@ A configurable formatted window, shown at the bottom by default, that displays t
 _Avoid_: result buffer, table window
 
 **Statement**:
-Text executed through a connection profile's CLI, including read, data-changing, and schema-changing operations.
+Text executed through a connection profile's Connector, including read, data-changing, and schema-changing operations.
 _Avoid_: query, command
 
 **Mutating statement**:

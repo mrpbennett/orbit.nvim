@@ -41,4 +41,16 @@ return {
     assert(target == nil)
     assert(err:match("select the statement explicitly"))
   end,
+
+	["statements.target applies MSSQL lexical splitting and rejects GO"] = function()
+		local target = assert(statements.target({
+			lines = { "SELECT '[semi;]' AS [semi;column]; -- trailing ;" },
+			dialect = "mssql",
+		}))
+		assert(target:match("semi;column"))
+
+		local rejected, err = statements.target({ lines = { "SELECT 1", "GO" }, dialect = "mssql" })
+		assert(rejected == nil and err:match("GO batch separators"))
+		assert(statements.target({ lines = { "SELECT 'GO' AS value" }, dialect = "mssql" }))
+	end,
 }

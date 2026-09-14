@@ -87,6 +87,7 @@ end
 -- identifiers ("" escaping); see connectors/{postgres,sqlite,trino}.lua.
 function M.tokenize(lines, dialect)
 	local mysql = dialect == "mysql"
+	local mssql = dialect == "mssql"
 	-- Joining all lines with "\n" lets the scanner walk one flat string with
 	-- a single index `i`, instead of juggling a separate index per line. The
 	-- injected "\n" characters are treated specially in `advance()` below so
@@ -225,6 +226,26 @@ function M.tokenize(lines, dialect)
 		return start_row, start_col, table.concat(text)
 	end
 
+	local function scan_bracket_identifier()
+		local start_row, start_col = row, col
+		local text = { "[" }
+		advance()
+		while char() do
+			local c = char()
+			table.insert(text, c)
+			advance()
+			if c == "]" then
+				if char() == "]" then
+					table.insert(text, "]")
+					advance()
+				else
+					break
+				end
+			end
+		end
+		return start_row, start_col, table.concat(text)
+	end
+
 	local function dollar_delimiter()
 		if char() ~= "$" then
 			return nil
@@ -312,6 +333,9 @@ function M.tokenize(lines, dialect)
 				advance()
 			end
 			emit("comment", start_row, start_col, "")
+		elseif mssql and c == "[" then
+			local start_row, start_col, text = scan_bracket_identifier()
+			emit("quoted_identifier", start_row, start_col, text)
 		elseif mysql and c == "`" then
 			local start_row, start_col, text = scan_delimited("`", false)
 			emit("quoted_identifier", start_row, start_col, text)
@@ -325,7 +349,7 @@ function M.tokenize(lines, dialect)
 			-- identifiers, just with a different delimiter character.
 			local start_row, start_col, text = scan_delimited("'", mysql)
 			emit("string", start_row, start_col, text)
-		elseif not mysql and c == "$" and dollar_delimiter() then
+		elseif not mysql and not mssql and c == "$" and dollar_delimiter() then
 			local start_row, start_col, text = scan_dollar_quoted(dollar_delimiter())
 			emit("string", start_row, start_col, text)
 		elseif is_digit(c) then
@@ -424,7 +448,24 @@ function M.split_qualified(text)
 	local n = #text
 	while i <= n do
 		local c = text:sub(i, i)
-		if c == '"' or c == "`" then
+		if c == "[" then
+			i = i + 1
+			while i <= n do
+				local d = text:sub(i, i)
+				if d == "]" then
+					if text:sub(i + 1, i + 1) == "]" then
+						table.insert(buffer, "]")
+						i = i + 2
+					else
+						i = i + 1
+						break
+					end
+				else
+					table.insert(buffer, d)
+					i = i + 1
+				end
+			end
+		elseif c == '"' or c == "`" then
 			local quote = c
 			-- Enter a quoted segment: consume characters verbatim
 			-- (un-escaping doubled quotes back to one) until the closing
@@ -468,6 +509,37 @@ function M.split_qualified(text)
 	-- dots) has no trailing dot to trigger that, so it's appended here.
 	table.insert(segments, table.concat(buffer))
 	return segments
+end
+
+-- SQL Server's GO command is a client-side batch separator, not T-SQL. Orbit
+-- accepts the word as ordinary SQL but rejects it when it occupies a line by
+-- itself (with an optional count/semicolon), outside strings and comments.
+function M.mssql_command_rows(lines)
+	local eligible = {}
+	for row = 1, #lines do
+		eligible[row] = true
+	end
+	for _, token in ipairs(M.tokenize(lines, "mssql")) do
+		if (token.type == "string" or token.type == "comment" or token.type == "quoted_identifier")
+			and token.end_row > token.row then
+			for row = token.row + 1, token.end_row do
+				eligible[row] = false
+			end
+		end
+	end
+	return eligible
+end
+
+function M.has_mssql_batch_separator(lines)
+	-- Go sqlcmd tracks multiline SQL strings/comments before matching commands.
+	local eligible = M.mssql_command_rows(lines)
+	for row, line in ipairs(lines) do
+		local command = line:match("^%s*(.-)%s*$")
+		if eligible[row] and (command:upper() == "GO" or command:upper():match("^GO +")) then
+			return true
+		end
+	end
+	return false
 end
 
 return M

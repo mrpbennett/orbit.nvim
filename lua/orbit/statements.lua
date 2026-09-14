@@ -39,6 +39,7 @@
 -- Exports:
 --   M.target(request) -> sql_text, nil   OR   nil, error_message
 local M = {}
+local tokenizer = require("orbit.sql.tokenizer")
 
 -- Side effects: none (pure function).
 local function selected_lines(lines, selection)
@@ -129,6 +130,9 @@ function M.target(request)
 		if explicit:match("^%s*$") then
 			return nil, "selection is empty"
 		end
+		if request.dialect == "mssql" and tokenizer.has_mssql_batch_separator(vim.split(explicit, "\n", { plain = true })) then
+			return nil, "MSSQL GO batch separators are not supported"
+		end
 		return explicit
 	end
 
@@ -144,6 +148,20 @@ function M.target(request)
 	-- `select(2, ...)`) the *count* of substitutions made -- i.e. how many
 	-- semicolons the buffer contains.
 	local semicolons = select(2, contents:gsub(";", ""))
+	local trailing_terminator = contents:match(";%s*$") ~= nil
+	if request.dialect == "mssql" then
+		semicolons = 0
+		local last_code
+		for _, token in ipairs(tokenizer.tokenize(request.lines, request.dialect)) do
+			if token.type == "semicolon" then
+				semicolons = semicolons + 1
+			end
+			if token.type ~= "comment" then
+				last_code = token
+			end
+		end
+		trailing_terminator = last_code ~= nil and last_code.type == "semicolon"
+	end
 	-- This is intentionally a safety rule, not SQL parsing: ambiguous buffers require a selection.
 	-- Rationale for the two conditions below:
 	--   - More than one semicolon anywhere means the buffer very likely holds
@@ -154,8 +172,11 @@ function M.target(request)
 	--     properly terminated); one semicolon anywhere else in the middle of
 	--     the buffer suggests a second statement follows it, so it's treated
 	--     as ambiguous too.
-	if semicolons > 1 or (semicolons == 1 and not contents:match(";%s*$")) then
+	if semicolons > 1 or (semicolons == 1 and not trailing_terminator) then
 		return nil, "statement is ambiguous; select the statement explicitly"
+	end
+	if request.dialect == "mssql" and tokenizer.has_mssql_batch_separator(request.lines) then
+		return nil, "MSSQL GO batch separators are not supported"
 	end
 
 	return contents

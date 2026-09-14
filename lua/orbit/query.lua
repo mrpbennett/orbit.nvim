@@ -300,6 +300,7 @@ function M.execute(buffer, config, selection, context)
 		end)
 		return
 	end
+	local connector = assert(adapters.connector(profile))
 
 	-- Ask the statements module (not shown in this file) to figure out the
 	-- actual SQL text to run: either the given visual selection, or whatever
@@ -308,6 +309,7 @@ function M.execute(buffer, config, selection, context)
 	local statement, statement_err = statements.target({
 		lines = vim.api.nvim_buf_get_lines(buffer, 0, -1, false),
 		selection = selection,
+		dialect = connector.sql_dialect,
 	})
 	if not statement then
 		vim.notify(statement_err, vim.log.levels.ERROR)
@@ -320,7 +322,8 @@ function M.execute(buffer, config, selection, context)
 	-- this statement looks mutating. vim.fn.confirm shows a native "modal"
 	-- prompt with the given buttons; choice 1 is "&Execute", anything else
 	-- (including cancelling with <Esc>, which returns 0) aborts the run.
-	if config.confirm_mutations and profile.options.confirm_mutations ~= false and requires_confirmation(statement) then
+	local confirm = connector.requires_confirmation or requires_confirmation
+	if config.confirm_mutations and profile.options.confirm_mutations ~= false and confirm(statement) then
 		local choice = vim.fn.confirm("Execute mutating statement?", "&Execute\n&Cancel", 2)
 		if choice ~= 1 then
 			return
@@ -380,11 +383,12 @@ function M.execute(buffer, config, selection, context)
 	vim.cmd.redrawstatus()
 	-- Kick off the actual query asynchronously. runner.run is expected to talk
 	-- to the database connector for this profile (postgres/sqlite/trino) and
-	-- eventually invoke the callback below with either (rows, nil) on success
-	-- or (nil, error_message) on failure. `state.process` stores whatever
+	-- eventually invoke the callback below with (rows, nil, metadata) on
+	-- success or (nil, error_message) on failure. Metadata is optional, so
+	-- existing Connectors retain their two-value behavior. `state.process` stores whatever
 	-- handle runner.run returns so M.cancel can later ask the runner to abort
 	-- it.
-	state.process = runner.run(profile, statement, function(rows, run_err)
+	state.process = runner.run(profile, statement, function(rows, run_err, metadata)
 		-- A previous completion must not clear or render over a newer run in this buffer.
 		if running[buffer] ~= state then
 			return
@@ -426,6 +430,8 @@ function M.execute(buffer, config, selection, context)
 			-- 1_000_000_000 of them per second.
 			elapsed = math.floor((vim.uv.hrtime() - state.started_at) / 1000000000),
 		}
+		metadata = metadata or {}
+		result_options.columns = metadata.columns
 		-- vim.b[buffer].orbit_table is set elsewhere (e.g. by the workspace's
 		-- "browse table" flow) when this buffer's statement was generated to
 		-- browse a specific table/view rather than typed freely by the user.
@@ -482,7 +488,7 @@ function M.execute(buffer, config, selection, context)
 					if result_generation[buffer] ~= state.result_generation then
 						return
 					end
-					if columns then
+					if columns and not result_options.columns then
 						result_options.columns = vim.tbl_map(function(column)
 							return column.name
 						end, columns)
@@ -497,11 +503,7 @@ function M.execute(buffer, config, selection, context)
 			end)
 			feedback.finish(
 				state.notice,
-				string.format(
-					"Query finished: %d rows in %ds",
-					#rows,
-					math.floor((vim.uv.hrtime() - state.started_at) / 1000000000)
-				)
+				string.format("Query finished: %d rows in %ds", #rows, math.floor((vim.uv.hrtime() - state.started_at) / 1000000000))
 			)
 			return
 		end
@@ -514,11 +516,7 @@ function M.execute(buffer, config, selection, context)
 		end
 		feedback.finish(
 			state.notice,
-			string.format(
-				"Query finished: %d rows in %ds",
-				#rows,
-				math.floor((vim.uv.hrtime() - state.started_at) / 1000000000)
-			)
+			string.format("Query finished: %d rows in %ds", #rows, math.floor((vim.uv.hrtime() - state.started_at) / 1000000000))
 		)
 	end)
 end

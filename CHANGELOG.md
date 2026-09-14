@@ -6,6 +6,8 @@ All notable changes to Orbit.nvim are documented in this file.
 
 ### Added
 
+- Added an MSSQL Connector backed by user-installed Microsoft Go `sqlcmd`, with SQL authentication through a sanitized `SQLCMDPASSWORD` environment, mandatory encryption, an explicit unsafe certificate-trust bypass, a retained interactive session, schema browsing, object actions, bracket-qualified completion, and read-only Result grids.
+- Added local Connector diagnostics through `:OrbitDoctor [kind]`; `:OrbitDoctor mssql` checks the configured user-installed executable, its version output, profile validation, and `password_env` presence without connecting.
 - Added a Trino `output_format` profile option with `CSV_HEADER` and `JSON` choices.
 - Added `:OrbitSave` to save Workspace query buffers into configured saved-query locations or existing subdirectories, then reveal the saved file in the Workspace tree.
 - Added saved-query actions for opening, previewing, renaming, moving among existing directories in configured locations, and confirmed deletion while preserving loaded buffer contents and unsaved edits.
@@ -15,6 +17,8 @@ All notable changes to Orbit.nvim are documented in this file.
 
 ### Changed
 
+- Connector execution now carries ordered result metadata from retained and one-shot database CLI sessions.
+- MSSQL parsing now accepts at most one separator-delimited result, trims cell edges, represents every accepted cell as text, and rejects detectable malformed widths, headings, informational output, and additional result sets. The CLI format remains best-effort and can lose or ambiguously represent separators, newlines, blank one-column rows, whitespace, literal `NULL`, wrapped values, and truncated values.
 - Trino profiles now default to `CSV_HEADER` output so maps, arrays, rows, and binary values can be displayed through the stock CLI. `JSON` remains available for scalar result fidelity.
 - Schema browser labels now quote identifier segments when distinct catalog/schema combinations would otherwise look identical. Ordinary labels remain unchanged, and disambiguated labels stay stable while filtering.
 - CLI result decoding now fails atomically on malformed or lossy CSV, JSON, XML, and HTML instead of returning partial rows or silently overwriting duplicate headings.
@@ -37,6 +41,7 @@ All notable changes to Orbit.nvim are documented in this file.
 - Added MySQL coverage for profile and TLS validation, client command construction, XML framing and parsing, schema capabilities, mutations, qualified completion, and dialect tokenization.
 - Added every-byte retained-frame coverage for SQLite, PostgreSQL, MySQL, and Vertica, including residual stream preservation between queued statements.
 - Added focused coverage for Saved query filesystem transactions, strict output normalization, arbitrary Connector metadata categories, and query-block-local Completion.
+- Added deterministic MSSQL coverage for profile validation, Go `sqlcmd` argv and environment construction, retained framing, output rejection, schema/actions, completion, and mutation classification. No live `sqlcmd` or SQL Server verification was performed.
 
 ## 0.2.5 - 2026-09-07
 

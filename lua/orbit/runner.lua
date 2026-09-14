@@ -30,19 +30,21 @@ local M = {}
 -- Turn raw CLI output text into a list of row tables.
 -- `connector` may define its own `parse` (some CLIs need bespoke parsing);
 -- otherwise we fall back to the generic parser in `orbit.adapters`.
--- Returns: rows (table) and/or an error string, same contract as
--- connector.parse/adapters.parse.
+-- Returns normalized rows, an error string, and optional execution metadata.
+-- The third value extends the Connector contract without changing existing
+-- two-value row/error parsers.
 local function parse(connector, output)
-	local rows, err
+	local rows, err, metadata
 	if connector.parse then
-		rows, err = connector.parse(output)
+		rows, err, metadata = connector.parse(output)
 	else
-		rows, err = adapters.parse(output)
+		rows, err, metadata = adapters.parse(output)
 	end
 	if not rows then
-		return nil, err
+		return nil, err, metadata
 	end
-	return adapters.normalize(rows)
+	local normalized, normalize_err = adapters.normalize(rows)
+	return normalized, normalize_err, metadata
 end
 
 -- Run a single statement by spawning a brand-new CLI process for it
@@ -54,8 +56,8 @@ end
 --               `connector.prepare(options, statement)` to build a shell
 --               command.
 --   statement - the SQL text to run (must be a non-empty string).
---   callback  - function(rows, err) called exactly once with either the
---               parsed rows or an error message.
+--   callback  - function(rows, err, metadata) called exactly once with either
+--               parsed rows and optional execution metadata, or an error.
 -- Returns: the process handle from vim.system (so the caller can cancel it),
 --          or nil if the run could not even be started (bad input, no
 --          command, or spawn failure) -- in all of those "nil" cases the
@@ -105,12 +107,12 @@ local function run_once(profile, connector, statement, callback)
         return
       end
 
-			local rows, parse_err = parse(connector, result.stdout)
+			local rows, parse_err, metadata = parse(connector, result.stdout)
       if not rows then
-        callback(nil, parse_err)
+        callback(nil, parse_err, metadata)
         return
       end
-      callback(rows)
+			callback(rows, nil, metadata)
     end)
   end)
   if not ok then
@@ -129,7 +131,8 @@ end
 -- Parameters:
 --   profile   - connection profile table (name, kind, options, ...).
 --   statement - SQL text to execute.
---   callback  - function(rows, err) invoked once with results or an error.
+--   callback  - function(rows, err, metadata) invoked once with results,
+--               optional execution metadata, or an error.
 --   connector - optional pre-resolved adapter; if omitted, it is looked up
 --               from `profile` via `adapters.connector`. Callers that already
 --               have the connector (e.g. because they inspected it) can pass
@@ -159,8 +162,8 @@ function M.run(profile, statement, callback, connector)
       callback(nil, run_err)
       return
     end
-		local rows, parse_err = parse(connector, output)
-    callback(rows, parse_err)
+		local rows, parse_err, metadata = parse(connector, output)
+		callback(rows, parse_err, metadata)
   end)
 end
 

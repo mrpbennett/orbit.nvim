@@ -4,7 +4,7 @@
 
 Your database revolves around your editor, not the other way around.
 
-Orbit runs statements through your existing database CLI, retains one connection per profile where the CLI supports it, keeps profiles per query buffer, browses schemas, completes cached objects, and renders normalized results in a navigable grid.
+Orbit runs statements through backend-specific Connectors using user-installed database CLIs. It retains one connection per profile where the CLI supports it, keeps profiles per query buffer, browses schemas, completes cached objects, and renders normalized results in a navigable grid.
 
 ![preview](./assets/preview.png)
 
@@ -38,15 +38,18 @@ Orbit runs statements through your existing database CLI, retains one connection
 
 - Neovim 0.10 or later.
 - No required third-party Neovim plugins.
-- The CLI required by each connection profile:
+- The executable required by each connection profile:
 
-| Profile kind | CLI                                                                                                                                                                                               | Notes                                     |
-| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
-| `trino`      | [`trino`](https://trino.io/docs/current/client/cli.html)                                                                                                                                          | Defaults to CSV with headers; JSON is optional. |
-| `sqlite`     | `sqlite3`                                                                                                                                                                                         | Requires a build that supports `-json`.   |
-| `postgres`   | [`psql`](https://www.postgresql.org/docs/current/app-psql.html)                                                                                                                                   | Requires a version that supports `--csv`. |
-| `mysql`      | Oracle [`mysql`](https://dev.mysql.com/doc/refman/8.4/en/mysql.html) 8.x or MariaDB [`mariadb`](https://mariadb.com/docs/server/clients-and-utilities/mariadb-client/mariadb-command-line-client) | Connects to MySQL 8.x servers using XML.  |
-| `vertica`    | [`vsql`](https://docs.vertica.com/24.3.x/en/connecting-to/using-vsql/)                                                                                                                            | Uses HTML table output.                   |
+| Profile kind | Executable                                                                                                                                                                                        | Notes                                                |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| `mssql`      | Microsoft [Go `sqlcmd`](https://learn.microsoft.com/en-us/sql/tools/sqlcmd/sqlcmd-download-install?view=sql-server-ver17)                                                                          | User-installed; other `sqlcmd` variants are not targeted. |
+| `trino`      | [`trino`](https://trino.io/docs/current/client/cli.html)                                                                                                                                          | Defaults to CSV with headers; JSON is optional.      |
+| `sqlite`     | `sqlite3`                                                                                                                                                                                         | Requires a build that supports `-json`.              |
+| `postgres`   | [`psql`](https://www.postgresql.org/docs/current/app-psql.html)                                                                                                                                   | Requires a version that supports `--csv`.            |
+| `mysql`      | Oracle [`mysql`](https://dev.mysql.com/doc/refman/8.4/en/mysql.html) 8.x or MariaDB [`mariadb`](https://mariadb.com/docs/server/clients-and-utilities/mariadb-client/mariadb-command-line-client) | Connects to MySQL 8.x servers using XML.             |
+| `vertica`    | [`vsql`](https://docs.vertica.com/24.3.x/en/connecting-to/using-vsql/)                                                                                                                            | Uses HTML table output.                              |
+
+The MSSQL Connector targets only Microsoft's Go implementation of `sqlcmd`. Install it using Microsoft's [Download and install the sqlcmd utility](https://learn.microsoft.com/en-us/sql/tools/sqlcmd/sqlcmd-download-install?view=sql-server-ver17) instructions and keep it updated yourself. Orbit does not install or update it. A trusted system CA store is required unless the profile explicitly enables the unsafe certificate-trust bypass.
 
 ## Installation
 
@@ -65,13 +68,20 @@ Or call setup from your Neovim configuration:
 require("orbit").setup()
 ```
 
+### Microsoft Go sqlcmd Installation
+
+Install Microsoft Go `sqlcmd` by following Microsoft's [primary installation guide](https://learn.microsoft.com/en-us/sql/tools/sqlcmd/sqlcmd-download-install?view=sql-server-ver17). The default executable name is `sqlcmd`; set the profile's `options.executable` to another path or command name when necessary. Installation and updates remain entirely user-managed.
+
+Run `:OrbitDoctor mssql` after installation. It validates profiles, resolves each MSSQL profile's executable from `options.executable` or `PATH`, runs only `sqlcmd --version`, and checks that a configured `password_env` is populated. It does not execute SQL or connect to SQL Server.
+
 ## Quick Start
 
 1. Run `:OrbitProfiles`. This creates `~/.local/share/orbit.nvim/profiles.json` with owner-only (`0600`) permissions and opens it for editing.
-2. Add a connection profile using the format below.
-3. Open `:OrbitWorkspace` or a SQL buffer.
-4. Bind a profile with `:OrbitProfile`, or press `<CR>` on a profile in the workspace.
-5. Run `:OrbitExecute`, or use `<leader>E` in Normal or Visual mode in a SQL buffer.
+2. For MSSQL, install Microsoft Go `sqlcmd`, then run `:OrbitDoctor mssql`.
+3. Add a connection profile using the format below.
+4. Open `:OrbitWorkspace` or a SQL buffer.
+5. Bind a profile with `:OrbitProfile`, or press `<CR>` on a profile in the workspace.
+6. Run `:OrbitExecute`, or use `<leader>E` in Normal or Visual mode in a SQL buffer.
 
 If a query buffer has no profile, executing it opens profile selection and retries after you choose one.
 
@@ -79,23 +89,100 @@ If a query buffer has no profile, executing it opens profile selection and retri
 
 | Kind       | Required options            | Optional options                                                                                                                | Schema support                                                                                                           |
 | ---------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `mssql`    | `host`, `database`, `user`  | `port`, `password`, `password_env`, `trust_server_certificate`, `schema_patterns`, `executable`, `confirm_mutations`                                      | User tables and views in the profile database, plus columns.                                                            |
 | `trino`    | `server`, `user`, `catalog` | `schema`, `schema_patterns`, `executable`, `arguments`, `confirm_mutations`                                                     | Tables, views, and columns from `information_schema`. Omitting `schema` browses the catalog except `information_schema`. |
 | `sqlite`   | `path`                      | `schema_patterns`, `executable`, `arguments`, `confirm_mutations`                                                               | Tables and views from `sqlite_master`, plus columns from `PRAGMA table_info`, under `main`.                              |
 | `postgres` | `database`                  | `schema_patterns`, `host`, `port`, `user`, `password`, `sslmode`, `executable`, `arguments`, `confirm_mutations`                | Tables and views outside PostgreSQL system schemas, plus columns, primary keys, foreign keys, and indexes.               |
 | `mysql`    | `database`                  | `schema_patterns`, `host`, `port`, `socket`, `user`, `client_family`, `sslmode`, `executable`, `arguments`, `confirm_mutations` | MySQL 8.x tables and views, plus columns, primary keys, foreign keys, indexes, and view definitions.                     |
 | `vertica`  | `host`, `user`, `database`  | `schema_patterns`, `port`, `password`, `sslmode`, `executable`, `arguments`, `confirm_mutations`                                | User tables and views, plus columns, primary keys, foreign keys, projections, and view definitions.                      |
 
-`executable` replaces the CLI binary and `arguments` adds an array of string arguments before Orbit's generated arguments. This is useful for wrappers or CLI-specific authentication flags. For SQLite, PostgreSQL, MySQL, and Vertica, Orbit retains one interactive CLI connection per profile; statements, schema browsing, and completion prewarming share it and are serialized per profile. A changed profile definition, failed CLI, `:OrbitDisconnect`, or Neovim exit closes the connection; the next request reconnects automatically. Trino statements instead run one `trino` CLI invocation per statement, serialized per profile, because the `trino` CLI does not flush its output while held open on a retained connection.
+`executable` replaces the Connector's default executable. `arguments` is supported only by CLI-backed Connectors and adds an array of string arguments before Orbit's generated arguments; MSSQL intentionally does not accept `arguments`. For MSSQL, SQLite, PostgreSQL, MySQL, and Vertica, Orbit retains one CLI process per profile; statements, schema browsing, and completion prewarming share it and are serialized per profile. MSSQL uses that retained interactive Go `sqlcmd` process as one SQL Server session. A changed profile definition, failed executable, `:OrbitDisconnect`, cancellation, or Neovim exit closes the retained process; the next request reconnects automatically. Trino statements instead run one `trino` CLI invocation per statement, serialized per profile, because the `trino` CLI does not flush its output while held open on a retained connection.
 
 Schema browsing and completion cache rows only while the connection profile's kind and options are unchanged. Updating a profile clears its prior schema rows before Orbit acquires replacements. Connector metadata that is unavailable for an object, such as Trino primary keys, is shown as unavailable rather than treated as a statement failure. Explicit Workspace refreshes run after pending acquisitions and coalesce with other refresh requests.
 
-`schema_patterns` restricts the tables and views shown by Orbit's Workspace schema browser, but does not change database permissions or restrict statements you run manually. For Trino, it maps each catalog to an array of schema patterns; use an empty array to include every non-system schema from that catalog. PostgreSQL, MySQL, SQLite, and Vertica use a non-empty array instead. Entries accept `*` and `?` globs. A MySQL profile always includes its required default `database`; its patterns add other databases. SQLite's only available schema is `main`.
+`schema_patterns` restricts the tables and views shown by Orbit's Workspace schema browser, but does not change database permissions or restrict statements you run manually. For Trino, it maps each catalog to an array of schema patterns; use an empty array to include every non-system schema from that catalog. MSSQL, PostgreSQL, MySQL, SQLite, and Vertica use a non-empty array instead. Entries accept `*` and `?` globs. MSSQL patterns select schemas only within the profile's fixed database. A MySQL profile always includes its required default `database`; its patterns add other databases. SQLite's only available schema is `main`.
 
 ## Connection Profiles
 
 The profile file is the source of truth for named connection profiles. Its default location is `~/.local/share/orbit.nvim/profiles.json`; set `profile_path` in `setup()` to use another location. Orbit refuses to load a file that is not mode `0600`.
 
 Profiles are JSON, versioned at `1`, and names must be unique:
+
+<details>
+<summary>Microsoft SQL Server</summary>
+
+### Direct Password
+
+```json
+{
+  "version": 1,
+  "profiles": [
+    {
+      "name": "warehouse-mssql",
+      "kind": "mssql",
+      "options": {
+        "host": "sql.example.com",
+        "port": 1433,
+        "database": "warehouse",
+        "user": "orbit",
+        "password": "replace-me",
+        "trust_server_certificate": false,
+        "schema_patterns": ["dbo", "reporting*"]
+      }
+    }
+  ]
+}
+```
+
+### Password From The Environment
+
+Set the named variable before starting Neovim, then use its name, not `$MSSQL_PASSWORD`, in the connection profile:
+
+```sh
+export MSSQL_PASSWORD='replace-me'
+```
+
+```json
+{
+  "version": 1,
+  "profiles": [
+    {
+      "name": "warehouse-mssql-env",
+      "kind": "mssql",
+      "options": {
+        "host": "sql.example.com",
+        "port": 1433,
+        "database": "warehouse",
+        "user": "orbit",
+        "password_env": "MSSQL_PASSWORD",
+        "trust_server_certificate": false,
+        "schema_patterns": ["dbo", "reporting*"]
+      }
+    }
+  ]
+}
+```
+
+MSSQL accepts exactly these profile fields:
+
+- `host`: required non-empty string.
+- `database`: required non-empty string.
+- `user`: required non-empty SQL login string.
+- `port`: optional integer from `1` through `65535`; defaults to `1433`.
+- `password`: optional non-empty string stored in the owner-only profile file.
+- `password_env`: optional non-empty environment-variable name. It is mutually exclusive with `password`; the named variable must contain a non-empty value before the CLI starts.
+- `trust_server_certificate`: optional boolean; defaults to `false`.
+- `schema_patterns`: optional non-empty array whose entries are non-empty schema globs using `*` and `?`.
+- `executable`: optional non-empty command name or path replacing `sqlcmd`.
+- `confirm_mutations`: optional boolean per-profile mutation-confirmation override.
+
+One of `password` or `password_env` must resolve to a password before Go `sqlcmd` starts. Orbit passes it as `SQLCMDPASSWORD`, never in argv. The child receives a sanitized environment: Orbit removes every inherited variable whose name starts with `SQLCMD` (case-insensitive), removes the source variable named by `password_env`, preserves other inherited variables, and then sets only the resolved `SQLCMDPASSWORD` credential among the SQLCMD variables.
+
+The current argv, in order, is `<executable> -S tcp:<host>,<port> -d <database> -U <user> -N mandatory [-C] -s <ASCII 31> -w 65535 -y 8000 -Y 8000 -x`; the bracketed `-C` is present only when `trust_server_certificate` is `true`. ASCII 31 is the unit-separator field delimiter, `-w` sets width `65535`, `-y` and `-Y` set variable and fixed type limits to `8000`, and `-x` disables variable substitution. Orbit does not use `-r`, so SQL errors stay ordered inside the framed stdout response instead of racing a separate stderr stream.
+
+The address is always one explicit TCP host and port, and schema browsing remains in the profile's fixed database. Named-instance discovery and cross-database schema browsing are unsupported. Encryption is always requested as mandatory with `-N mandatory`; profiles cannot weaken it. `trust_server_certificate = true` adds `-C`, bypassing certificate validation and enabling man-in-the-middle attacks. Treat it only as an unsafe temporary development escape hatch.
+
+</details>
 
 <details>
 <summary>MySQL</summary>
@@ -344,6 +431,8 @@ Run `:OrbitProfiles`, change the value in the profile's existing `options` objec
 
 ### Authentication
 
+MSSQL profiles require SQL authentication through either `options.password` or `options.password_env`. Orbit resolves the password before starting Go `sqlcmd` and passes it only as `SQLCMDPASSWORD` in the sanitized child environment. Windows integrated authentication, Kerberos, and Microsoft Entra authentication are not supported.
+
 PostgreSQL profiles may include `options.password`. Orbit passes it only to `psql` as `PGPASSWORD`, never as a command-line argument. The profile file is owner-protected (`0600`), but a password remains sensitive; use your system's credential management or a `~/.pgpass` file if you prefer not to store it in JSON.
 
 Vertica profiles may include `options.password`. Orbit passes it only to `vsql` as `VSQL_PASSWORD`, never as a command-line argument.
@@ -355,7 +444,7 @@ Configure Trino authentication exactly as you do for the Trino CLI, including it
 Orbit passes profile values to the CLI as literal arguments. It does **not** expand `$VAR` or `${VAR}` inside JSON. Other Trino CLI authentication mechanisms, such as tokens or external credential providers, continue to work through their normal CLI configuration.
 
 > [!NOTE]
-> Connection profiles can contain sensitive settings, including PostgreSQL passwords. Orbit requires the profile file to be mode `0600`; do not copy it into a repository or share it.
+> Connection profiles can contain sensitive settings, including MSSQL, PostgreSQL, and Vertica passwords. Orbit requires the profile file to be mode `0600`; do not copy it into a repository or share it.
 
 ## Workspace Workflow
 
@@ -387,21 +476,24 @@ From a workspace query buffer, `/` focuses the workspace filter. Elsewhere, `/` 
 
 ## Commands
 
-| Command                | Description                                                     |
-| ---------------------- | --------------------------------------------------------------- |
-| `:OrbitProfiles`       | Create, protect, and edit the profile file.                     |
-| `:OrbitProfile`        | Search profiles and bind one to the current query buffer.       |
-| `:OrbitSelectProfile`  | Alias for `:OrbitProfile`.                                      |
-| `:OrbitExecute`        | Execute the single unambiguous statement in the current buffer. |
-| `:'<,'>OrbitExecute`   | Execute the selected line range.                                |
-| `:OrbitCancel`         | Cancel the statement running in the current buffer.             |
-| `:OrbitDisconnect`     | Close the connection for the current buffer's profile.          |
-| `:OrbitStructure`      | Toggle the current query buffer's Structure panel.              |
-| `:OrbitSave`           | Save a Workspace query buffer into a saved query location.      |
-| `:OrbitWorkspace`      | Open the workspace or toggle its profile/schema browser.        |
-| `:OrbitWorkspaceClose` | Close the Orbit workspace tabpage.                              |
+| Command                | Description                                                                  |
+| ---------------------- | ---------------------------------------------------------------------------- |
+| `:OrbitProfiles`       | Create, protect, and edit the profile file.                                  |
+| `:OrbitProfile`        | Search profiles and bind one to the current query buffer.                    |
+| `:OrbitSelectProfile`  | Alias for `:OrbitProfile`.                                                   |
+| `:OrbitExecute`        | Execute the single unambiguous statement in the current buffer.              |
+| `:'<,'>OrbitExecute`   | Execute the selected line range.                                             |
+| `:OrbitCancel`         | Cancel the statement running in the current buffer.                          |
+| `:OrbitDisconnect`     | Close the connection for the current buffer's profile.                       |
+| `:OrbitDoctor [kind]`  | Diagnose profiles, executable selection, and versions without connecting.    |
+| `:OrbitStructure`      | Toggle the current query buffer's Structure panel.                           |
+| `:OrbitSave`           | Save a Workspace query buffer into a saved query location.                   |
+| `:OrbitWorkspace`      | Open the workspace or toggle its profile/schema browser.                     |
+| `:OrbitWorkspaceClose` | Close the Orbit workspace tabpage.                                           |
 
 Whole-buffer execution rejects ambiguous multi-statement content. Select the exact statement in Visual mode, then run `:OrbitExecute` or `<leader>E`.
+
+With no argument, `:OrbitDoctor` diagnoses every Connector. Supply `mssql`, `mysql`, `postgres`, `sqlite`, `trino`, or `vertica` to restrict the report. For MSSQL, `:OrbitDoctor mssql` validates the profile file, reports the user-installed executable selected from an override or `PATH`, invokes only `--version`, and checks `password_env` presence. It does not install anything, execute SQL, or open a database session, and it redacts known profile secrets from version output.
 
 ## Keybindings
 
@@ -454,7 +546,7 @@ require("orbit").setup({
 
 While editing the Workspace filter, press `<Esc>` to finish filtering. In a saved-query preview, `q` or `<Esc>` closes the preview. In Workspace help, `q`, `?`, or `<Esc>` closes the help window.
 
-Expanding a table reveals its available metadata folders. SQLite, PostgreSQL, and MySQL provide columns, primary keys, foreign keys, and indexes; Vertica provides columns, primary keys, foreign keys, and projections. Each folder loads on demand. Views remain under the schema's `views` group and expose their columns.
+Expanding a table reveals its available metadata folders. MSSQL provides columns. SQLite, PostgreSQL, and MySQL provide columns, primary keys, foreign keys, and indexes; Vertica provides columns, primary keys, foreign keys, and projections. Each folder loads on demand. Views remain under the schema's `views` group and expose their columns.
 
 ### Saved Queries
 
@@ -520,7 +612,7 @@ Structure parsing is dependency-free and tolerant of incomplete SQL. It outlines
 | `y`                | Copy the raw selected value.                                             |
 | `q`                | Close the standalone grid, or return to the query editor in a Workspace. |
 
-Workspace sample statements for MySQL, PostgreSQL, and SQLite base tables become editable when Orbit can load a primary key. Ad-hoc statements, views, Trino, Vertica, and tables without a primary key remain read-only.
+Workspace sample statements for MySQL, PostgreSQL, and SQLite base tables become editable when Orbit can load a primary key. MSSQL, ad-hoc statements, views, Trino, Vertica, and tables without a primary key remain read-only.
 
 | Key / command       | Action                                                                     |
 | ------------------- | -------------------------------------------------------------------------- |
@@ -551,6 +643,7 @@ Database and execution errors may open in a diagnostic split. Press `q` there to
 
 Press `a` on a table or view in the Workspace schema browser to select an action supplied by its connection profile kind. Actions that inspect metadata open in the Result grid; sample actions create a bound query buffer instead.
 
+- MSSQL: `SELECT TOP (N)` sample statement and columns.
 - SQLite: sample statement, columns, primary keys, indexes, foreign keys, and object definition.
 - PostgreSQL: sample statement, columns, primary keys, indexes, foreign keys, and view definition.
 - MySQL: sample statement, columns, primary keys, indexes, foreign keys, and view definition.
@@ -579,28 +672,52 @@ Orbit's schema-aware completion (tables, views, columns, table aliases) is provi
 
 Once wired up, suggestions appear automatically as you type, no manual trigger needed. Completion is clause-aware: it parses the statement around your cursor (not just the current line) with a small dependency-free SQL tokenizer, so suggestions depend on where you are:
 
-- Tables and views after any `FROM`-family clause (`FROM`, `JOIN`, `UPDATE`, `INTO`), and after database/schema/catalog qualifiers on connectors that support them (MySQL, PostgreSQL, Trino).
+- Tables and views after any `FROM`-family clause (`FROM`, `JOIN`, `UPDATE`, `INTO`), and after database/schema/catalog qualifiers on Connectors that support them (MSSQL, MySQL, PostgreSQL, Trino).
 - Trino catalogs configured as top-level `schema_patterns` keys are offered alongside direct relation suggestions. Selecting a catalog and schema completes progressively (`catalog.` → `catalog.schema.` → `catalog.schema.table`); without `schema_patterns`, only the profile's default `catalog` is offered.
 - Columns in the `SELECT` list, `WHERE`, `ON`, `GROUP BY`, `ORDER BY`, `INSERT INTO t (...)`, and `UPDATE t SET ...`.
 - Table aliases: `SELECT u.| FROM users u` resolves `u` to `users`'s columns, including old-style comma joins (`FROM a, b`). With more than one table in scope, unqualified columns are offered from every table, each annotated with its source alias.
 - Alias/table scope is limited to the query block and set-operation branch containing the cursor, plus SQL-visible correlated outer blocks. Sibling subqueries and `UNION`/`INTERSECT`/`EXCEPT` branches do not leak aliases; `JOIN ... ON` sees only tables introduced so far; non-`LATERAL` derived tables are isolated, while `LATERAL` derived tables see preceding sources. CTEs and derived tables (`FROM (SELECT ...) sub`) are recognized but do not offer inferred columns.
 - Suggestions are narrowed to whatever you've already typed (case-insensitive prefix match) before being handed to blink.cmp, so its own fuzzy scoring only ever sees genuinely relevant candidates.
 
-Selecting a profile preloads tables and views in the background; expanding it in the Workspace schema browser fills more of the cache. Completion never runs the CLI while you type. SQL keywords and functions, formatting, and highlighting remain the responsibility of your existing SQL tooling.
+MSSQL completion uses bracket-qualified schema and object names such as `[sales].[orders]` and offers schemas as completion namespaces. It uses only objects acquired from the profile's fixed database.
+
+Selecting a profile preloads tables and views in the background; expanding it in the Workspace schema browser fills more of the cache. Completion never runs a Connector executable while you type. SQL keywords and functions, formatting, and highlighting remain the responsibility of your existing SQL tooling.
 
 Set `completion = false` in Orbit's `setup()` to disable the blink source's `enabled()` check.
 
 ## Execution And Results
 
-Orbit runs statements asynchronously through the selected profile's CLI. For SQLite, PostgreSQL, MySQL, and Vertica, schema work and statements share one retained connection and execute one at a time; failures notify you and open a diagnostic window, and the next request starts a new connection. Trino statements each run their own `trino` CLI invocation, still serialized per profile. One running statement is allowed per query buffer; `:OrbitCancel` terminates the current CLI invocation (and, for retained connectors, the connection) and pending work fails rather than running against an uncertain session.
+Orbit runs statements asynchronously through the selected profile's Connector executable. For MSSQL, SQLite, PostgreSQL, MySQL, and Vertica, schema work and statements share one retained process and execute one at a time. MSSQL keeps one interactive Go `sqlcmd` process per connection profile, so transactions, temporary tables, and other session state can persist until disconnect, cancellation, failure, profile change, or exit. Trino statements each run their own `trino` CLI invocation, still serialized per profile.
+
+One running statement is allowed per query buffer. `:OrbitCancel` terminates an active retained process, fails work queued on that process, and starts a fresh session only when the next Statement is requested. Cancelling work that has not started removes only that queued request. Orbit reports cancellation as cancellation rather than opening diagnostics; server-side completion timing is not asserted after the CLI is terminated.
 
 Potentially mutating statements require confirmation by default. A single `SELECT`, `SHOW`, `DESCRIBE`, `EXPLAIN`, `USE`, or `VALUES` statement runs without confirmation; everything else requires it. This is a convenience guardrail, not a security boundary.
+
+The MSSQL Connector uses a stricter T-SQL classifier: only a single `SELECT` without top-level `INTO` runs without confirmation. Data mutations, DDL, `SELECT INTO`, `EXEC`, CTEs whose effective operation mutates, and ambiguous or multiple statements require confirmation; an `OUTPUT` clause does not make a mutation read-only. Standalone `GO` batch separators are rejected rather than split.
 
 Result grids are reused per tabpage. They show up to `result_limit` rows and truncate displayed cell text to `max_cell_width` characters while retaining the raw value for copy and inspection.
 
 MySQL XML results preserve SQL `NULL`, empty strings, tabs, line feeds, and ordinary Unicode text. Statements returning multiple row-producing result sets fail explicitly because the Result grid represents one set. Arbitrary binary/BLOB bytes are not guaranteed to round-trip through the CLI XML format. MariaDB servers are rejected rather than treated as compatible MySQL servers.
 
-Orbit rejects malformed or lossy machine output instead of rendering partial rows. This includes incomplete CSV/XML/HTML records, duplicate or empty column headings, invalid encoded entities, inconsistent tabular row widths, and JSON rows that are not objects.
+MSSQL output handling is strict best-effort, not a lossless transport. Orbit rejects detectable malformed widths, empty or duplicate headings, informational output mixed into results, and multiple tabular result sets. Detection cannot make the format safe: a unit-separator byte or newline inside a value can collide with framing and may be undetectable; a blank one-column row is indistinguishable from result spacing; leading and trailing whitespace in every heading and cell is trimmed; the literal text `NULL` is indistinguishable from SQL `NULL`; and Go `sqlcmd` may truncate or wrap values despite Orbit's large fixed width and type limits. All cell data, including apparent `NULL`, remains text and Orbit performs no typed decoding. Statements capable of reproducing Orbit's internal marker output can break in-band framing, so framing is not a security boundary. Do not rely on an MSSQL Result grid for byte-for-byte export or type preservation.
+
+Orbit rejects other detectable malformed CLI formats rather than rendering partial rows. This includes incomplete CSV/XML/HTML records, duplicate or empty column headings, invalid encoded entities, inconsistent tabular row widths, and JSON rows that are not objects.
+
+### MSSQL Scope And Limits
+
+This table describes implemented behavior, not verified compatibility. Only Microsoft Go `sqlcmd` is targeted. No live `sqlcmd` or SQL Server verification occurred, so server versions, client versions, TLS behavior, authentication behavior, retained server-session behavior, and result fidelity claims are not release-ready.
+
+| Area | Implemented contract | Current limit |
+| ---- | -------------------- | ------------- |
+| CLI | User-installed Microsoft Go `sqlcmd`, selected from `options.executable` or `PATH` | Other implementations sharing the `sqlcmd` name are not targeted. |
+| Authentication | SQL username/password through sanitized `SQLCMDPASSWORD` | Integrated, Kerberos, and Microsoft Entra authentication are unsupported. |
+| Transport | Mandatory encryption; certificate validation by default | `trust_server_certificate = true` adds unsafe `-C` and bypasses validation. |
+| Addressing | One TCP host, fixed port, and fixed database per profile | Named-instance discovery and cross-database schema browsing are unsupported. |
+| Session | One retained interactive CLI process per profile | Cancellation, failure, disconnect, profile changes, and exit discard it. |
+| Schema acquisition | User tables and views excluding Microsoft-shipped objects, columns, and optional schema globs | Primary keys, foreign keys, indexes, and definitions are not exposed. |
+| Object UX | `SELECT TOP (N)` samples, columns action, bracket-qualified names, and bracket-aware completion | Result grids are read-only. |
+| Results | Zero or one separator-delimited tabular result parsed into text cells | Output is best-effort and lossy; multiple sets and informational output are rejected. |
+| T-SQL input | One Statement with conservative mutation confirmation | Active `GO` lines and sqlcmd control commands (`:...`, `!!`, `ED`, `RESET`, `ON ERROR`, `EXIT`, and `QUIT`) are rejected. |
 
 ## Configuration
 

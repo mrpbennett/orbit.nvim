@@ -30,6 +30,21 @@ local function with_acquisition(profile, rows, acquire, callback)
 end
 
 return {
+	["MSSQL completion recognizes bracket-qualified schemas"] = function()
+		local profile = { name = "mssql-completion", kind = "mssql", options = { host = "sql.example", database = "warehouse", user = "orbit" } }
+		local rows = {
+			{ schema = "Sales]West", name = "Order.Items", type = "table" },
+			{ schema = "dbo", name = "users", type = "view" },
+		}
+		with_acquisition(profile, rows, function(done)
+			cache.load_tables(profile, {}, done)
+		end, function()
+			local line = "SELECT * FROM [Sales]]West]."
+			assert(vim.deep_equal(words(completion.items(profile, { line }, 1, #line)), { "[Sales]]West].[Order.Items]" }))
+			local all = words(completion.items(profile, { "SELECT * FROM " }, 1, #"SELECT * FROM "))
+			assert(vim.deep_equal(all, { "[Sales]]West].", "[Sales]]West].[Order.Items]", "[dbo].", "[dbo].[users]" }))
+		end)
+	end,
 	["MySQL completion recognizes backtick-qualified namespaces"] = function()
 		local profile = { name = "mysql-completion", kind = "mysql", options = { database = "orbit_dev" } }
 		local rows = { { schema = "orbit_dev", name = "users", type = "table" } }

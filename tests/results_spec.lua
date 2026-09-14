@@ -29,6 +29,15 @@ return {
     assert(grid.rows[1][1] == '{"source":"trino"}')
   end,
 
+	["results.render retains explicit headings for empty rowsets"] = function()
+		local rendered = results.render({}, { columns = { "second", "first" } })
+
+		assert_equal(rendered.columns, { "second", "first" })
+		assert_equal(rendered.rows, {})
+		local lines = grid.layout(rendered, "empty")
+		assert(lines[3] == "| second | first |")
+	end,
+
   ["result grid geometry maps and moves logical cells"] = function()
     local model = grid.render({ { id = 1, name = "Orbit" }, { id = 22, name = "Q" } })
     local lines, widths = grid.layout(model, "local")

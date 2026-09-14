@@ -1,5 +1,40 @@
 # Orbit.nvim v0.1 Plan
 
+## Microsoft SQL Server Design
+
+- [x] Validate the MSSQL research against the current connector, Session, Result grid, profile, SQL-analysis, and release seams.
+- [x] Reject the Orbit-owned Go helper after confirming its ongoing binary maintenance burden was unacceptable.
+- [x] Select Microsoft's user-installed `sqlcmd` and explicitly accept its documented result-fidelity limits.
+- [x] Remove the Go helper, managed installer, initialized protocol, and binary-release documentation.
+- [x] Implement retained `sqlcmd` framing, strict best-effort result parsing, credentials, TLS flags, schema support, and T-SQL behavior.
+- [x] Keep local Connector diagnostics and update user/domain documentation with exact limitations.
+- [x] Run deterministic verification and independent standards/specification review.
+
+### Settled Design
+
+- Orbit does not own or distribute MSSQL binaries. Users install Microsoft's `sqlcmd` and manage its updates.
+- Results retain row maps and ordered columns, but `sqlcmd` output is explicitly best-effort rather than lossless. Detectable malformed widths, duplicate/empty headings, and multiple tabular results are errors.
+- MVP connection profiles use a host and fixed TCP port, target one database, and expose tables, views, and columns.
+- Standalone `GO` client separators are rejected rather than partially split.
+- TLS requests encryption and certificate validation through `sqlcmd`; `trust_server_certificate` is the only unsafe bypass.
+- MVP authentication is SQL username/password only. Profiles accept mutually exclusive `password` and `password_env`, passed through `SQLCMDPASSWORD` rather than argv.
+- `:OrbitDoctor [kind]` diagnoses user-installed Connector executables without connecting. `:OrbitInstall` is removed.
+- MSSQL profiles require `host`, `database`, and `user`; optional MVP settings are `port`, `password` or `password_env`, `trust_server_certificate`, `schema_patterns`, `executable`, and `confirm_mutations`.
+- T-SQL mutation confirmation covers data mutations, DDL, `SELECT INTO`, and `EXEC`, follows CTEs to their effective operation, and is not bypassed by `OUTPUT`.
+- Schema acquisition includes all user schemas by default, excludes only Microsoft-shipped objects, and applies optional glob-style `schema_patterns`.
+- No server version, client platform/version, TLS, authentication, or fidelity claim is release-ready until verified live through the supported `sqlcmd` variant.
+
+### Review
+
+- Replaced the Orbit-owned Go helper with Microsoft Go `sqlcmd` as a user-installed, user-maintained CLI; `:OrbitInstall` and every binary release artifact, checksum, signing, and updater path were removed.
+- MSSQL retains one interactive `sqlcmd` process per connection profile, sends SQL credentials only through a sanitized `SQLCMDPASSWORD` environment, requests mandatory encryption, and exposes an explicit unsafe certificate-trust bypass.
+- Strict best-effort parsing preserves ordered headings and rejects detectable malformed widths, messages, duplicate/empty headings, and multiple tabular results. Documentation explicitly covers undetectable separator/newline/framing collisions, blank one-column rows, whitespace loss, `NULL` ambiguity, truncation, wrapping, and all-text cells.
+- Schema acquisition, bracket-qualified completion, `TOP` samples, conservative T-SQL mutation confirmation, active `GO` rejection, and sqlcmd control-command rejection are covered deterministically.
+- `:OrbitDoctor [kind]` checks user-installed Connector executables without connecting and identifies Go `sqlcmd` through its `--version` output while labeling compatibility unverified.
+- Verification: `nvim --headless -u NONE -l tests/run.lua` and `git diff --check` pass. Final independent Standards and Spec reviews are clean.
+- Live verification remains unavailable because `sqlcmd` is not installed; SQL Server connectivity, TLS, authentication, retained server state, cancellation, and real output formatting remain explicitly unverified.
+- No commit, tag, push, release, or other GitHub write was made.
+
 ## Architecture Review 2026-09-11
 
 - [x] Scan recent connector, Workspace/Schema browser, and SQL-analysis hot spots using the domain model and deletion test.
@@ -58,9 +93,9 @@
 
 ### Review
 
-- Recommended an Orbit-owned retained helper built with Microsoft's pure-Go `go-mssqldb` driver. This avoids making unsupported Arch ODBC packages or platform-specific native libraries runtime dependencies.
-- Rejected `sqlcmd` as the primary machine transport because its documented tabular output can wrap, truncate, pad, and cannot losslessly delimit arbitrary cell content; its JSON mode does not convert arbitrary result sets to JSON.
-- Scoped the MVP to SQL authentication and Windows integrated authentication over TCP, secure TLS defaults, read-only Result grids, basic schema acquisition and object actions, and explicit rejection of multiple row-producing result sets and duplicate column names.
+- **Superseded:** Recommended an Orbit-owned retained helper built with Microsoft's pure-Go `go-mssqldb` driver. The maintainer later rejected the ongoing binary build, publication, signing, and maintenance burden.
+- **Superseded as a transport decision, retained as a limitation:** Rejected `sqlcmd` as the primary machine transport because its documented tabular output can wrap, truncate, pad, and cannot losslessly delimit arbitrary cell content. The accepted redesign deliberately uses user-installed Go `sqlcmd` with these limitations documented.
+- **Superseded:** Scoped the helper MVP to SQL authentication and Windows integrated authentication. The accepted Go `sqlcmd` redesign supports SQL authentication only.
 - Identified Windows profile-file permission handling as a release blocker independent of SQL Server support because Orbit currently requires exact POSIX mode `0600`.
 - Verification: primary-source links and repository references were checked; `git diff --check` passes. No implementation or live SQL Server test was performed.
 

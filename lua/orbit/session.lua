@@ -52,6 +52,12 @@ local M = {}
 --                        prefixes while preserving bytes for the next request.
 local sessions = {}
 
+-- Framing methods must consume one complete prefix and leave any following
+-- bytes untouched, even when libuv combines or splits stdout unpredictably.
+local function valid_consumed(consumed, output)
+	return type(consumed) == "number" and consumed % 1 == 0 and consumed >= 1 and consumed <= #output
+end
+
 -- Complete a request's callback exactly once, no matter how it finishes.
 -- Parameters: request - a request table (see M.run); output - the result
 -- string to pass on success; err - an error message (or nil on success).
@@ -85,6 +91,9 @@ local function fail(session, err)
 	session.active = nil
 	session.process = nil
 	session.stdout = ""
+	-- Every callback from the failed process becomes stale immediately, even if
+	-- libuv delivers buffered stdout or stderr before its final exit callback.
+	session.process_generation = (session.process_generation or 0) + 1
 	if active then
 		finish(active, nil, err)
 	end
@@ -119,8 +128,17 @@ local function start_next(session)
 			fail(session, command_err)
 			return
 		end
-		local environment = session.connector.environment and session.connector.environment(session.profile.options)
-			or {}
+		local inherited = vim.fn.environ()
+		local environment, environment_err = {}, nil
+		if session.connector.environment then
+			environment, environment_err = session.connector.environment(session.profile.options, inherited)
+		end
+		if not environment then
+			fail(session, environment_err or "connector returned an invalid environment")
+			return
+		end
+		session.process_generation = (session.process_generation or 0) + 1
+		local process_generation = session.process_generation
 		local options = {
 			-- stdin = true tells vim.system to open a pipe we can write() to
 			-- later, since we need to send each statement interactively rather
@@ -132,6 +150,9 @@ local function start_next(session)
 			-- The Connector returns only after the complete marker record arrives,
 			-- along with the byte count Session can remove before advancing.
 			stdout = function(err, data)
+				if session.process_generation ~= process_generation then
+					return
+				end
 				if err or not data then
 					return
 				end
@@ -141,7 +162,7 @@ local function start_next(session)
 				end
 				local output, consumed = session.connector.session_output(session.stdout, session.active.marker)
 				if output then
-					if type(consumed) ~= "number" or consumed % 1 ~= 0 or consumed < 1 or consumed > #session.stdout then
+					if not valid_consumed(consumed, session.stdout) then
 						local process = session.process
 						fail(session, "connector returned invalid session framing")
 						if process then
@@ -166,14 +187,19 @@ local function start_next(session)
 			-- alongside successful output (e.g. NOTICE/WARNING messages some
 			-- CLIs print outside of stdout).
 			stderr = function(_, data)
+				if session.process_generation ~= process_generation then
+					return
+				end
 				if data and session.active then
 					session.active.stderr = session.active.stderr .. data
 				end
 			end,
 			text = true,
 		}
-		if next(environment) then
-			options.env = vim.tbl_extend("force", vim.fn.environ(), environment)
+		if session.connector.inherit_environment == false then
+			options.env = environment
+		elseif next(environment) then
+			options.env = vim.tbl_extend("force", inherited, environment)
 		end
 		-- The final callback here fires when the CLI process exits entirely
 		-- (not per-statement) -- i.e. the session ended, whether cleanly or
@@ -184,12 +210,15 @@ local function start_next(session)
 			-- `session_for` already swapped in a different session object under
 			-- this profile name, this exit callback belongs to an old process
 			-- and must not fail the new session.
-			if sessions[session.profile.name] == session then
+			if sessions[session.profile.name] == session and session.process_generation == process_generation then
 				local stderr = result.stderr or ""
 				-- Streaming stderr callbacks may consume text before vim.system's
 				-- final result is assembled; preserve the active request's copy.
 				if stderr == "" and session.active then
 					stderr = session.active.stderr
+				end
+				if session.connector.session_exit_error then
+					stderr = session.connector.session_exit_error(session.stdout, stderr) or stderr
 				end
 				fail(
 					session,
@@ -243,6 +272,7 @@ local function session_for(profile, connector)
 			queue = {},
 			signature = signature,
 			sequence = 0,
+			process_generation = 0,
 			stdout = "",
 		}
 		sessions[profile.name] = session
@@ -334,9 +364,8 @@ function M.close(profile_name)
 	end
 end
 
--- Check whether the profile currently has a live CLI process running.
--- Returns: boolean (false if there's no session at all, or the session
--- exists but hasn't started/has lost its process).
+-- Check whether the profile currently has a live CLI process.
+-- Returns: boolean (false if the process is absent).
 function M.connected(profile_name)
 	return sessions[profile_name] and sessions[profile_name].process ~= nil
 end
