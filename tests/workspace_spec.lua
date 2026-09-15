@@ -47,20 +47,31 @@ return {
     vim.api.nvim_set_current_tabpage(original)
   end,
 
-  ["workspace.open toggles the profile and schema browser"] = function()
+  ["workspace.open toggles the Workspace tabpage"] = function()
     local original = vim.api.nvim_get_current_tabpage()
     local state = workspace.open({ profile_path = vim.fn.tempname() })
 
     workspace.open({ profile_path = vim.fn.tempname() })
-    assert(not vim.api.nvim_win_is_valid(state.sidebar_window))
-    assert(vim.api.nvim_win_is_valid(state.query_window))
+    assert(not vim.api.nvim_tabpage_is_valid(state.tabpage))
+    assert(vim.api.nvim_get_current_tabpage() == original)
 
-    workspace.open({ profile_path = vim.fn.tempname() })
-    assert(vim.api.nvim_win_is_valid(state.sidebar_window))
-    assert(vim.api.nvim_win_get_buf(state.sidebar_window) == state.sidebar)
+    local reopened = workspace.open({ profile_path = vim.fn.tempname() })
+    assert(vim.api.nvim_tabpage_is_valid(reopened.tabpage))
+    assert(reopened.tabpage ~= state.tabpage)
 
     workspace.close()
     vim.api.nvim_set_current_tabpage(original)
+  end,
+
+  ["workspace sidebar q closes the Workspace tabpage"] = function()
+    local original = vim.api.nvim_get_current_tabpage()
+    local state = workspace.open({ profile_path = vim.fn.tempname() })
+    vim.api.nvim_set_current_win(state.sidebar_window)
+
+    vim.api.nvim_feedkeys("q", "mx", false)
+
+    assert(not vim.api.nvim_tabpage_is_valid(state.tabpage))
+    assert(vim.api.nvim_get_current_tabpage() == original)
   end,
 
   ["workspace expands the profile displayed under the cursor"] = function()

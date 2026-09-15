@@ -1342,3 +1342,26 @@ Plan: `~/.claude/plans/sprightly-seeking-blanket.md`. Replaces the two single-li
 - Trino profiles now use the CLI's complex-type-safe `CSV_HEADER` printer by default and can opt back into `JSON`; the connector detects and parses either result without shared mutable state.
 - PostgreSQL and Trino share one strict CSV parser. PostgreSQL retains its quoted-empty versus unquoted-NULL behavior, while Trino preserves the CLI's unavoidable empty-cell ambiguity.
 - Verification: `nvim --headless -u NONE -l tests/run.lua` and `git diff --check` passed. Trino CLI 483 confirms `CSV_HEADER` and `JSON` are supported and that batch mode defaults to CSV. Independent review found no remaining functional blockers after its low-severity parser and coverage findings were addressed. `stylua` is not installed.
+
+## Workspace Command Toggle
+
+- [x] Add regression coverage proving `:OrbitWorkspace` opens and closes the dedicated Workspace tabpage.
+- [x] Make `workspace.open` close an existing Workspace instead of toggling only its schema browser.
+- [x] Remove `:OrbitWorkspaceClose` and update user-facing command documentation.
+- [x] Run focused and complete verification, inspect the diff, and record the results.
+
+### Scope
+
+- `:OrbitWorkspace` is the single Workspace lifecycle command: it opens the Workspace when absent and closes it when present.
+- Invoking the command from any tab closes the one tracked Workspace tabpage and leaves the user on a normal tabpage.
+- If the Workspace is Neovim's last tabpage, toggling it off creates one ordinary replacement tab because Neovim cannot close its final tabpage.
+- The Workspace sidebar `q` mapping continues to close the Workspace directly.
+- Profile selection continues to reveal and reuse an existing Workspace without toggling it closed.
+- This decision supersedes the earlier architecture note that assigned sidebar toggling to `:OrbitWorkspace` and tab closing to `:OrbitWorkspaceClose`.
+
+### Review
+
+- `:OrbitWorkspace` is now the sole Workspace lifecycle command: it opens the dedicated tabpage when absent and closes it when present. `:OrbitWorkspaceClose` has been removed.
+- Toggling works from inside or outside the Workspace. If it is Neovim's final tabpage, Orbit creates one ordinary replacement tab before closing it.
+- Profile selection still reuses an existing Workspace without closing it, and the sidebar `q` mapping retains direct close behavior.
+- Verification: `nvim --headless -u NONE -l tests/run.lua` and `git diff --check` pass. Independent Standards and Spec reviews are clean. `stylua` is not installed in this environment.

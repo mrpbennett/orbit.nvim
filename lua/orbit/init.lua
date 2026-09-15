@@ -266,7 +266,7 @@ end
 -- Returns: nothing.
 -- Side effects: creates the `OrbitExecute`, `OrbitCancel`, `OrbitDisconnect`,
 -- `OrbitSelectProfile`, `OrbitProfile`, `OrbitProfiles`, `OrbitSave`,
--- `OrbitWorkspace`, and `OrbitWorkspaceClose` user commands. Called once from `M.setup` (via
+-- and `OrbitWorkspace` user commands. Called once from `M.setup` (via
 -- `configure_ux`), guarded by the `configured` flag, so calling `setup()`
 -- again does not try to redefine these commands.
 local function create_commands()
@@ -317,10 +317,7 @@ local function create_commands()
 	end, { desc = "Save the current query to an Orbit saved query location" })
 	vim.api.nvim_create_user_command("OrbitWorkspace", function()
 		workspace.open(M.config)
-	end, { desc = "Open Orbit workspace" })
-	vim.api.nvim_create_user_command("OrbitWorkspaceClose", function()
-		workspace.close()
-	end, { desc = "Close Orbit workspace" })
+	end, { desc = "Toggle the Orbit workspace" })
 end
 
 -- Defines (or re-defines) orbit's highlight groups by linking each one to a

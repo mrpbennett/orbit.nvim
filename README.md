@@ -448,7 +448,7 @@ Orbit passes profile values to the CLI as literal arguments. It does **not** exp
 
 ## Workspace Workflow
 
-`:OrbitWorkspace` opens a dedicated Orbit tabpage with a profile/schema browser and a normal SQL editing window. Run it again to toggle that browser. `:OrbitWorkspaceClose` closes only that tabpage.
+`:OrbitWorkspace` toggles a dedicated Orbit tabpage with a profile/schema browser and a normal SQL editing window. Run it once to open the Workspace and again to close it.
 
 1. Press `<CR>` on a profile to select it and bind it to the active query buffer.
 2. Optionally press `l` to load its schema for browsing and completion.
@@ -488,8 +488,7 @@ From a workspace query buffer, `/` focuses the workspace filter. Elsewhere, `/` 
 | `:OrbitDoctor [kind]`  | Diagnose profiles, executable selection, and versions without connecting.    |
 | `:OrbitStructure`      | Toggle the current query buffer's Structure panel.                           |
 | `:OrbitSave`           | Save a Workspace query buffer into a saved query location.                   |
-| `:OrbitWorkspace`      | Open the workspace or toggle its profile/schema browser.                     |
-| `:OrbitWorkspaceClose` | Close the Orbit workspace tabpage.                                           |
+| `:OrbitWorkspace`      | Toggle the Orbit workspace tabpage.                                          |
 
 Whole-buffer execution rejects ambiguous multi-statement content. Select the exact statement in Visual mode, then run `:OrbitExecute` or `<leader>E`.
 
@@ -503,7 +502,7 @@ Orbit installs the following defaults:
 
 | Mode and scope          | Default     | Action                                                   |
 | ----------------------- | ----------- | -------------------------------------------------------- |
-| Normal, global          | `<leader>D` | Open the workspace or toggle its profile/schema browser. |
+| Normal, global          | `<leader>D` | Toggle the Workspace tabpage.                            |
 | Normal, SQL buffer      | `<leader>E` | Execute the buffer statement.                            |
 | Visual, SQL buffer      | `<leader>E` | Execute the visual selection.                            |
 | Normal, Structure panel | `<leader>E` | Execute the highlighted Structure element.               |

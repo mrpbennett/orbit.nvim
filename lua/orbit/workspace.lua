@@ -18,9 +18,8 @@
     * orbit.feedback      -- shows "loading..."/"done" style status messages
 
   Responsibilities of THIS file specifically:
-    1. Window/buffer management: creating the workspace tabpage, the
-      sidebar buffer/window, and the query buffer/window; reopening an
-      existing workspace instead of creating duplicates.
+    1. Window/buffer management: creating and closing the workspace tabpage,
+      sidebar buffer/window, and query buffer/window.
     2. Tree rendering: turning plugin state (which profiles exist, which
       profile's schema is expanded, which saved-query directories are
       expanded, the current filter text, etc.) into plain text lines
@@ -46,7 +45,7 @@
   there is no other persistence layer.
 
   What this module exports (see the `M.*` functions near the bottom):
-    M.open(config)                        -- open/reveal the workspace tab
+    M.open(config)                        -- toggle the workspace tab
     M.open_results(rows, options)         -- open a results split for the
                                               workspace's query window
     M.close(tabpage)                      -- close a workspace tab
@@ -1424,35 +1423,8 @@ local function configure_sidebar(state)
 	end, { buffer = state.sidebar, silent = true, nowait = true, desc = "Close Orbit workspace" })
 end
 
--- Show or hide the sidebar window for a workspace whose tabpage is
--- already open, without touching the query window's contents. Used when
--- M.open() is called again while a workspace tab already exists.
---   state: workspace state table.
--- Returns: nothing.
--- Side effects: if the sidebar window is currently open/valid, closes it
--- (nvim_win_close with the second argument `false` meaning "don't force
--- -- refuse if it has unsaved changes", which is moot here since it's a
--- scratch buffer). Otherwise recreates the sidebar split: focuses the
--- query window, opens a new vertical split pinned to the far left
--- ("topleft vsplit"), points that window at the existing sidebar buffer,
--- and resizes it to the configured width.
-local function toggle_sidebar(state)
-	if vim.api.nvim_win_is_valid(state.sidebar_window) then
-		vim.api.nvim_win_close(state.sidebar_window, false)
-		return
-	end
-
-	vim.api.nvim_set_current_win(ensure_query_window(state))
-	vim.cmd("topleft vsplit")
-	state.sidebar_window = vim.api.nvim_get_current_win()
-	vim.api.nvim_win_set_buf(state.sidebar_window, state.sidebar)
-	vim.api.nvim_win_set_width(state.sidebar_window, state.config.workspace_sidebar_width or 32)
-end
-
 -- Find the one workspace tabpage that's still valid, if any, and switch
--- to it. Orbit only ever keeps a single workspace tab open at a time
--- (opening the workspace again just reveals the existing tab rather than
--- creating a second one).
+-- to it. Orbit only ever keeps a single workspace tab open at a time.
 -- Returns: the existing workspace's state table, or nil if none is open.
 -- Side effects: switches the current tabpage to the found workspace, if
 -- one exists. Also incidentally prunes nothing itself, but note that
@@ -1468,15 +1440,15 @@ local function existing_workspace()
 	end
 end
 
--- Public entry point: open the Orbit workspace, creating it if it
--- doesn't exist yet or revealing/toggling the sidebar of the existing one.
+-- Public entry point: toggle the Orbit workspace, creating it if it does
+-- not exist yet or closing the existing Workspace tabpage.
 --   config: the plugin's resolved configuration table (see orbit/init.lua
 --     or wherever config is built) -- fields used here include
 --     .profile_path, .workspace_sidebar_width, .saved_query_dirs,
 --     .icons (read later during render), .result_limit,
 --     .max_cell_width, .workspace_result_ratio (read later).
--- Returns: the workspace state table (either the existing one, or the
--- newly created one).
+-- Returns: the newly created workspace state, or nil after closing the
+-- existing Workspace.
 -- Side effects (new workspace only): opens a new tabpage (:tabnew),
 -- creates the sidebar scratch buffer and its vertical split, sets the
 -- query buffer's filetype to sql, loads profiles from disk, builds the
@@ -1489,8 +1461,8 @@ end
 function M.open(config)
 	local state = existing_workspace()
 	if state then
-		toggle_sidebar(state)
-		return state
+		M.close(state.tabpage)
+		return
 	end
 
 	vim.cmd("tabnew")
@@ -1719,21 +1691,25 @@ end
 --   tabpage: the tabpage to close; defaults to the current tabpage if
 --     omitted.
 -- Returns: nothing.
--- Side effects: removes the workspace's entry from the module-local
--- `workspaces` table (so it's no longer tracked even if the tabclose
--- below fails or the tabpage is already gone) and, if the tabpage is
--- still valid, switches to it and runs :tabclose to actually close it.
+-- Side effects: if the tabpage is valid, switches to it and runs :tabclose,
+-- then removes the workspace's entry from the module-local `workspaces`
+-- table. A failed :tabclose leaves the Workspace tracked so the user can
+-- resolve an unsaved buffer and retry safely.
 function M.close(tabpage)
 	tabpage = tabpage or vim.api.nvim_get_current_tabpage()
 	local state = workspaces[tabpage]
 	if not state then
 		return
 	end
-	workspaces[tabpage] = nil
 	if vim.api.nvim_tabpage_is_valid(tabpage) then
+		-- Neovim cannot close its final tabpage, so leave one ordinary tab behind.
+		if #vim.api.nvim_list_tabpages() == 1 then
+			vim.cmd("tabnew")
+		end
 		vim.api.nvim_set_current_tabpage(tabpage)
 		vim.cmd("tabclose")
 	end
+	workspaces[tabpage] = nil
 end
 
 -- Public helper: is the given (or current) tabpage an Orbit workspace?
