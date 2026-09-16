@@ -49,6 +49,9 @@
     M.open_results(rows, options)         -- open a results split for the
                                               workspace's query window
     M.close(tabpage)                      -- close a workspace tab
+    M.cleanup()                           -- release natively closed workspaces
+    M.capture(tabpage)                    -- capture opaque lifetime ownership
+    M.is_live(state)                      -- test captured lifetime ownership
     M.is_workspace(tabpage)               -- true if a tab is an Orbit workspace
     M.focus_filter()                      -- jump cursor into the filter input
     M.select_profile(config, buffer, on_select) -- open the workspace and
@@ -70,6 +73,62 @@ local FIXED_HEADER_LINES = 3
 -- One entry per open workspace tabpage: tabpage handle -> state table.
 -- A workspace's full lifetime is tracked here; see M.open/M.close.
 local workspaces = {}
+
+local function is_live(state)
+	return state ~= nil
+		and workspaces[state.tabpage] == state
+		and vim.api.nvim_tabpage_is_valid(state.tabpage)
+end
+
+local function start_notice(state, message, discarded_message)
+	local notice = feedback.start(message)
+	state.notices[notice] = discarded_message
+	return notice
+end
+
+local function finish_notice(state, notice, message, level)
+	if not notice or not state.notices[notice] then
+		return
+	end
+	state.notices[notice] = nil
+	feedback.finish(notice, message, level)
+end
+
+-- End one Workspace lifetime exactly once. Query buffers may survive their
+-- tabpage, so remove only the ownership marker and retain their SQL state.
+local function teardown(state)
+	if not state or workspaces[state.tabpage] ~= state then
+		return false
+	end
+	workspaces[state.tabpage] = nil
+	state.generation = state.generation + 1
+	if state.binding_callback then
+		vim.notify("Profile selection discarded: Workspace closed", vim.log.levels.DEBUG)
+	end
+	state.binding_target = nil
+	state.binding_callback = nil
+	for notice, message in pairs(state.notices) do
+		feedback.finish(notice, message, vim.log.levels.DEBUG)
+	end
+	state.notices = {}
+	state.schema_notice = nil
+	for buffer in pairs(state.buffers) do
+		if vim.api.nvim_buf_is_valid(buffer) then
+			vim.b[buffer].orbit_workspace_tab = nil
+		end
+	end
+	results.cleanup(state.tabpage)
+	return true
+end
+
+local function registered_workspace(tabpage)
+	local state = workspaces[tabpage]
+	if state and not vim.api.nvim_tabpage_is_valid(tabpage) then
+		teardown(state)
+		return nil
+	end
+	return state
+end
 local fallback_icons = {
 	collapsed = ">",
 	column = ":",
@@ -489,7 +548,7 @@ end
 --   * Shows a start/finish feedback notice, and vim.notify()s on error.
 local function load_schema(state, profile, force)
 	if state.schema_notice then
-		feedback.finish(state.schema_notice, "Schema load replaced", vim.log.levels.DEBUG)
+		finish_notice(state, state.schema_notice, "Schema load replaced", vim.log.levels.DEBUG)
 	end
 	state.generation = state.generation + 1
 	local generation = state.generation
@@ -503,13 +562,18 @@ local function load_schema(state, profile, force)
 	end
 	state.loading = true
 	render(state)
-	state.schema_notice = feedback.start("Loading schema for " .. profile.name .. "...")
+	state.schema_notice = start_notice(
+		state,
+		"Loading schema for " .. profile.name .. "...",
+		"Schema load discarded: Workspace closed"
+	)
 	cache.load_tables(profile, { refresh = force }, function(rows, err)
 		-- Ignore callbacks from replaced loads and from a workspace that has been closed.
-		if state.generation ~= generation or not vim.api.nvim_buf_is_valid(state.sidebar) then
+		if state.generation ~= generation or not is_live(state) then
 			return
 		end
-		feedback.finish(
+		finish_notice(
+			state,
 			state.schema_notice,
 			err and "Schema load failed: " .. profile.name or string.format("Schema loaded: %d objects", #rows),
 			err and vim.log.levels.ERROR or vim.log.levels.INFO
@@ -611,9 +675,14 @@ local function load_metadata(state, profile, row, category, show_progress)
 	local generation = state.generation
 	schema_tree.set_metadata_loading(state.tree, row, category.id, true)
 	local notice = show_progress
-		and feedback.start("Loading " .. category.label .. " for " .. object_name(state.tree, row) .. "...")
+		and start_notice(
+			state,
+			"Loading " .. category.label .. " for " .. object_name(state.tree, row) .. "...",
+			category.label .. " load discarded: Workspace closed"
+		)
 	cache.load_metadata(profile, row, category.id, {}, function(entries, err)
-		if state.generation ~= generation or not vim.api.nvim_buf_is_valid(state.sidebar) then
+		if state.generation ~= generation or not is_live(state) then
+			finish_notice(state, notice, category.label .. " load replaced", vim.log.levels.DEBUG)
 			return
 		end
 		schema_tree.set_metadata_loading(state.tree, row, category.id, nil)
@@ -622,7 +691,8 @@ local function load_metadata(state, profile, row, category, show_progress)
 		-- reported separately via vim.notify below.
 		schema_tree.set_metadata(state.tree, row, category.id, err and {} or entries)
 		if notice then
-			feedback.finish(
+			finish_notice(
+				state,
 				notice,
 				err and category.label .. " load failed: " .. object_name(state.tree, row)
 					or string.format("%s loaded: %d", category.label, #entries),
@@ -674,6 +744,7 @@ local function new_query(state)
 	vim.bo.filetype = "sql"
 	require("orbit.query").bind_profile(0, state.selected)
 	vim.b.orbit_workspace_tab = state.tabpage
+	state.buffers[vim.api.nvim_get_current_buf()] = true
 	vim.keymap.set("n", "/", function()
 		M.focus_filter()
 	end, { buffer = 0, silent = true, nowait = true, desc = "Filter Orbit workspace" })
@@ -696,6 +767,7 @@ end
 local function configure_query_buffer(state, buffer)
 	-- Workspace tagging routes later results back here and makes / target the sidebar filter.
 	vim.b[buffer].orbit_workspace_tab = state.tabpage
+	state.buffers[buffer] = true
 	vim.keymap.set("n", "/", function()
 		M.focus_filter()
 	end, { buffer = buffer, silent = true, nowait = true, desc = "Filter Orbit workspace" })
@@ -752,23 +824,30 @@ end
 -- debug-level notice) if the workspace tabpage has since been closed or
 -- replaced, since there'd be nowhere sensible to show them.
 local function run_object_action(state, profile, connector, row, action)
+	if not is_live(state) then
+		vim.notify("Schema action discarded: Workspace closed", vim.log.levels.DEBUG)
+		return
+	end
 	if action.kind == "query_buffer" then
 		-- Generated statements are editable; metadata actions execute immediately into the result grid.
 		open_generated_query(state, profile, action.statement, row)
 		return
 	end
-	local notice = feedback.start("Loading " .. action.label:lower() .. " for " .. object_name(state.tree, row) .. "...")
+	local notice = start_notice(
+		state,
+		"Loading " .. action.label:lower() .. " for " .. object_name(state.tree, row) .. "...",
+		"Schema action discarded: Workspace closed"
+	)
 	runner.run(profile, action.statement, function(rows, err)
-		if workspaces[state.tabpage] ~= state or not vim.api.nvim_tabpage_is_valid(state.tabpage) then
-			feedback.finish(notice, "Schema action discarded", vim.log.levels.DEBUG)
+		if not is_live(state) then
 			return
 		end
 		if err then
-			feedback.finish(notice, "Schema action failed: " .. action.label, vim.log.levels.ERROR)
+			finish_notice(state, notice, "Schema action failed: " .. action.label, vim.log.levels.ERROR)
 			vim.notify(err, vim.log.levels.ERROR)
 			return
 		end
-		feedback.finish(notice, string.format("Loaded %s: %d rows", action.label:lower(), #rows))
+		finish_notice(state, notice, string.format("Loaded %s: %d rows", action.label:lower(), #rows))
 		M.open_results(rows, {
 			limit = state.config.result_limit,
 			max_cell_width = state.config.max_cell_width,
@@ -815,7 +894,11 @@ local function select_object_action(state, profile, row)
 		end,
 	}, function(action)
 		if action then
-			run_object_action(state, profile, connector, row, action)
+			if is_live(state) then
+				run_object_action(state, profile, connector, row, action)
+			else
+				vim.notify("Schema action discarded: Workspace closed", vim.log.levels.DEBUG)
+			end
 		end
 	end)
 end
@@ -913,7 +996,8 @@ local function preview_saved_query(node)
 end
 
 local function relocate_saved_query(state, node, destination, directory, operation)
-	if workspaces[state.tabpage] ~= state then
+	if not is_live(state) then
+		vim.notify(operation .. " discarded: Workspace closed", vim.log.levels.DEBUG)
 		return
 	end
 	local relocated, detail, error_kind = saved_queries.relocate(node, destination, directory)
@@ -978,7 +1062,8 @@ local function move_saved_query(state, node)
 end
 
 local function delete_saved_query(state, node)
-	if workspaces[state.tabpage] ~= state then
+	if not is_live(state) then
+		vim.notify("Delete saved query discarded: Workspace closed", vim.log.levels.DEBUG)
 		return
 	end
 	local deletion, deletion_error = saved_queries.deletion(node)
@@ -1037,8 +1122,12 @@ local function select_saved_query_action(state, node)
 			return action.label
 		end,
 	}, function(action)
-		if action and workspaces[state.tabpage] == state then
-			action.run()
+		if action then
+			if is_live(state) then
+				action.run()
+			else
+				vim.notify("Saved query action discarded: Workspace closed", vim.log.levels.DEBUG)
+			end
 		end
 	end)
 end
@@ -1138,7 +1227,7 @@ local function configure_sidebar(state)
 				-- ones render() makes) aren't safe to call directly; scheduling
 				-- defers the actual render to the next safe main-loop tick.
 				vim.schedule(function()
-					if vim.api.nvim_buf_is_valid(state.sidebar) then
+					if is_live(state) then
 						render(state)
 					end
 				end)
@@ -1242,7 +1331,7 @@ local function configure_sidebar(state)
 			end
 		elseif node.kind == "metadata" and not schema_tree.is_expanded(state.tree, node) then
 			expand_metadata(state, node.profile, node.row, node.category)
-		elseif (node.kind == "schema" or node.kind == "group") and not schema_tree.is_expanded(state.tree, node) then
+		elseif (node.kind == "catalog" or node.kind == "schema" or node.kind == "group") and not schema_tree.is_expanded(state.tree, node) then
 			schema_tree.toggle(state.tree, node)
 			render(state)
 		end
@@ -1426,17 +1515,14 @@ end
 -- Find the one workspace tabpage that's still valid, if any, and switch
 -- to it. Orbit only ever keeps a single workspace tab open at a time.
 -- Returns: the existing workspace's state table, or nil if none is open.
--- Side effects: switches the current tabpage to the found workspace, if
--- one exists. Also incidentally prunes nothing itself, but note that
--- entries for since-closed tabpages are cleaned up elsewhere (M.close);
--- this just skips over any that nvim_tabpage_is_valid reports as gone.
+-- Side effects: releases any natively closed Workspace first, then switches
+-- the current tabpage to the live Workspace if one exists.
 local function existing_workspace()
+	M.cleanup()
 	-- Orbit intentionally keeps one workspace tabpage, reopening it instead of creating duplicates.
 	for tabpage, state in pairs(workspaces) do
-		if vim.api.nvim_tabpage_is_valid(tabpage) then
-			vim.api.nvim_set_current_tabpage(tabpage)
-			return state
-		end
+		vim.api.nvim_set_current_tabpage(tabpage)
+		return state
 	end
 end
 
@@ -1484,6 +1570,8 @@ function M.open(config)
 	--     tracks which saved-query folders are open (separate from
 	--     schema_tree's own expand tracking, since saved queries aren't
 	--     part of schema_tree at all).
+	--   buffers       -- query buffers owned during this Workspace lifetime;
+	--     surviving buffers have only their ownership marker removed at teardown.
 	--   filter        -- current text typed into "Filter: ".
 	--   filtering     -- true only while the user is actively editing the
 	--     filter box (keeps the buffer modifiable and stops on_lines from
@@ -1496,6 +1584,8 @@ function M.open(config)
 	--   nodes         -- buffer line number -> node table, rebuilt by
 	--     every render() call; this is how keymaps resolve "what is the
 	--     cursor on" without parsing the rendered text back into data.
+	--   notices       -- active Workspace feedback handles and the debug message
+	--     used to finish each one if the Workspace closes first.
 	--   profiles      -- the list of profile tables loaded from disk.
 	--   query_window  -- the window used for opening/editing queries.
 	--   saved_query_locations -- one entry per configured saved-query
@@ -1516,6 +1606,7 @@ function M.open(config)
 	-- M.select_profile is used, and removed again once consumed by
 	-- activate_current.)
 	local state = {
+		buffers = {},
 		config = config,
 		expanded_saved_dirs = {},
 		filter = "",
@@ -1523,6 +1614,7 @@ function M.open(config)
 		generation = 0,
 		loading = false,
 		nodes = {},
+		notices = {},
 		profiles = document and document.profiles or {},
 		query_window = query_window,
 		saved_query_locations = {},
@@ -1563,8 +1655,8 @@ function M.save_query(buffer)
 		return
 	end
 	local tabpage = vim.b[buffer].orbit_workspace_tab
-	local state = tabpage and workspaces[tabpage] or nil
-	if not state or not vim.api.nvim_tabpage_is_valid(tabpage) then
+	local state = tabpage and registered_workspace(tabpage) or nil
+	if not state then
 		vim.notify("OrbitSave requires an Orbit Workspace query buffer", vim.log.levels.ERROR)
 		return
 	end
@@ -1583,11 +1675,11 @@ function M.save_query(buffer)
 		if not directory then
 			return
 		end
-		if
-			not vim.api.nvim_buf_is_valid(buffer)
-			or workspaces[state.tabpage] ~= state
-			or vim.b[buffer].orbit_workspace_tab ~= state.tabpage
-		then
+		if not is_live(state) then
+			vim.notify("OrbitSave discarded: Workspace closed", vim.log.levels.DEBUG)
+			return
+		end
+		if not vim.api.nvim_buf_is_valid(buffer) or vim.b[buffer].orbit_workspace_tab ~= state.tabpage then
 			vim.notify("OrbitSave query buffer is no longer in its Workspace", vim.log.levels.ERROR)
 			return
 		end
@@ -1605,11 +1697,11 @@ function M.save_query(buffer)
 			if not filename then
 				return
 			end
-			if
-				not vim.api.nvim_buf_is_valid(buffer)
-				or workspaces[state.tabpage] ~= state
-				or vim.b[buffer].orbit_workspace_tab ~= state.tabpage
-			then
+			if not is_live(state) then
+				vim.notify("OrbitSave discarded: Workspace closed", vim.log.levels.DEBUG)
+				return
+			end
+			if not vim.api.nvim_buf_is_valid(buffer) or vim.b[buffer].orbit_workspace_tab ~= state.tabpage then
 				vim.notify("OrbitSave query buffer is no longer in its Workspace", vim.log.levels.ERROR)
 				return
 			end
@@ -1667,15 +1759,18 @@ end
 --     to look up this workspace's config) and is expected to include
 --     `source_window` (read by the on_quit handler installed below).
 --     `height` and `on_quit` are set/overwritten by this function.
--- Returns: whatever orbit.results.open returns.
+-- Returns: the opened Result grid, or nil when the captured Workspace ended.
 -- Side effects: computes a result-window height as a fraction of the
 -- total editor height (state.config.workspace_result_ratio, default
 -- 30%, floored and never below 6 rows), and installs an on_quit callback
 -- that returns focus to the query window the results came from when the
 -- results window is closed. Delegates the actual window creation to
 -- orbit.results.open.
-function M.open_results(rows, options)
-	local state = workspaces[options.tabpage]
+function M.open_results(rows, options, workspace_state)
+	local state = workspace_state or registered_workspace(options.tabpage)
+	if not is_live(state) or state.tabpage ~= options.tabpage then
+		return false
+	end
 	options.height = math.max(6, math.floor(vim.o.lines * ((state and state.config.workspace_result_ratio) or 0.30)))
 	options.on_quit = function(_, source_window)
 		-- The workspace owns result geometry and returns focus to the originating query split.
@@ -1709,7 +1804,27 @@ function M.close(tabpage)
 		vim.api.nvim_set_current_tabpage(tabpage)
 		vim.cmd("tabclose")
 	end
-	workspaces[tabpage] = nil
+	teardown(state)
+end
+
+-- Remove Workspace state for tabpages closed through native Neovim commands.
+function M.cleanup()
+	local stale = {}
+	for _, state in pairs(workspaces) do
+		if not vim.api.nvim_tabpage_is_valid(state.tabpage) then
+			stale[#stale + 1] = state
+		end
+	end
+	for _, state in ipairs(stale) do teardown(state) end
+end
+
+-- Capture opaque ownership for asynchronous work started inside a Workspace.
+function M.capture(tabpage)
+	return registered_workspace(tabpage or vim.api.nvim_get_current_tabpage())
+end
+
+function M.is_live(state)
+	return is_live(state)
 end
 
 -- Public helper: is the given (or current) tabpage an Orbit workspace?
@@ -1719,7 +1834,7 @@ end
 --   tabpage: tabpage handle to check; defaults to the current tabpage.
 -- Returns: boolean.
 function M.is_workspace(tabpage)
-	return workspaces[tabpage or vim.api.nvim_get_current_tabpage()] ~= nil
+	return registered_workspace(tabpage or vim.api.nvim_get_current_tabpage()) ~= nil
 end
 
 -- Public helper: if the current tabpage is an Orbit workspace, focus its
@@ -1729,7 +1844,7 @@ end
 -- Returns: true if the current tabpage was a workspace (and focus was
 -- moved), false otherwise.
 function M.focus_filter()
-	local state = workspaces[vim.api.nvim_get_current_tabpage()]
+	local state = registered_workspace(vim.api.nvim_get_current_tabpage())
 	if state then
 		focus_filter(state)
 		return true

@@ -115,22 +115,42 @@ return {
     local second = { catalog = "a", schema = "b.c", name = "second", type = "table" }
     schema_tree.set_tables(tree, { first })
     local lines, nodes = schema_tree.lines(tree, profile, "", { icons = icons })
-    assert(lines[1] == "> @ a.b.c")
+    assert(lines[1] == "> @ a.b")
     schema_tree.toggle(tree, nodes[1])
     _, nodes = schema_tree.lines(tree, profile, "", { icons = icons })
     schema_tree.toggle(tree, nodes[2])
+    _, nodes = schema_tree.lines(tree, profile, "", { icons = icons })
+    schema_tree.toggle(tree, nodes[3])
 
     schema_tree.set_tables(tree, { first, second })
     lines, nodes = schema_tree.lines(tree, profile, "", { icons = icons })
-    assert(lines[1] == '> @ "a"."b.c"', vim.inspect(lines))
-    assert(lines[2] == 'v @ "a.b"."c"', vim.inspect(lines))
-    assert(nodes[4].row == first, "the first namespace's object group stays expanded")
+    assert(lines[1] == '> @ a', vim.inspect(lines))
+    assert(lines[2] == 'v @ a.b', vim.inspect(lines))
+    assert(lines[3] == '  v @ c', vim.inspect(lines))
+    assert(nodes[5].row == first, "the first namespace's object group stays expanded")
 
     lines = schema_tree.lines(tree, profile, "second", { icons = icons })
-    assert(lines[1] == 'v @ "a"."b.c"')
+    assert(lines[1] == 'v @ a')
     lines, nodes = schema_tree.lines(tree, profile, "", { icons = icons })
-    assert(lines[1] == '> @ "a"."b.c"', "filtering must not overwrite expansion choices")
-    assert(nodes[4].row == first)
+    assert(lines[1] == '> @ a', "filtering must not overwrite expansion choices")
+    assert(nodes[5].row == first)
+  end,
+
+  ["schema_tree nests catalog-aware schemas beneath their catalog"] = function()
+    local tree = schema_tree.new()
+    schema_tree.set_tables(tree, {
+      { catalog = "gridhive", schema = "analytics", name = "events", type = "table" },
+      { catalog = "gridhive", schema = "default", name = "users", type = "table" },
+    })
+
+    local lines, nodes = schema_tree.lines(tree, profile, "", { icons = icons })
+    assert(lines[1] == "> @ gridhive", vim.inspect(lines))
+    assert(nodes[1].kind == "catalog")
+    schema_tree.toggle(tree, nodes[1])
+    lines, nodes = schema_tree.lines(tree, profile, "", { icons = icons })
+    assert(lines[2] == "  > @ analytics", vim.inspect(lines))
+    assert(lines[3] == "  > @ default", vim.inspect(lines))
+    assert(nodes[2].kind == "schema" and nodes[3].kind == "schema")
   end,
 
   ["schema_tree.lines renders collapsed schemas and object groups"] = function()

@@ -7,11 +7,16 @@ local M = {
 }
 
 local metadata = require("orbit.connectors.metadata")
+local jdbc = require("orbit.connectors.mssql_jdbc")
 local schema_pattern = require("orbit.connectors.utils.schema_pattern")
 local tokenizer = require("orbit.sql.tokenizer")
 
 local separator = string.char(31)
 local default_port = 1433
+
+local function default_database(options)
+	return type(options.database) == "table" and options.database[1] or options.database
+end
 
 local function literal(value)
 	return "'" .. tostring(value):gsub("'", "''") .. "'"
@@ -21,8 +26,12 @@ local function identifier(value)
 	return "[" .. tostring(value):gsub("]", "]]") .. "]"
 end
 
-local function qualified(row)
-	return identifier(row.schema or "dbo") .. "." .. identifier(row.name)
+local function qualified(options, row)
+	local name = identifier(row.schema or "dbo") .. "." .. identifier(row.name)
+	if type(options.database) == "table" then
+		return identifier(row.catalog or default_database(options)) .. "." .. name
+	end
+	return name
 end
 
 local function is_integer(value, minimum, maximum)
@@ -36,6 +45,12 @@ local function is_integer(value, minimum, maximum)
 end
 
 function M.validate_options(profile_name, options)
+	if jdbc.selected(options) then
+		return jdbc.validate_options(profile_name, options)
+	end
+	if options.transport ~= nil and options.transport ~= "sqlcmd" then
+		return nil, string.format("profile %q has unsupported MSSQL transport %q", profile_name, tostring(options.transport))
+	end
 	local allowed = {
 		confirm_mutations = true,
 		database = true,
@@ -46,6 +61,7 @@ function M.validate_options(profile_name, options)
 		port = true,
 		schema_patterns = true,
 		trust_server_certificate = true,
+		transport = true,
 		user = true,
 	}
 	for name in pairs(options) do
@@ -59,10 +75,28 @@ function M.validate_options(profile_name, options)
 	if options.confirm_mutations ~= nil and type(options.confirm_mutations) ~= "boolean" then
 		return nil, string.format("profile %q options.confirm_mutations must be a boolean", profile_name)
 	end
-	for _, name in ipairs({ "host", "database", "user" }) do
+	for _, name in ipairs({ "host", "user" }) do
 		if type(options[name]) ~= "string" or options[name] == "" then
 			return nil, string.format("profile %q requires options.%s", profile_name, name)
 		end
+	end
+	if type(options.database) == "table" then
+		if not vim.islist(options.database) or #options.database == 0 then
+			return nil, string.format("profile %q options.database must be a non-empty string or array", profile_name)
+		end
+		local seen = {}
+		for _, database in ipairs(options.database) do
+			if type(database) ~= "string" or database == "" then
+				return nil, string.format("profile %q options.database must contain non-empty strings", profile_name)
+			end
+			local normalized = database:lower()
+			if seen[normalized] then
+				return nil, string.format("profile %q options.database must not contain duplicates", profile_name)
+			end
+			seen[normalized] = true
+		end
+	elseif type(options.database) ~= "string" or options.database == "" then
+		return nil, string.format("profile %q requires options.database", profile_name)
 	end
 	for _, name in ipairs({ "password", "password_env" }) do
 		if options[name] ~= nil and (type(options[name]) ~= "string" or options[name] == "") then
@@ -106,6 +140,9 @@ local function password(options)
 end
 
 function M.session_command(options)
+	if jdbc.selected(options) then
+		return jdbc.session_command(options)
+	end
 	local _, err = password(options)
 	if err then
 		return nil, err
@@ -113,7 +150,7 @@ function M.session_command(options)
 	local command = {
 		options.executable or "sqlcmd",
 		"-S", string.format("tcp:%s,%d", options.host, options.port or default_port),
-		"-d", options.database,
+		"-d", default_database(options),
 		"-U", options.user,
 		"-N", "mandatory",
 	}
@@ -127,6 +164,9 @@ end
 -- Return a complete child environment with every inherited SQLCMD setting
 -- removed. The retained Session must replace, rather than merge, this table.
 function M.environment(options, inherited)
+	if jdbc.selected(options) then
+		return jdbc.environment(options, inherited)
+	end
 	local resolved, err = password(options)
 	if not resolved then
 		return nil, err
@@ -172,7 +212,10 @@ end
 
 -- Preserve fatal sqlcmd diagnostics when the process exits before its end
 -- marker. Ordinary SQL errors remain inside complete framed stdout responses.
-function M.session_exit_error(stdout, stderr)
+function M.session_exit_error(stdout, stderr, options)
+	if jdbc.selected(options or {}) then
+		return stderr and vim.trim(stderr) ~= "" and vim.trim(stderr) or nil
+	end
 	stdout = stdout or ""
 	local start_at = stdout:find("Msg %d+,") or stdout:find("[Ss]qlcmd:")
 	local details = {}
@@ -185,9 +228,12 @@ function M.session_exit_error(stdout, stderr)
 	return #details > 0 and table.concat(details, "\n") or nil
 end
 
-function M.session_request(statement, marker)
+function M.session_request(statement, marker, options)
 	if tokenizer.has_mssql_batch_separator(vim.split(statement, "\n", { plain = true })) then
 		return nil, "MSSQL statements containing a GO batch separator are not supported"
+	end
+	if jdbc.selected(options or {}) then
+		return jdbc.session_request(statement, marker, options)
 	end
 	local control = sqlcmd_control(statement)
 	if control then
@@ -240,7 +286,10 @@ local function marker_record(records, marker, suffix, first)
 	return nil
 end
 
-function M.session_output(output, marker)
+function M.session_output(output, marker, options)
+	if jdbc.selected(options or {}) then
+		return jdbc.session_output(output, marker)
+	end
 	local records = lines(output)
 	local begin = marker_record(records, marker, ":BEGIN")
 	if not begin then
@@ -268,7 +317,10 @@ local function message_line(line)
 		or value:match("^Changed database context to ")
 end
 
-function M.parse(output)
+function M.parse(output, options)
+	if jdbc.selected(options or {}) then
+		return jdbc.parse(output)
+	end
 	if type(output) ~= "string" then
 		return nil, "MSSQL output is required"
 	end
@@ -356,19 +408,56 @@ function M.parse(output)
 	return result, nil, { columns = columns }
 end
 
-function M.qualified_name(_, row)
-	return qualified(row)
+function M.qualified_name(options, row)
+	return qualified(options, row)
 end
 
-function M.completion_word(_, row)
-	return qualified(row)
+function M.completion_word(options, row)
+	return qualified(options, row)
 end
 
-function M.completion_path(_, row)
+function M.completion_path(options, row)
+	if type(options.database) == "table" then
+		return { row.catalog or default_database(options), row.schema or "dbo", row.name }
+	end
 	return { row.schema or "dbo", row.name }
 end
 
-function M.completion_namespaces(_, rows, qualifier_segments)
+function M.completion_namespaces(options, rows, qualifier_segments)
+	if type(options.database) == "table" then
+		if #qualifier_segments == 0 then
+			local result = {}
+			for _, database in ipairs(options.database) do
+				result[#result + 1] = { name = identifier(database), kind = "Database" }
+			end
+			return result, false
+		end
+		if #qualifier_segments > 1 then
+			return {}, false
+		end
+		local requested = qualifier_segments[1]:lower()
+		local database
+		for _, candidate in ipairs(options.database) do
+			if candidate:lower() == requested then
+				database = candidate
+				break
+			end
+		end
+		if not database then
+			return nil, false
+		end
+		local schemas = {}
+		for _, row in ipairs(rows) do
+			if row.catalog and row.catalog:lower() == database:lower() then
+				schemas[row.schema or "dbo"] = true
+			end
+		end
+		local result = {}
+		for schema in pairs(schemas) do
+			result[#result + 1] = { name = identifier(schema), kind = "Schema" }
+		end
+		return result, true
+	end
 	if #qualifier_segments > 0 then
 		return {}, false
 	end
@@ -386,6 +475,40 @@ end
 function M.schema_statement(options, node)
 	if node.type == "tables" then
 		local filter = schema_pattern.sql_clause("schema_name", options.schema_patterns)
+		if type(options.database) == "table" then
+			local branches = {}
+			local database_filter = schema_pattern.sql_clause("schemas.name", options.schema_patterns)
+			for _, database in ipairs(options.database) do
+				local catalog = "N" .. literal(database)
+				local source = identifier(database) .. ".sys."
+				local tables = {
+					"SELECT " .. catalog .. " AS catalog, schemas.name COLLATE DATABASE_DEFAULT AS schema_name,",
+					"tables.name COLLATE DATABASE_DEFAULT AS object_name, 'table' AS object_type",
+					"FROM " .. source .. "tables AS tables",
+					"JOIN " .. source .. "schemas AS schemas ON schemas.schema_id = tables.schema_id",
+					"WHERE tables.is_ms_shipped = 0",
+				}
+				local views = {
+					"SELECT " .. catalog .. " AS catalog, schemas.name COLLATE DATABASE_DEFAULT AS schema_name,",
+					"views.name COLLATE DATABASE_DEFAULT AS object_name, 'view' AS object_type",
+					"FROM " .. source .. "views AS views",
+					"JOIN " .. source .. "schemas AS schemas ON schemas.schema_id = views.schema_id",
+					"WHERE views.is_ms_shipped = 0",
+				}
+				if database_filter then
+					tables[#tables + 1] = "AND " .. database_filter
+					views[#views + 1] = "AND " .. database_filter
+				end
+				branches[#branches + 1] = table.concat(tables, " ")
+				branches[#branches + 1] = table.concat(views, " ")
+			end
+			local clauses = {
+				"SELECT catalog, schema_name AS [schema], object_name AS name, object_type AS type",
+				"FROM (" .. table.concat(branches, " UNION ALL ") .. ") AS objects",
+			}
+			clauses[#clauses + 1] = "ORDER BY catalog, schema_name, object_name"
+			return table.concat(clauses, " ")
+		end
 		local clauses = {
 			"SELECT schema_name AS [schema], object_name AS name, object_type AS type",
 			"FROM (",
@@ -405,12 +528,16 @@ function M.schema_statement(options, node)
 		return table.concat(clauses, " ")
 	end
 	if node.type == "columns" and node.name then
+		local source = "sys."
+		if type(options.database) == "table" then
+			source = identifier(node.catalog or default_database(options)) .. ".sys."
+		end
 		return table.concat({
 			"SELECT columns.name AS name, types.name AS type",
-			"FROM sys.columns AS columns",
-			"JOIN sys.types AS types ON types.user_type_id = columns.user_type_id",
-			"JOIN sys.objects AS objects ON objects.object_id = columns.object_id",
-			"JOIN sys.schemas AS schemas ON schemas.schema_id = objects.schema_id",
+			"FROM " .. source .. "columns AS columns",
+			"JOIN " .. source .. "types AS types ON types.user_type_id = columns.user_type_id",
+			"JOIN " .. source .. "objects AS objects ON objects.object_id = columns.object_id",
+			"JOIN " .. source .. "schemas AS schemas ON schemas.schema_id = objects.schema_id",
 			"WHERE schemas.name = " .. literal(node.schema or "dbo"),
 			"AND objects.name = " .. literal(node.name),
 			"AND objects.type IN ('U', 'V') AND objects.is_ms_shipped = 0",
@@ -430,13 +557,18 @@ function M.object_actions(options, row, limit)
 			id = "sample",
 			kind = "query_buffer",
 			label = "Open sample statement",
-			statement = string.format("SELECT TOP (%d) *\nFROM %s;", limit, qualified(row)),
+			statement = string.format("SELECT TOP (%d) *\nFROM %s;", limit, qualified(options, row)),
 		},
 		{
 			id = "columns",
 			kind = "statement",
 			label = "Columns",
-			statement = assert(M.schema_statement(options, { type = "columns", schema = row.schema, name = row.name })),
+			statement = assert(M.schema_statement(options, {
+				type = "columns",
+				catalog = row.catalog,
+				schema = row.schema,
+				name = row.name,
+			})),
 		},
 	}
 end

@@ -7,7 +7,9 @@ All notable changes to Orbit.nvim are documented in this file.
 ### Added
 
 - Added an MSSQL Connector backed by user-installed Microsoft Go `sqlcmd`, with SQL authentication through a sanitized `SQLCMDPASSWORD` environment, mandatory encryption, an explicit unsafe certificate-trust bypass, a retained interactive session, schema browsing, object actions, bracket-qualified completion, and read-only Result grids.
+- Added an opt-in MSSQL JDBC transport using an Orbit-owned Java source helper and the user-provided jTDS 1.3.1 JDBC driver. Profiles can use structured SQL-password or domain-password authentication, JVM-trusted certificate-chain validation by default, retained sessions, and structured results with distinct SQL `NULL` values while omitted-transport profiles retain the existing `sqlcmd` behavior.
 - Added local Connector diagnostics through `:OrbitDoctor [kind]`; `:OrbitDoctor mssql` checks the configured user-installed executable, its version output, profile validation, and `password_env` presence without connecting.
+- Extended `:OrbitDoctor mssql` for JDBC profiles to check Java 11+ source-file execution, readable driver paths, and exact jTDS 1.3.1 class loading without connecting or exposing credentials.
 - Added a Trino `output_format` profile option with `CSV_HEADER` and `JSON` choices.
 - Added `:OrbitSave` to save Workspace query buffers into configured saved-query locations or existing subdirectories, then reveal the saved file in the Workspace tree.
 - Added saved-query actions for opening, previewing, renaming, moving among existing directories in configured locations, and confirmed deletion while preserving loaded buffer contents and unsaved edits.
@@ -19,6 +21,8 @@ All notable changes to Orbit.nvim are documented in this file.
 
 - Connector execution now carries ordered result metadata from retained and one-shot database CLI sessions.
 - MSSQL parsing now accepts at most one separator-delimited result, trims cell edges, represents every accepted cell as text, and rejects detectable malformed widths, headings, informational output, and additional result sets. The CLI format remains best-effort and can lose or ambiguously represent separators, newlines, blank one-column rows, whitespace, literal `NULL`, wrapped values, and truncated values.
+- MSSQL JDBC profiles now retain one Java helper and JDBC connection per profile, preserve the session after ordinary SQL errors, and replace it after connection/protocol failure or active cancellation. Cancellation also fails queued work; later work reconnects.
+- MSSQL JDBC credentials are resolved from exactly one direct or environment-backed password source and sent only through framed helper stdin, never through process arguments, JDBC URLs, or the Java child environment. TLS cannot fall back to plaintext; the explicit trust bypass retains encryption while disabling server authentication.
 - Trino profiles now default to `CSV_HEADER` output so maps, arrays, rows, and binary values can be displayed through the stock CLI. `JSON` remains available for scalar result fidelity.
 - Schema browser labels now quote identifier segments when distinct catalog/schema combinations would otherwise look identical. Ordinary labels remain unchanged, and disambiguated labels stay stable while filtering.
 - CLI result decoding now fails atomically on malformed or lossy CSV, JSON, XML, and HTML instead of returning partial rows or silently overwriting duplicate headings.
@@ -26,6 +30,7 @@ All notable changes to Orbit.nvim are documented in this file.
 
 ### Fixed
 
+- Prevented native Workspace tab closure and late Statement, Schema acquisition, Table metadata, or Schema object callbacks from retaining stale ownership or opening UI in an unrelated tabpage.
 - Prevented Trino statements containing map or other container values from failing in the CLI's JSON serializer before Orbit receives their results.
 - Prevented distinct schema objects with identical dotted labels, such as `"a.b"."c"` and `"a"."b.c"`, from sharing cached metadata or receiving each other's column completions.
 - Kept colliding catalog/schema groups separate and made schema browser expansion and metadata state independent of display labels.
@@ -41,7 +46,8 @@ All notable changes to Orbit.nvim are documented in this file.
 - Added MySQL coverage for profile and TLS validation, client command construction, XML framing and parsing, schema capabilities, mutations, qualified completion, and dialect tokenization.
 - Added every-byte retained-frame coverage for SQLite, PostgreSQL, MySQL, and Vertica, including residual stream preservation between queued statements.
 - Added focused coverage for Saved query filesystem transactions, strict output normalization, arbitrary Connector metadata categories, and query-block-local Completion.
-- Added deterministic MSSQL coverage for profile validation, Go `sqlcmd` argv and environment construction, retained framing, output rejection, schema/actions, completion, and mutation classification. No live `sqlcmd` or SQL Server verification was performed.
+- Added deterministic MSSQL coverage for profile validation, Go `sqlcmd` argv and environment construction, retained framing, output rejection, schema/actions, completion, and mutation classification. No live `sqlcmd` transport verification was performed.
+- Verified the JDBC transport on Linux with Java 25 and jTDS 1.3.1 against SQL Server `16.0.4252.3`: explicit domain credentials produced server-reported NTLM while Orbit set `useNTLMv2`; the client connected with `ssl=require` through the unsafe trust bypass; and structured values, schema acquisition, retained state across an ordinary error, cancellation, queue invalidation, and reconnection passed. The account could not independently inspect the NTLM version or server-side encryption state. Secure certificate-chain validation rejected the test server's chain because its issuer was absent from the JVM trust store; successful trusted-chain and hostname verification remain unverified.
 
 ## 0.2.5 - 2026-09-07
 

@@ -137,7 +137,8 @@ local function table_items(profile, connector, qualifier_segments, raw_prefix, p
 	if connector.completion_namespaces then
 		namespaces, namespace_only = connector.completion_namespaces(profile.options, rows, qualifier_segments)
 		for _, namespace in ipairs(namespaces or {}) do
-			if partial_matches(namespace.name, partial) then
+			local unquoted = tokenizer.split_qualified(namespace.name)[1] or namespace.name
+			if partial_matches(unquoted, partial) then
 				table.insert(items, item(raw_prefix .. namespace.name .. ".", namespace.kind, profile.name))
 			end
 		end
@@ -226,13 +227,19 @@ end
 -- Returns the matching row, or nil if the table isn't in the schema cache
 -- (e.g. schema not loaded yet, or the name doesn't exist).
 local function resolve_table_row(profile, entry)
+	local preferred_catalog
+	if profile.kind == "mssql" and type(profile.options.database) == "table" then
+		preferred_catalog = profile.options.database[1]
+	end
 	for _, row in ipairs(cache.tables(profile)) do
 		if
 			ci_equals(row.name, entry.name)
 			and (entry.schema == nil or ci_equals(row.schema, entry.schema))
 			and (entry.catalog == nil or ci_equals(row.catalog, entry.catalog))
 		then
-			return row
+			if entry.catalog ~= nil or preferred_catalog == nil or ci_equals(row.catalog, preferred_catalog) then
+				return row
+			end
 		end
 	end
 	return nil

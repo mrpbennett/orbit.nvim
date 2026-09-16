@@ -48,79 +48,171 @@ return {
     assert_equal(loaded.profiles[2].kind, "sqlite")
   end,
 
-	["profiles.load accepts MySQL profiles and requires a database"] = function()
-		local valid = write_profiles({
-			version = 1,
-			profiles = { { name = "mysql-local", kind = "mysql", options = { database = "orbit_dev", client_family = "mariadb" } } },
-		})
-		assert(assert(profiles.load(valid)).profiles[1].kind == "mysql")
+  ["profiles.load accepts MySQL profiles and requires a database"] = function()
+    local valid = write_profiles({
+      version = 1,
+      profiles = { { name = "mysql-local", kind = "mysql", options = { database = "orbit_dev", client_family = "mariadb" } } },
+    })
+    assert(assert(profiles.load(valid)).profiles[1].kind == "mysql")
 
-		local missing = write_profiles({ version = 1, profiles = { { name = "mysql-local", kind = "mysql", options = {} } } })
-		local loaded, err = profiles.load(missing)
-		assert(loaded == nil and err:match("options.database"))
-	end,
+    local missing = write_profiles({ version = 1, profiles = { { name = "mysql-local", kind = "mysql", options = {} } } })
+    local loaded, err = profiles.load(missing)
+    assert(loaded == nil and err:match("options.database"))
+  end,
 
-	["MSSQL profiles validate the exact SQL authentication and TLS options"] = function()
-		local base = { host = "sql.example.test", database = "warehouse", user = "orbit" }
-		local valid = write_profiles({
-			version = 1,
-			profiles = { {
-				name = "warehouse-mssql",
-				kind = "mssql",
-				options = vim.tbl_extend("force", base, {
-					port = 1433,
-					password_env = "ORBIT_MSSQL_PASSWORD",
-					trust_server_certificate = false,
-					schema_patterns = { "sales", "report*" },
-					executable = "sqlcmd-dev",
-				}),
-			} },
-		})
-		assert(assert(profiles.load(valid)).profiles[1].kind == "mssql")
+  ["MSSQL profiles validate the exact SQL authentication and TLS options"] = function()
+    local base = { host = "sql.example.test", database = "warehouse", user = "orbit" }
+    local valid = write_profiles({
+      version = 1,
+      profiles = { {
+        name = "warehouse-mssql",
+        kind = "mssql",
+        options = vim.tbl_extend("force", base, {
+          port = 1433,
+          password_env = "ORBIT_MSSQL_PASSWORD",
+          trust_server_certificate = false,
+          schema_patterns = { "sales", "report*" },
+          executable = "sqlcmd-dev",
+        }),
+      } },
+    })
+    assert(assert(profiles.load(valid)).profiles[1].kind == "mssql")
+    local multiple = vim.tbl_extend("force", base, { database = { "warehouse", "reporting" } })
+    local multiple_valid = write_profiles({
+      version = 1,
+      profiles = { { name = "multiple-mssql", kind = "mssql", options = multiple } },
+    })
+    assert(vim.deep_equal(assert(profiles.load(multiple_valid)).profiles[1].options.database, {
+      "warehouse",
+      "reporting",
+    }))
 
-		local cases = {
-			{ options = { database = "warehouse", user = "orbit" }, error = "options.host" },
-			{ options = vim.tbl_extend("force", base, { port = 0 }), error = "options.port" },
-			{ options = vim.tbl_extend("force", base, { trust_server_certificate = "yes" }), error = "trust_server_certificate" },
-			{ options = vim.tbl_extend("force", base, { password = "one", password_env = "TWO" }), error = "mutually exclusive" },
-			{ options = vim.tbl_extend("force", base, { certificate = "/tmp/ca.pem" }), error = "unsupported MSSQL option" },
-			{ options = vim.tbl_extend("force", base, { hostname_in_certificate = "sql.internal" }), error = "unsupported MSSQL option" },
-			{ options = vim.tbl_extend("force", base, { encrypt = "optional" }), error = "unsupported MSSQL option" },
-			{ options = vim.tbl_extend("force", base, { arguments = { "--unsafe" } }), error = "unsupported MSSQL option" },
-			{ options = vim.tbl_extend("force", base, { executable = "" }), error = "options.executable" },
-			{ options = vim.tbl_extend("force", base, { confirm_mutations = "no" }), error = "confirm_mutations" },
-			{ options = vim.tbl_extend("force", base, { schema_patterns = {} }), error = "non%-empty array" },
-			{ options = vim.tbl_extend("force", base, { schema_patterns = { "" } }), error = "schema_patterns" },
-		}
-		for _, case in ipairs(cases) do
-			local path = write_profiles({ version = 1, profiles = { { name = "bad-mssql", kind = "mssql", options = case.options } } })
-			local loaded, err = profiles.load(path)
-			assert(loaded == nil and err:match(case.error), tostring(err))
-		end
-	end,
+    local cases = {
+      { options = { database = "warehouse", user = "orbit" },                                  error = "options.host" },
+      { options = { certificate = "/tmp/ca.pem" },                                             error = "options.host" },
+      { options = vim.tbl_extend("force", base, { port = 0 }),                                 error = "options.port" },
+      { options = vim.tbl_extend("force", base, { trust_server_certificate = "yes" }),         error = "trust_server_certificate" },
+      { options = vim.tbl_extend("force", base, { password = "one", password_env = "TWO" }),   error = "mutually exclusive" },
+      { options = vim.tbl_extend("force", base, { certificate = "/tmp/ca.pem" }),              error = "unsupported MSSQL option" },
+      { options = vim.tbl_extend("force", base, { hostname_in_certificate = "sql.internal" }), error = "unsupported MSSQL option" },
+      { options = vim.tbl_extend("force", base, { encrypt = "optional" }),                     error = "unsupported MSSQL option" },
+      { options = vim.tbl_extend("force", base, { arguments = { "--unsafe" } }),               error = "unsupported MSSQL option" },
+      { options = vim.tbl_extend("force", base, { executable = "" }),                          error = "options.executable" },
+      { options = vim.tbl_extend("force", base, { confirm_mutations = "no" }),                 error = "confirm_mutations" },
+      { options = vim.tbl_extend("force", base, { schema_patterns = {} }),                     error = "non%-empty array" },
+      { options = vim.tbl_extend("force", base, { schema_patterns = { "" } }),                 error = "schema_patterns" },
+      { options = vim.tbl_extend("force", base, { database = {} }),                            error = "options.database" },
+      { options = vim.tbl_extend("force", base, { database = { "warehouse", "" } }),           error = "non%-empty strings" },
+      { options = vim.tbl_extend("force", base, { database = { "warehouse", "WAREHOUSE" } }),  error = "duplicates" },
+    }
+    for _, case in ipairs(cases) do
+      local path = write_profiles({ version = 1, profiles = { { name = "bad-mssql", kind = "mssql", options = case.options } } })
+      local loaded, err = profiles.load(path)
+      assert(loaded == nil and err:match(case.error), tostring(err))
+    end
+  end,
+  ["MSSQL JDBC profiles validate jTDS domain and SQL password settings"] = function()
+    local domain = {
+      transport = "jdbc",
+      driver = "jtds",
+      driver_path = "/opt/jdbc/jtds-1.3.1.jar",
+      host = "sql.example.test",
+      instance = "REPORTING",
+      authentication = {
+        type = "domain_password",
+        domain = "EXAMPLE",
+        user = "orbit",
+        password_env = "ORBIT_MSSQL_PASSWORD",
+      },
+      trust_server_certificate = false,
+    }
+    local valid = write_profiles({
+      version = 1,
+      profiles = { { name = "domain-jdbc", kind = "mssql", options = domain } },
+    })
+    assert(assert(profiles.load(valid)).profiles[1].options.database == nil)
 
-	["adapters resolve supported connector kinds and reject unknown kinds"] = function()
+    local sql_password = vim.deepcopy(domain)
+    sql_password.instance = nil
+    sql_password.port = 54059
+    sql_password.database = "warehouse"
+    sql_password.authentication = { type = "sql_password", user = "orbit", password = "secret" }
+    local sql_valid = write_profiles({
+      version = 1,
+      profiles = { { name = "sql-jdbc", kind = "mssql", options = sql_password } },
+    })
+    assert(assert(profiles.load(sql_valid)).profiles[1].options.port == 54059)
+
+    local multiple = vim.deepcopy(domain)
+    multiple.instance = nil
+    multiple.port = 54059
+    multiple.database = { "Database", "Databaserpt" }
+    local multiple_valid = write_profiles({
+      version = 1,
+      profiles = { { name = "multiple-jdbc", kind = "mssql", options = multiple } },
+    })
+    assert(vim.deep_equal(assert(profiles.load(multiple_valid)).profiles[1].options.database, {
+      "Database",
+      "Databaserpt",
+    }))
+
+    local function changed(path, value)
+      local options = vim.deepcopy(domain)
+      local target = options
+      for index = 1, #path - 1 do target = target[path[index]] end
+      target[path[#path]] = value
+      return options
+    end
+    local cases = {
+      { changed({ "transport" }, "odbc"),                        "unsupported MSSQL transport" },
+      { changed({ "driver" }, "microsoft"),                      "options.driver" },
+      { changed({ "driver_path" }, ""),                          "options.driver_path" },
+      { changed({ "driver_path" }, "$HOME/jtds-1.3.1.jar"),      "driver_path must be an absolute path" },
+      { changed({ "host" }, "sql.example;ssl=off"),              "unsupported JDBC URL character" },
+      { changed({ "port" }, 1433),                               "port and options.instance are mutually exclusive" },
+      { changed({ "database" }, ""),                             "options.database" },
+      { changed({ "database" }, {}),                             "options.database" },
+      { changed({ "database" }, { "Database", "" }),             "non%-empty strings" },
+      { changed({ "database" }, { "Database", "databasead" }),   "duplicates" },
+      { changed({ "authentication", "type" }, "integrated"),     "authentication.type" },
+      { changed({ "authentication", "domain" }, nil),            "authentication.domain" },
+      { changed({ "authentication", "password" }, "second"),     "exactly one" },
+      { changed({ "authentication", "password_env" }, nil),      "exactly one" },
+      { changed({ "jdbc_url" }, "jdbc:jtds:sqlserver://unsafe"), "unsupported MSSQL JDBC option" },
+      { changed({ "properties" }, { ssl = "off" }),              "unsupported MSSQL JDBC option" },
+    }
+    local sql_domain = vim.deepcopy(sql_password)
+    sql_domain.authentication.domain = "EXAMPLE"
+    cases[#cases + 1] = { sql_domain, "domain requires domain_password" }
+    for _, case in ipairs(cases) do
+      local path = write_profiles({ version = 1, profiles = { { name = "bad-jdbc", kind = "mssql", options = case[1] } } })
+      local loaded, err = profiles.load(path)
+      assert(loaded == nil and err:match(case[2]), tostring(err))
+    end
+  end,
+
+  ["adapters resolve supported connector kinds and reject unknown kinds"] = function()
     assert(adapters.connector({ kind = "sqlite" }) == connector("sqlite"))
     assert(adapters.connector({ kind = "postgres" }) == connector("postgres"))
     assert(adapters.connector({ kind = "trino" }) == connector("trino"))
     assert(adapters.connector({ kind = "vertica" }) == connector("vertica"))
-		assert(adapters.connector({ kind = "mysql" }) == connector("mysql"))
-		assert(adapters.connector({ kind = "mssql" }) == connector("mssql"))
+    assert(adapters.connector({ kind = "mysql" }) == connector("mysql"))
+    assert(adapters.connector({ kind = "mssql" }) == connector("mssql"))
     local unknown, err = adapters.connector({ kind = "unknown" })
     assert(unknown == nil)
     assert(err == "unsupported profile kind: unknown")
   end,
 
-	["runner reports an unsupported profile kind"] = function()
-		local run_err
-		runner.run({ kind = "unknown", options = {} }, "SELECT 1", function(_, err)
-			run_err = err
-		end)
-		assert(vim.wait(100, function()
-			return run_err ~= nil
-		end))
-		assert(run_err == "unsupported profile kind: unknown")
-	end,
+  ["runner reports an unsupported profile kind"] = function()
+    local run_err
+    runner.run({ kind = "unknown", options = {} }, "SELECT 1", function(_, err)
+      run_err = err
+    end)
+    assert(vim.wait(100, function()
+      return run_err ~= nil
+    end))
+    assert(run_err == "unsupported profile kind: unknown")
+  end,
 
   ["profiles.load rejects removed Trino HTTP transport options"] = function()
     for name, value in pairs({ transport = "http", password_env = "ANALYTICS_TRINO_PASSWORD" }) do
@@ -148,8 +240,8 @@ return {
   ["profiles.find resolves an exact connection profile name"] = function()
     local document = {
       profiles = {
-        { name = "analytics", kind = "trino", options = {} },
-        { name = "local", kind = "sqlite", options = {} },
+        { name = "analytics", kind = "trino",  options = {} },
+        { name = "local",     kind = "sqlite", options = {} },
       },
     }
 
@@ -222,11 +314,11 @@ return {
 
   ["Trino connector defaults to CSV_HEADER output"] = function()
     local command = assert(connector("trino").prepare({
-        server = "https://trino.example.test:8443",
-        user = "orbit",
-        catalog = "hive",
-        schema = "default",
-		}, "SELECT 1"))
+      server = "https://trino.example.test:8443",
+      user = "orbit",
+      catalog = "hive",
+      schema = "default",
+    }, "SELECT 1"))
 
     assert_equal(command, {
       "trino",
@@ -240,101 +332,101 @@ return {
     })
   end,
 
-	["Trino connector supports JSON output"] = function()
-		local command = assert(connector("trino").prepare({
-			server = "https://trino.example.test:8443",
-			user = "orbit",
-			catalog = "hive",
-			output_format = "JSON",
-		}, "SELECT 1"))
+  ["Trino connector supports JSON output"] = function()
+    local command = assert(connector("trino").prepare({
+      server = "https://trino.example.test:8443",
+      user = "orbit",
+      catalog = "hive",
+      output_format = "JSON",
+    }, "SELECT 1"))
 
-		assert(command[10] == "JSON")
-	end,
+    assert(command[10] == "JSON")
+  end,
 
-	["Trino output format is validated"] = function()
-		for _, format in ipairs({ "CSV_HEADER", "JSON" }) do
-			local valid = write_profiles({
-				version = 1,
-				profiles = {
-					{
-						name = "analytics",
-						kind = "trino",
-						options = {
-							server = "https://trino.example.test:8443",
-							user = "orbit",
-							catalog = "hive",
-							output_format = format,
-						},
-					},
-				},
-			})
-			assert(profiles.load(valid))
-		end
+  ["Trino output format is validated"] = function()
+    for _, format in ipairs({ "CSV_HEADER", "JSON" }) do
+      local valid = write_profiles({
+        version = 1,
+        profiles = {
+          {
+            name = "analytics",
+            kind = "trino",
+            options = {
+              server = "https://trino.example.test:8443",
+              user = "orbit",
+              catalog = "hive",
+              output_format = format,
+            },
+          },
+        },
+      })
+      assert(profiles.load(valid))
+    end
 
-		for _, format in ipairs({ "ALIGNED", 42 }) do
-			local invalid = write_profiles({
-				version = 1,
-				profiles = {
-					{
-						name = "analytics",
-						kind = "trino",
-						options = {
-							server = "https://trino.example.test:8443",
-							user = "orbit",
-							catalog = "hive",
-							output_format = format,
-						},
-					},
-				},
-			})
-			local document, err = profiles.load(invalid)
-			assert(document == nil and err:match("CSV_HEADER"))
-		end
-	end,
+    for _, format in ipairs({ "ALIGNED", 42 }) do
+      local invalid = write_profiles({
+        version = 1,
+        profiles = {
+          {
+            name = "analytics",
+            kind = "trino",
+            options = {
+              server = "https://trino.example.test:8443",
+              user = "orbit",
+              catalog = "hive",
+              output_format = format,
+            },
+          },
+        },
+      })
+      local document, err = profiles.load(invalid)
+      assert(document == nil and err:match("CSV_HEADER"))
+    end
+  end,
 
-	["Trino connector parses complex CSV values and JSON rows"] = function()
-		local trino = connector("trino")
-		local csv_rows = assert(trino.parse(table.concat({
-			'"id","metadata","note","empty"',
-			'"1","{source=trino, tags=[a, b]}","first line',
-			'second ""line""",""',
-			"",
-		}, "\n")))
-		assert_equal(csv_rows, {
-			{ id = "1", metadata = "{source=trino, tags=[a, b]}", note = 'first line\nsecond "line"', empty = "" },
-		})
-		assert_equal(assert(trino.parse('{"id":1,"missing":null}\n')), { { id = 1, missing = vim.NIL } })
-		assert_equal(assert(trino.parse('"id","metadata"\n')), {})
-		assert_equal(assert(trino.parse('"null_value","empty"\r\n"",""\r\n')), {
-			{ null_value = "", empty = "" },
-		})
-	end,
+  ["Trino connector parses complex CSV values and JSON rows"] = function()
+    local trino = connector("trino")
+    local csv_rows = assert(trino.parse(table.concat({
+      '"id","metadata","note","empty"',
+      '"1","{source=trino, tags=[a, b]}","first line',
+      'second ""line""",""',
+      "",
+    }, "\n")))
+    assert_equal(csv_rows, {
+      { id = "1", metadata = "{source=trino, tags=[a, b]}", note = 'first line\nsecond "line"', empty = "" },
+    })
+    assert_equal(assert(trino.parse('{"id":1,"missing":null}\n')), { { id = 1, missing = vim.NIL } })
+    assert_equal(assert(trino.parse('"id","metadata"\n')), {})
+    assert_equal(assert(trino.parse('"null_value","empty"\r\n"",""\r\n')), {
+      { null_value = "", empty = "" },
+    })
+  end,
 
-	["Trino connector rejects malformed CSV output"] = function()
-		local trino = connector("trino")
-		local rows, width_err = trino.parse('"id","metadata"\n"1"\n')
-		assert(rows == nil and width_err:match("expected 2"))
+  ["Trino connector rejects malformed CSV output"] = function()
+    local trino = connector("trino")
+    local rows, width_err = trino.parse('"id","metadata"\n"1"\n')
+    assert(rows == nil and width_err:match("expected 2"))
 
-		local quoted, quote_err = trino.parse('"id"\n"unterminated\n')
-		assert(quoted == nil and quote_err:match("unterminated"))
+    local quoted, quote_err = trino.parse('"id"\n"unterminated\n')
+    assert(quoted == nil and quote_err:match("unterminated"))
 
-		local carriage, carriage_err = trino.parse('"id"\n"one"\rtwo\n')
-		assert(carriage == nil and carriage_err:match("carriage return"))
+    local carriage, carriage_err = trino.parse('"id"\n"one"\rtwo\n')
+    assert(carriage == nil and carriage_err:match("carriage return"))
 
-		local trailing, trailing_err = trino.parse('"id"\n"one"two\n')
-		assert(trailing == nil and trailing_err:match("after closing quote"))
+    local trailing, trailing_err = trino.parse('"id"\n"one"two\n')
+    assert(trailing == nil and trailing_err:match("after closing quote"))
 
-		local duplicate, duplicate_err = trino.parse('"id","id"\n"1","2"\n')
-		assert(duplicate == nil and duplicate_err:match("duplicate column"))
-		local empty, empty_err = trino.parse('""\n"value"\n')
-		assert(empty == nil and empty_err:match("must not be empty"))
-	end,
+    local duplicate, duplicate_err = trino.parse('"id","id"\n"1","2"\n')
+    assert(duplicate == nil and duplicate_err:match("duplicate column"))
+    local empty, empty_err = trino.parse('""\n"value"\n')
+    assert(empty == nil and empty_err:match("must not be empty"))
+  end,
 
   ["connectors own object naming"] = function()
     local sqlite = connector("sqlite")
     local postgres = connector("postgres")
     local trino = connector("trino")
-		local mssql = connector("mssql")
+    local mssql = connector("mssql")
 
     assert(sqlite.qualified_name({}, { name = 'a"b' }) == '"a""b"')
     assert(sqlite.completion_word({}, { name = "sessions" }, "") == "sessions")
@@ -342,91 +434,123 @@ return {
     assert(postgres.qualified_name({}, { schema = "Sales", name = 'Order"Item' }) == '"Sales"."Order""Item"')
     assert(postgres.completion_word({}, { schema = "Sales", name = "Order" }, '"Sales".') == '"Sales"."Order"')
 
-    assert(trino.qualified_name({}, { catalog = "iceberg", schema = "cleanroom", name = "events" }) == '"iceberg"."cleanroom"."events"')
-    assert(trino.completion_word({ catalog = "hive", schema = "default" }, { catalog = "hive", schema = "default", name = "events" }, "") == "default.events")
-    assert(trino.completion_word({ catalog = "hive" }, { catalog = "iceberg", schema = "cleanroom", name = "events" }, "") == "iceberg.cleanroom.events")
+    assert(trino.qualified_name({}, { catalog = "iceberg", schema = "cleanroom", name = "events" }) ==
+    '"iceberg"."cleanroom"."events"')
+    assert(trino.completion_word({ catalog = "hive", schema = "default" },
+      { catalog = "hive", schema = "default", name = "events" }, "") == "default.events")
+    assert(trino.completion_word({ catalog = "hive" }, { catalog = "iceberg", schema = "cleanroom", name = "events" }, "") ==
+    "iceberg.cleanroom.events")
     assert(trino.completion_word({}, { name = "events" }, "cleanroom.") == "cleanroom.events")
-		assert(mssql.qualified_name({}, { schema = "Sales]West", name = "Order.Items" }) == "[Sales]]West].[Order.Items]")
-		assert(mssql.completion_word({}, { schema = "dbo", name = "users" }, "dbo.") == "[dbo].[users]")
+    assert(mssql.qualified_name({}, { schema = "Sales]West", name = "Order.Items" }) == "[Sales]]West].[Order.Items]")
+    assert(mssql.completion_word({}, { schema = "dbo", name = "users" }, "dbo.") == "[dbo].[users]")
   end,
 
-	["MSSQL connector builds user-object schema SQL and read-only actions"] = function()
-		local mssql = connector("mssql")
-		local options = { host = "sql.example", database = "warehouse", user = "orbit", schema_patterns = { "sales", "report*" } }
-		local tables = assert(mssql.schema_statement(options, { type = "tables" }))
-		assert(tables:find("FROM sys.tables", 1, true) and tables:find("FROM sys.views", 1, true))
-		assert(tables:find("is_ms_shipped = 0", 1, true))
-		assert(tables:find("schema_name IN ('sales')", 1, true))
-		assert(tables:find("schema_name LIKE 'report%' ESCAPE '\\'", 1, true))
-		local columns = assert(mssql.schema_statement(options, { type = "columns", schema = "a'b", name = "Order]Items" }))
-		assert(columns:find("FROM sys.columns", 1, true) and columns:find("schemas.name = 'a''b'", 1, true))
-		local actions = mssql.object_actions(options, { type = "table", schema = "Sales", name = "Order]Items" }, 25)
-		assert(#actions == 2 and actions[1].statement == "SELECT TOP (25) *\nFROM [Sales].[Order]]Items];")
-		assert(actions[2].id == "columns" and mssql.editable_table == nil and mssql.mutation_statement == nil)
-		assert(mssql.metadata_categories(options, { type = "table" })[1].id == "columns")
-	end,
+  ["MSSQL connector builds user-object schema SQL and read-only actions"] = function()
+    local mssql = connector("mssql")
+    local options = { host = "sql.example", database = "warehouse", user = "orbit", schema_patterns = { "sales", "report*" } }
+    local tables = assert(mssql.schema_statement(options, { type = "tables" }))
+    assert(tables:find("FROM sys.tables", 1, true) and tables:find("FROM sys.views", 1, true))
+    assert(tables:find("is_ms_shipped = 0", 1, true))
+    assert(tables:find("schema_name IN ('sales')", 1, true))
+    assert(tables:find("schema_name LIKE 'report%' ESCAPE '\\'", 1, true))
+    local columns = assert(mssql.schema_statement(options, { type = "columns", schema = "a'b", name = "Order]Items" }))
+    assert(columns:find("FROM sys.columns", 1, true) and columns:find("schemas.name = 'a''b'", 1, true))
+    local actions = mssql.object_actions(options, { type = "table", schema = "Sales", name = "Order]Items" }, 25)
+    assert(#actions == 2 and actions[1].statement == "SELECT TOP (25) *\nFROM [Sales].[Order]]Items];")
+    assert(actions[2].id == "columns" and mssql.editable_table == nil and mssql.mutation_statement == nil)
+    assert(mssql.metadata_categories(options, { type = "table" })[1].id == "columns")
+  end,
+  ["MSSQL database arrays acquire and address schema objects by catalog"] = function()
+    local mssql = connector("mssql")
+    local options = {
+      host = "sql.example",
+      database = { "Context]Ad", "Databaserpt" },
+      user = "orbit",
+      schema_patterns = { "dbo", "report*" },
+    }
+    local tables = assert(mssql.schema_statement(options, { type = "tables" }))
+    assert(tables:find("N'Context]Ad' AS catalog", 1, true))
+    assert(tables:find("FROM [Context]]Ad].sys.tables", 1, true))
+    assert(tables:find("FROM [Databaserpt].sys.views", 1, true))
+    assert(tables:find("schemas.name IN ('dbo')", 1, true))
 
-	["SQLite connector builds a JSON command"] = function()
-		local command = assert(connector("sqlite").prepare({ path = "/tmp/local.db" }, "SELECT 1"))
+    local row = { catalog = "Databaserpt", schema = "Sales", name = "Order]Items", type = "table" }
+    assert(mssql.qualified_name(options, row) == "[Databaserpt].[Sales].[Order]]Items]")
+    local columns = assert(mssql.schema_statement(options, {
+      type = "columns",
+      catalog = row.catalog,
+      schema = row.schema,
+      name = row.name,
+    }))
+    assert(columns:find("FROM [Databaserpt].sys.columns", 1, true))
+    local actions = mssql.object_actions(options, row, 25)
+    assert(actions[1].statement == "SELECT TOP (25) *\nFROM [Databaserpt].[Sales].[Order]]Items];")
+    assert(actions[2].statement:find("FROM [Databaserpt].sys.columns", 1, true))
+  end,
+
+  ["SQLite connector builds a JSON command"] = function()
+    local command = assert(connector("sqlite").prepare({ path = "/tmp/local.db" }, "SELECT 1"))
 
     assert_equal(command, { "sqlite3", "-json", "/tmp/local.db", "SELECT 1" })
-	end,
+  end,
 
-	["PostgreSQL connector builds a CSV command"] = function()
-		local command = assert(connector("postgres").prepare({
-				database = "orbit",
-				host = "postgres.example.test",
-				port = 5432,
-				user = "alice",
-				sslmode = "require",
-			}, "SELECT 1"))
+  ["PostgreSQL connector builds a CSV command"] = function()
+    local command = assert(connector("postgres").prepare({
+      database = "orbit",
+      host = "postgres.example.test",
+      port = 5432,
+      user = "alice",
+      sslmode = "require",
+    }, "SELECT 1"))
 
-		assert_equal(command, {
-			"psql",
-			"--dbname", "orbit",
-			"--host", "postgres.example.test",
-			"--port", "5432",
-			"--username", "alice",
-			"--csv",
-			"--no-psqlrc",
-			"--pset", "footer=off",
-			"--set", "ON_ERROR_STOP=on",
-			"--command", "SELECT 1",
-		})
-	end,
+    assert_equal(command, {
+      "psql",
+      "--dbname", "orbit",
+      "--host", "postgres.example.test",
+      "--port", "5432",
+      "--username", "alice",
+      "--csv",
+      "--no-psqlrc",
+      "--pset", "footer=off",
+      "--set", "ON_ERROR_STOP=on",
+      "--command", "SELECT 1",
+    })
+  end,
 
-	["PostgreSQL profiles pass passwords only through the process environment"] = function()
-		local postgres = connector("postgres")
-		local environment = postgres.environment({ database = "orbit", password = "secret" })
-		assert_equal(environment, { PGPASSWORD = "secret" })
-		assert(not vim.inspect(assert(postgres.prepare({ database = "orbit", password = "secret" }, "SELECT 1"))):match("secret"))
-	end,
+  ["PostgreSQL profiles pass passwords only through the process environment"] = function()
+    local postgres = connector("postgres")
+    local environment = postgres.environment({ database = "orbit", password = "secret" })
+    assert_equal(environment, { PGPASSWORD = "secret" })
+    assert(not vim.inspect(assert(postgres.prepare({ database = "orbit", password = "secret" }, "SELECT 1"))):match(
+    "secret"))
+  end,
 
   ["PostgreSQL CSV output is normalized into rows"] = function()
-		local rows = assert(connector("postgres").parse('id,name,note,missing,empty\n1,Alice,"hello, world",,""\n2,Bob,"two\nlines",,""\n'))
-		assert_equal(rows, {
-			{ id = "1", name = "Alice", note = "hello, world", missing = vim.NIL, empty = "" },
-			{ id = "2", name = "Bob", note = "two\nlines", missing = vim.NIL, empty = "" },
-		})
-	end,
+    local rows = assert(connector("postgres").parse(
+    'id,name,note,missing,empty\n1,Alice,"hello, world",,""\n2,Bob,"two\nlines",,""\n'))
+    assert_equal(rows, {
+      { id = "1", name = "Alice", note = "hello, world", missing = vim.NIL, empty = "" },
+      { id = "2", name = "Bob",   note = "two\nlines",   missing = vim.NIL, empty = "" },
+    })
+  end,
 
-	["adapters.parse accepts JSON arrays and JSON lines"] = function()
+  ["adapters.parse accepts JSON arrays and JSON lines"] = function()
     local array = assert(adapters.parse('[{"id":1}]'))
     local lines = assert(adapters.parse('{"id":1}\n{"id":2}\n'))
 
     assert_equal(array, { { id = 1 } })
-		assert_equal(lines, { { id = 1 }, { id = 2 } })
-	end,
+    assert_equal(lines, { { id = 1 }, { id = 2 } })
+  end,
 
-	["adapters.parse rejects lossy or non-row JSON"] = function()
-		for _, output in ipairs({ '[1]', '[[1]]', '{"":1}', '{"id":1,"id":2}', '{"nested":{"id":1,"id":2}}' }) do
-			local rows, err = adapters.parse(output)
-			assert(rows == nil and err, output)
-		end
-		local rows, err = adapters.parse('{"id":1}\n2\n')
-		assert(rows == nil and err)
-		assert_equal(assert(adapters.parse('[{"payload":{"":"value"}}]')), { { payload = { [""] = "value" } } })
-	end,
+  ["adapters.parse rejects lossy or non-row JSON"] = function()
+    for _, output in ipairs({ '[1]', '[[1]]', '{"":1}', '{"id":1,"id":2}', '{"nested":{"id":1,"id":2}}' }) do
+      local rows, err = adapters.parse(output)
+      assert(rows == nil and err, output)
+    end
+    local rows, err = adapters.parse('{"id":1}\n2\n')
+    assert(rows == nil and err)
+    assert_equal(assert(adapters.parse('[{"payload":{"":"value"}}]')), { { payload = { [""] = "value" } } })
+  end,
 
   ["Vertica connector builds secure vsql commands and parses HTML output"] = function()
     local vertica = connector("vertica")
@@ -455,25 +579,26 @@ return {
 </table>]]), {
       { name = "Ada & Bob", note = "<line>\nnext", missing = vim.NIL },
     })
-		local framed_output = "<table><tr><td>one</td></tr></table>\n<table><tr><th>__orbit_marker</th></tr><tr><td>__orbit_marker__</td></tr></table>\n"
-		local payload, consumed = vertica.session_output(framed_output, "__orbit_marker__")
-		assert(payload == "<table><tr><td>one</td></tr></table>\n" and consumed == #framed_output)
-		assert(vertica.session_output(framed_output:sub(1, -3), "__orbit_marker__") == nil)
+    local framed_output =
+    "<table><tr><td>one</td></tr></table>\n<table><tr><th>__orbit_marker</th></tr><tr><td>__orbit_marker__</td></tr></table>\n"
+    local payload, consumed = vertica.session_output(framed_output, "__orbit_marker__")
+    assert(payload == "<table><tr><td>one</td></tr></table>\n" and consumed == #framed_output)
+    assert(vertica.session_output(framed_output:sub(1, -3), "__orbit_marker__") == nil)
 
-		for _, invalid in ipairs({
-			"<table><tr><th>id</th><th>id</th></tr><tr><td>1</td><td>2</td></tr></table>",
-			"<table><tr><th></th></tr><tr><td>1</td></tr></table>",
-			"<table><tr><th>id</th><th>name</th></tr><tr><td>1</td></tr></table>",
-			"<table><tr><th>id</th></tr><tr><td>1</td><td>Ada</td></tr></table>",
-			"<table><tr><th>id</th></tr><tr><td>1</tr></table>",
-			"<table><tr><th>id</th></tr></table><table><tr><th>other</th></tr></table>",
-			"<table><tr><th>value</th></tr><tr><td>&#0;</td></tr></table>",
-			"<table><tr><th>value</th></tr><tr><td>&#x110000;</td></tr></table>",
-		}) do
-			local invalid_rows, invalid_err = vertica.parse(invalid)
-			assert(invalid_rows == nil and invalid_err, invalid)
-		end
-	end,
+    for _, invalid in ipairs({
+      "<table><tr><th>id</th><th>id</th></tr><tr><td>1</td><td>2</td></tr></table>",
+      "<table><tr><th></th></tr><tr><td>1</td></tr></table>",
+      "<table><tr><th>id</th><th>name</th></tr><tr><td>1</td></tr></table>",
+      "<table><tr><th>id</th></tr><tr><td>1</td><td>Ada</td></tr></table>",
+      "<table><tr><th>id</th></tr><tr><td>1</tr></table>",
+      "<table><tr><th>id</th></tr></table><table><tr><th>other</th></tr></table>",
+      "<table><tr><th>value</th></tr><tr><td>&#0;</td></tr></table>",
+      "<table><tr><th>value</th></tr><tr><td>&#x110000;</td></tr></table>",
+    }) do
+      local invalid_rows, invalid_err = vertica.parse(invalid)
+      assert(invalid_rows == nil and invalid_err, invalid)
+    end
+  end,
 
   ["Vertica profiles require connection coordinates and expose catalog metadata"] = function()
     local missing = write_profiles({
@@ -486,13 +611,18 @@ return {
 
     local vertica = connector("vertica")
     local options = { database = "warehouse", host = "vertica.example.test", user = "alice" }
-    local tables = vertica.schema_statement(vim.tbl_extend("force", options, { schema_patterns = { "sales" } }), { type = "tables" })
+    local tables = vertica.schema_statement(vim.tbl_extend("force", options, { schema_patterns = { "sales" } }),
+      { type = "tables" })
     assert(select(2, tables:gsub("table_schema IN", "")) == 2)
-    assert(vertica.schema_statement(options, { type = "primary_keys", name = "orders", schema = "sales" }):match("v_catalog%.primary_keys"))
-    assert(vertica.schema_statement(options, { type = "foreign_keys", name = "orders", schema = "sales" }):match("reference_column_name AS \"to\""))
-    assert(vertica.schema_statement(options, { type = "projections", name = "orders", schema = "sales" }):match("v_catalog%.projections"))
+    assert(vertica.schema_statement(options, { type = "primary_keys", name = "orders", schema = "sales" }):match(
+    "v_catalog%.primary_keys"))
+    assert(vertica.schema_statement(options, { type = "foreign_keys", name = "orders", schema = "sales" }):match(
+    "reference_column_name AS \"to\""))
+    assert(vertica.schema_statement(options, { type = "projections", name = "orders", schema = "sales" }):match(
+    "v_catalog%.projections"))
     local categories = vertica.metadata_categories(options, { type = "table" })
-    assert(table.concat(vim.tbl_map(function(category) return category.id end, categories), ",") == "columns,primary_keys,foreign_keys,projections")
+    assert(table.concat(vim.tbl_map(function(category) return category.id end, categories), ",") ==
+    "columns,primary_keys,foreign_keys,projections")
     assert(categories[4].presentation.format({ name = "orders_super" }) == "orders_super")
     local actions = vertica.object_actions(options, { type = "view", schema = "sales", name = "monthly_orders" }, 25)
     assert(actions[#actions].id == "definition")
@@ -500,16 +630,21 @@ return {
   end,
 
   ["Trino connector builds schema statements"] = function()
-    local statement = assert(connector("trino").schema_statement({ catalog = "hive", schema = "default" }, { type = "columns", name = "events" }))
+    local statement = assert(connector("trino").schema_statement({ catalog = "hive", schema = "default" },
+      { type = "columns", name = "events" }))
 
     assert(statement:match("information_schema%.columns"))
     assert(statement:match("table_name = 'events'"))
   end,
 
   ["schema_patterns limit relational schema discovery"] = function()
-		local trino = assert(connector("trino").schema_statement({ catalog = "gridhive", schema_patterns = { gridhive = { "cleanroom", "report" }, iceberg = {} } }, { type = "tables" }))
-		local postgres = assert(connector("postgres").schema_statement({ database = "orbit", schema_patterns = { "app" } }, { type = "tables" }))
-		local sqlite = assert(connector("sqlite").schema_statement({ path = "/tmp/local.db", schema_patterns = { "other" } }, { type = "tables" }))
+    local trino = assert(connector("trino").schema_statement(
+    { catalog = "gridhive", schema_patterns = { gridhive = { "cleanroom", "report" }, iceberg = {} } },
+      { type = "tables" }))
+    local postgres = assert(connector("postgres").schema_statement({ database = "orbit", schema_patterns = { "app" } },
+      { type = "tables" }))
+    local sqlite = assert(connector("sqlite").schema_statement({ path = "/tmp/local.db", schema_patterns = { "other" } },
+      { type = "tables" }))
 
     assert(trino:match('FROM "gridhive"%.information_schema%.tables'))
     assert(trino:match("table_schema IN %('cleanroom', 'report'%)"))
@@ -519,7 +654,8 @@ return {
   end,
 
   ["connectors expose schema object actions"] = function()
-    local sqlite_actions = assert(connector("sqlite").object_actions({ path = "/tmp/local.db" }, { schema = "main", name = "sessions", type = "table" }, 25))
+    local sqlite_actions = assert(connector("sqlite").object_actions({ path = "/tmp/local.db" },
+      { schema = "main", name = "sessions", type = "table" }, 25))
     local action_ids = {}
     for _, action in ipairs(sqlite_actions) do
       action_ids[action.id] = action
@@ -533,73 +669,75 @@ return {
     assert(action_ids.foreign_keys.statement:match("PRAGMA foreign_key_list"))
     assert(action_ids.definition.statement:match("sqlite_master"))
 
-		local trino_actions = assert(connector("trino").object_actions({ catalog = "hive", schema = "analytics" }, { schema = "analytics", name = "events", type = "table" }, 25))
+    local trino_actions = assert(connector("trino").object_actions({ catalog = "hive", schema = "analytics" },
+      { schema = "analytics", name = "events", type = "table" }, 25))
 
     assert(#trino_actions == 2)
     assert(trino_actions[1].id == "sample")
     assert(trino_actions[2].id == "columns")
     assert(trino_actions[2].statement:match("information_schema%.columns"))
 
-		local cross_catalog_actions = assert(connector("trino").object_actions({ catalog = "hive" }, { catalog = "iceberg", schema = "cleanroom", name = "events", type = "table" }, 25))
+    local cross_catalog_actions = assert(connector("trino").object_actions({ catalog = "hive" },
+      { catalog = "iceberg", schema = "cleanroom", name = "events", type = "table" }, 25))
     assert(cross_catalog_actions[1].statement:match('FROM "iceberg"%."cleanroom"%."events"'))
     assert(cross_catalog_actions[2].statement:match('FROM "iceberg"%.information_schema%.columns'))
   end,
 
-	["connectors expose metadata categories by object kind"] = function()
+  ["connectors expose metadata categories by object kind"] = function()
     local sqlite_categories = connector("sqlite").metadata_categories({ path = "/tmp/local.db" }, { type = "table" })
     local view_categories = connector("sqlite").metadata_categories({ path = "/tmp/local.db" }, { type = "view" })
-		local trino_categories = connector("trino").metadata_categories({ catalog = "hive" }, { type = "table" })
-		local postgres_categories = connector("postgres").metadata_categories({ database = "orbit" }, { type = "table" })
+    local trino_categories = connector("trino").metadata_categories({ catalog = "hive" }, { type = "table" })
+    local postgres_categories = connector("postgres").metadata_categories({ database = "orbit" }, { type = "table" })
 
-		local function ids(categories)
-			return table.concat(vim.tbl_map(function(category) return category.id end, categories), ",")
-		end
-		assert(ids(sqlite_categories) == "columns,primary_keys,foreign_keys,indexes")
-		assert(ids(view_categories) == "columns")
-		assert(ids(trino_categories) == "columns")
-		assert(ids(postgres_categories) == "columns,primary_keys,foreign_keys,indexes")
-		assert(sqlite_categories[1].presentation.format({ name = "id", type = "INTEGER" }) == "id  INTEGER")
-		assert(sqlite_categories[2].presentation.format({ name = "id", pk = 1 }) == "primary key #1 (id)")
-		assert(vim.deep_equal(sqlite_categories[3].presentation.icons, { "key", "folder", "result" }))
-		assert(postgres_categories[4].presentation.icon_highlight == "OrbitIconIndex")
-	end,
+    local function ids(categories)
+      return table.concat(vim.tbl_map(function(category) return category.id end, categories), ",")
+    end
+    assert(ids(sqlite_categories) == "columns,primary_keys,foreign_keys,indexes")
+    assert(ids(view_categories) == "columns")
+    assert(ids(trino_categories) == "columns")
+    assert(ids(postgres_categories) == "columns,primary_keys,foreign_keys,indexes")
+    assert(sqlite_categories[1].presentation.format({ name = "id", type = "INTEGER" }) == "id  INTEGER")
+    assert(sqlite_categories[2].presentation.format({ name = "id", pk = 1 }) == "primary key #1 (id)")
+    assert(vim.deep_equal(sqlite_categories[3].presentation.icons, { "key", "folder", "result" }))
+    assert(postgres_categories[4].presentation.icon_highlight == "OrbitIconIndex")
+  end,
 
-	["PostgreSQL profiles validate required and connector-specific options"] = function()
-		local missing_path = write_profiles({
-			version = 1,
-			profiles = { { name = "local", kind = "postgres", options = {} } },
-		})
-		local loaded, err = profiles.load(missing_path)
-		assert(loaded == nil)
-		assert(err:match("options.database"))
+  ["PostgreSQL profiles validate required and connector-specific options"] = function()
+    local missing_path = write_profiles({
+      version = 1,
+      profiles = { { name = "local", kind = "postgres", options = {} } },
+    })
+    local loaded, err = profiles.load(missing_path)
+    assert(loaded == nil)
+    assert(err:match("options.database"))
 
-		local invalid_path = write_profiles({
-			version = 1,
-			profiles = { { name = "local", kind = "postgres", options = { database = "orbit", port = "5432" } } },
-		})
-		loaded, err = profiles.load(invalid_path)
-		assert(loaded == nil)
-		assert(err:match("options.port"))
-	end,
+    local invalid_path = write_profiles({
+      version = 1,
+      profiles = { { name = "local", kind = "postgres", options = { database = "orbit", port = "5432" } } },
+    })
+    loaded, err = profiles.load(invalid_path)
+    assert(loaded == nil)
+    assert(err:match("options.port"))
+  end,
 
-	["PostgreSQL schema statements use shared metadata fields and ordered foreign keys"] = function()
-		local primary_keys = assert(connector("postgres").schema_statement({ database = "orbit" }, {
-			type = "primary_keys",
-			name = "orders",
-			schema = "app",
-		}))
-		local foreign_keys = assert(connector("postgres").schema_statement({ database = "orbit" }, {
-			type = "foreign_keys",
-			name = "orders",
-			schema = "app",
-		}))
-		assert(primary_keys:match("ordinal_position AS pk"))
-		assert(foreign_keys:match('AS "from"'))
-		assert(foreign_keys:match('AS "table"'))
-		assert(foreign_keys:match('AS "to"'))
-		assert(foreign_keys:match("WITH ORDINALITY"))
-		assert(foreign_keys:match("target_key%.position = source_key%.position"))
-	end,
+  ["PostgreSQL schema statements use shared metadata fields and ordered foreign keys"] = function()
+    local primary_keys = assert(connector("postgres").schema_statement({ database = "orbit" }, {
+      type = "primary_keys",
+      name = "orders",
+      schema = "app",
+    }))
+    local foreign_keys = assert(connector("postgres").schema_statement({ database = "orbit" }, {
+      type = "foreign_keys",
+      name = "orders",
+      schema = "app",
+    }))
+    assert(primary_keys:match("ordinal_position AS pk"))
+    assert(foreign_keys:match('AS "from"'))
+    assert(foreign_keys:match('AS "table"'))
+    assert(foreign_keys:match('AS "to"'))
+    assert(foreign_keys:match("WITH ORDINALITY"))
+    assert(foreign_keys:match("target_key%.position = source_key%.position"))
+  end,
 
   ["profiles.load accepts a catalog-level Trino profile"] = function()
     local path = write_profiles({
@@ -663,8 +801,8 @@ return {
     assert(err:match("options.confirm_mutations must be a boolean"))
   end,
 
-	["SQLite connector generates primary-key mutations in one transaction"] = function()
-		local statement = assert(connector("sqlite").mutation_statement({}, {
+  ["SQLite connector generates primary-key mutations in one transaction"] = function()
+    local statement = assert(connector("sqlite").mutation_statement({}, {
       name = "users",
       primary_keys = { "id" },
     }, {

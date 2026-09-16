@@ -4,7 +4,7 @@
 
 Your database revolves around your editor, not the other way around.
 
-Orbit runs statements through backend-specific Connectors using user-installed database CLIs. It retains one connection per profile where the CLI supports it, keeps profiles per query buffer, browses schemas, completes cached objects, and renders normalized results in a navigable grid.
+Orbit runs statements through backend-specific Connectors using user-installed database clients. It retains one connection per profile where the client supports it, keeps profiles per query buffer, browses schemas, completes cached objects, and renders normalized results in a navigable grid.
 
 ![preview](./assets/preview.png)
 
@@ -42,7 +42,7 @@ Orbit runs statements through backend-specific Connectors using user-installed d
 
 | Profile kind | Executable                                                                                                                                                                                        | Notes                                                |
 | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| `mssql`      | Microsoft [Go `sqlcmd`](https://learn.microsoft.com/en-us/sql/tools/sqlcmd/sqlcmd-download-install?view=sql-server-ver17)                                                                          | User-installed; other `sqlcmd` variants are not targeted. |
+| `mssql`      | Microsoft [Go `sqlcmd`](https://learn.microsoft.com/en-us/sql/tools/sqlcmd/sqlcmd-download-install?view=sql-server-ver17), or [Java 11+](https://docs.oracle.com/en/java/javase/11/tools/java.html) and [jTDS 1.3.1](https://sourceforge.net/projects/jtds/files/jtds/1.3.1/) | The profile selects the MSSQL transport; all dependencies are user-installed. |
 | `trino`      | [`trino`](https://trino.io/docs/current/client/cli.html)                                                                                                                                          | Defaults to CSV with headers; JSON is optional.      |
 | `sqlite`     | `sqlite3`                                                                                                                                                                                         | Requires a build that supports `-json`.              |
 | `postgres`   | [`psql`](https://www.postgresql.org/docs/current/app-psql.html)                                                                                                                                   | Requires a version that supports `--csv`.            |
@@ -50,6 +50,8 @@ Orbit runs statements through backend-specific Connectors using user-installed d
 | `vertica`    | [`vsql`](https://docs.vertica.com/24.3.x/en/connecting-to/using-vsql/)                                                                                                                            | Uses HTML table output.                              |
 
 The MSSQL Connector targets only Microsoft's Go implementation of `sqlcmd`. Install it using Microsoft's [Download and install the sqlcmd utility](https://learn.microsoft.com/en-us/sql/tools/sqlcmd/sqlcmd-download-install?view=sql-server-ver17) instructions and keep it updated yourself. Orbit does not install or update it. A trusted system CA store is required unless the profile explicitly enables the unsafe certificate-trust bypass.
+
+Alternatively, an MSSQL profile can select Orbit's JDBC transport and its initially supported JDBC driver, jTDS 1.3.1. The transport and driver are different: Orbit's transport owns the retained Java helper protocol, while jTDS is the Java library that communicates with SQL Server. Install a Java 11-or-newer runtime capable of [source-file mode](https://openjdk.org/jeps/330) and download the jTDS 1.3.1 JAR yourself. Orbit ships the [helper as Java source](./cmd/orbit-mssql/OrbitMssql.java) but does not bundle, download, install, or update Java or jTDS. See [ADR-0004](./docs/adr/0004-selectable-mssql-transports.md) for the accepted design.
 
 ## Installation
 
@@ -74,10 +76,16 @@ Install Microsoft Go `sqlcmd` by following Microsoft's [primary installation gui
 
 Run `:OrbitDoctor mssql` after installation. It validates profiles, resolves each MSSQL profile's executable from `options.executable` or `PATH`, runs only `sqlcmd --version`, and checks that a configured `password_env` is populated. It does not execute SQL or connect to SQL Server.
 
+### MSSQL JDBC/jTDS Installation
+
+Install Java 11 or newer with source-file execution support, then download [jTDS 1.3.1](https://sourceforge.net/projects/jtds/files/jtds/1.3.1/) to a user-managed location. Set `options.driver_path` to that JAR. Orbit runs `java` from `PATH` by default; set optional `options.java_executable` to another command name or path.
+
+Run `:OrbitDoctor mssql` after configuring the profile. For JDBC profiles it validates the profile and password source, resolves Java, checks that `driver_path` is readable, and runs the shipped Java source helper in doctor mode to verify Java 11+ source execution and exact jTDS 1.3.1 class loading. It does not connect to SQL Server. Java 25 helper and driver class loading and the live compatibility described below have been verified locally.
+
 ## Quick Start
 
 1. Run `:OrbitProfiles`. This creates `~/.local/share/orbit.nvim/profiles.json` with owner-only (`0600`) permissions and opens it for editing.
-2. For MSSQL, install Microsoft Go `sqlcmd`, then run `:OrbitDoctor mssql`.
+2. For MSSQL, install the dependencies for the selected `sqlcmd` or JDBC/jTDS transport, then run `:OrbitDoctor mssql`.
 3. Add a connection profile using the format below.
 4. Open `:OrbitWorkspace` or a SQL buffer.
 5. Bind a profile with `:OrbitProfile`, or press `<CR>` on a profile in the workspace.
@@ -89,18 +97,19 @@ If a query buffer has no profile, executing it opens profile selection and retri
 
 | Kind       | Required options            | Optional options                                                                                                                | Schema support                                                                                                           |
 | ---------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `mssql`    | `host`, `database`, `user`  | `port`, `password`, `password_env`, `trust_server_certificate`, `schema_patterns`, `executable`, `confirm_mutations`                                      | User tables and views in the profile database, plus columns.                                                            |
+| `mssql` (`sqlcmd`, default) | `host`, `database`, `user` | `transport`, `port`, `password`, `password_env`, `trust_server_certificate`, `schema_patterns`, `executable`, `confirm_mutations` | User tables and views in every listed database, plus columns. |
+| `mssql` (`jdbc`) | `transport`, `driver`, `driver_path`, `host`, `authentication` | `port` or `instance`, `database`, `java_executable`, `trust_server_certificate`, `schema_patterns`, `confirm_mutations` | User tables and views in every listed database, or the login-default database when omitted, plus columns. |
 | `trino`    | `server`, `user`, `catalog` | `schema`, `schema_patterns`, `executable`, `arguments`, `confirm_mutations`                                                     | Tables, views, and columns from `information_schema`. Omitting `schema` browses the catalog except `information_schema`. |
 | `sqlite`   | `path`                      | `schema_patterns`, `executable`, `arguments`, `confirm_mutations`                                                               | Tables and views from `sqlite_master`, plus columns from `PRAGMA table_info`, under `main`.                              |
 | `postgres` | `database`                  | `schema_patterns`, `host`, `port`, `user`, `password`, `sslmode`, `executable`, `arguments`, `confirm_mutations`                | Tables and views outside PostgreSQL system schemas, plus columns, primary keys, foreign keys, and indexes.               |
 | `mysql`    | `database`                  | `schema_patterns`, `host`, `port`, `socket`, `user`, `client_family`, `sslmode`, `executable`, `arguments`, `confirm_mutations` | MySQL 8.x tables and views, plus columns, primary keys, foreign keys, indexes, and view definitions.                     |
 | `vertica`  | `host`, `user`, `database`  | `schema_patterns`, `port`, `password`, `sslmode`, `executable`, `arguments`, `confirm_mutations`                                | User tables and views, plus columns, primary keys, foreign keys, projections, and view definitions.                      |
 
-`executable` replaces the Connector's default executable. `arguments` is supported only by CLI-backed Connectors and adds an array of string arguments before Orbit's generated arguments; MSSQL intentionally does not accept `arguments`. For MSSQL, SQLite, PostgreSQL, MySQL, and Vertica, Orbit retains one CLI process per profile; statements, schema browsing, and completion prewarming share it and are serialized per profile. MSSQL uses that retained interactive Go `sqlcmd` process as one SQL Server session. A changed profile definition, failed executable, `:OrbitDisconnect`, cancellation, or Neovim exit closes the retained process; the next request reconnects automatically. Trino statements instead run one `trino` CLI invocation per statement, serialized per profile, because the `trino` CLI does not flush its output while held open on a retained connection.
+`executable` replaces a CLI-backed Connector's default executable. `arguments` is supported only by CLI-backed Connectors and adds an array of string arguments before Orbit's generated arguments; MSSQL intentionally does not accept `arguments`. For MSSQL, SQLite, PostgreSQL, MySQL, and Vertica, Orbit retains one child process per profile; statements, schema browsing, and completion prewarming share it and are serialized per profile. MSSQL retains either an interactive Go `sqlcmd` process or a Java helper with one JDBC connection as one SQL Server session. A changed profile definition, failed executable, `:OrbitDisconnect`, cancellation, or Neovim exit closes the retained process; the next request reconnects automatically. Trino statements instead run one `trino` CLI invocation per statement, serialized per profile, because the `trino` CLI does not flush its output while held open on a retained connection.
 
 Schema browsing and completion cache rows only while the connection profile's kind and options are unchanged. Updating a profile clears its prior schema rows before Orbit acquires replacements. Connector metadata that is unavailable for an object, such as Trino primary keys, is shown as unavailable rather than treated as a statement failure. Explicit Workspace refreshes run after pending acquisitions and coalesce with other refresh requests.
 
-`schema_patterns` restricts the tables and views shown by Orbit's Workspace schema browser, but does not change database permissions or restrict statements you run manually. For Trino, it maps each catalog to an array of schema patterns; use an empty array to include every non-system schema from that catalog. MSSQL, PostgreSQL, MySQL, SQLite, and Vertica use a non-empty array instead. Entries accept `*` and `?` globs. MSSQL patterns select schemas only within the profile's fixed database. A MySQL profile always includes its required default `database`; its patterns add other databases. SQLite's only available schema is `main`.
+`schema_patterns` restricts the tables and views shown by Orbit's Workspace schema browser, but does not change database permissions or restrict statements you run manually. For Trino, it maps each catalog to an array of schema patterns; use an empty array to include every non-system schema from that catalog. MSSQL, PostgreSQL, MySQL, SQLite, and Vertica use a non-empty array instead. Entries accept `*` and `?` globs. MSSQL patterns select schemas within every database named by `database`; JDBC uses the login's default database when `database` is omitted. A MySQL profile always includes its required default `database`; its patterns add other databases. SQLite's only available schema is `main`.
 
 ## Connection Profiles
 
@@ -111,7 +120,9 @@ Profiles are JSON, versioned at `1`, and names must be unique:
 <details>
 <summary>Microsoft SQL Server</summary>
 
-### Direct Password
+### Microsoft Go sqlcmd Transport (Default)
+
+#### Direct Password
 
 ```json
 {
@@ -134,7 +145,7 @@ Profiles are JSON, versioned at `1`, and names must be unique:
 }
 ```
 
-### Password From The Environment
+#### Password From The Environment
 
 Set the named variable before starting Neovim, then use its name, not `$MSSQL_PASSWORD`, in the connection profile:
 
@@ -165,8 +176,9 @@ export MSSQL_PASSWORD='replace-me'
 
 MSSQL accepts exactly these profile fields:
 
+- `transport`: optional literal `sqlcmd`; omitting it selects this transport unchanged.
 - `host`: required non-empty string.
-- `database`: required non-empty string.
+- `database`: required non-empty string or non-empty array of unique non-empty strings. For an array, the first database is the retained session's default and schema acquisition includes every entry.
 - `user`: required non-empty SQL login string.
 - `port`: optional integer from `1` through `65535`; defaults to `1433`.
 - `password`: optional non-empty string stored in the owner-only profile file.
@@ -178,9 +190,84 @@ MSSQL accepts exactly these profile fields:
 
 One of `password` or `password_env` must resolve to a password before Go `sqlcmd` starts. Orbit passes it as `SQLCMDPASSWORD`, never in argv. The child receives a sanitized environment: Orbit removes every inherited variable whose name starts with `SQLCMD` (case-insensitive), removes the source variable named by `password_env`, preserves other inherited variables, and then sets only the resolved `SQLCMDPASSWORD` credential among the SQLCMD variables.
 
-The current argv, in order, is `<executable> -S tcp:<host>,<port> -d <database> -U <user> -N mandatory [-C] -s <ASCII 31> -w 65535 -y 8000 -Y 8000 -x`; the bracketed `-C` is present only when `trust_server_certificate` is `true`. ASCII 31 is the unit-separator field delimiter, `-w` sets width `65535`, `-y` and `-Y` set variable and fixed type limits to `8000`, and `-x` disables variable substitution. Orbit does not use `-r`, so SQL errors stay ordered inside the framed stdout response instead of racing a separate stderr stream.
+The current argv, in order, is `<executable> -S tcp:<host>,<port> -d <default-database> -U <user> -N mandatory [-C] -s <ASCII 31> -w 65535 -y 8000 -Y 8000 -x`; `<default-database>` is the string value or first array entry. The bracketed `-C` is present only when `trust_server_certificate` is `true`. ASCII 31 is the unit-separator field delimiter, `-w` sets width `65535`, `-y` and `-Y` set variable and fixed type limits to `8000`, and `-x` disables variable substitution. Orbit does not use `-r`, so SQL errors stay ordered inside the framed stdout response instead of racing a separate stderr stream.
 
-The address is always one explicit TCP host and port, and schema browsing remains in the profile's fixed database. Named-instance discovery and cross-database schema browsing are unsupported. Encryption is always requested as mandatory with `-N mandatory`; profiles cannot weaken it. `trust_server_certificate = true` adds `-C`, bypassing certificate validation and enabling man-in-the-middle attacks. Treat it only as an unsafe temporary development escape hatch.
+The address is always one explicit TCP host and port. An array-valued `database` browses every listed database through three-part SQL Server names; the login must be able to read each database's catalog views. Named-instance discovery remains unsupported. Encryption is always requested as mandatory with `-N mandatory`; profiles cannot weaken it. `trust_server_certificate = true` adds `-C`, bypassing certificate validation and enabling man-in-the-middle attacks. Treat it only as an unsafe temporary development escape hatch.
+
+### JDBC Transport With jTDS
+
+Omitting `transport` preserves the complete `sqlcmd` behavior above. Select the separate JDBC transport explicitly with `"transport": "jdbc"`; that transport initially requires the jTDS JDBC driver through `"driver": "jtds"`.
+
+Set the password variable before starting Neovim. This complete domain-password profile uses the first listed database as the retained JDBC connection's default and browses both databases:
+
+```sh
+export MSSQL_PASSWORD='replace-me'
+```
+
+```json
+{
+  "version": 1,
+  "profiles": [
+    {
+      "name": "domain-mssql",
+      "kind": "mssql",
+      "options": {
+        "transport": "jdbc",
+        "driver": "jtds",
+        "driver_path": "/home/you/.local/share/jdbc/jtds-1.3.1.jar",
+        "host": "db3.company.data",
+        "port": 54059,
+        "database": ["Schema1", "Schema2"],
+        "authentication": {
+          "type": "domain_password",
+          "domain": "company.corp",
+          "user": "user",
+          "password_env": "MSSQL_PASSWORD"
+        }
+      }
+    }
+  ]
+}
+```
+
+SQL-password authentication uses the same outer profile shape and omits `domain`:
+
+```json
+{
+  "transport": "jdbc",
+  "driver": "jtds",
+  "driver_path": "/home/alice/.local/share/jdbc/jtds-1.3.1.jar",
+  "java_executable": "/usr/bin/java",
+  "host": "sql.example.com",
+  "database": "warehouse",
+  "authentication": {
+    "type": "sql_password",
+    "user": "orbit",
+    "password_env": "MSSQL_PASSWORD"
+  }
+}
+```
+
+JDBC profiles accept only these structured fields; raw JDBC URLs and arbitrary driver properties are not accepted:
+
+- `transport`: required literal `jdbc`.
+- `driver`: required literal `jtds`; the initially supported driver version is exactly jTDS 1.3.1.
+- `driver_path`: required absolute path to the user-provided jTDS 1.3.1 JAR. Profile values are literal, so `$HOME` and `~` are not expanded.
+- `java_executable`: optional non-empty Java command name or path; defaults to `java` from `PATH`.
+- `host`: required non-empty SQL Server host.
+- `port`: optional integer from `1` through `65535`; defaults to `1433` when neither `port` nor `instance` is present.
+- `instance`: optional non-empty named instance. `port` and `instance` are mutually exclusive.
+- `database`: optional non-empty string or non-empty array of unique non-empty strings. Omitting it uses and browses the login's default database. For an array, the first entry is the retained JDBC connection's default and schema acquisition includes every entry.
+- `authentication`: required object with `type`, `user`, exactly one of `password` or `password_env`, and `domain` only when `type` is `domain_password`. Supported types are `sql_password` and `domain_password`; domain authentication enables NTLMv2.
+- `trust_server_certificate`: optional boolean; defaults to `false`.
+- `schema_patterns`: optional non-empty array whose entries are non-empty schema globs using `*` and `?`.
+- `confirm_mutations`: optional boolean per-profile mutation-confirmation override.
+
+The helper always requests encrypted TLS. By default, jTDS uses `ssl=authenticate`, which requires a certificate signed by an authority trusted by the JVM; there is no plaintext fallback. jTDS does not document hostname matching for this mode, so do not treat it as equivalent to a modern hostname-verified TLS client. Setting `trust_server_certificate = true` explicitly changes this to `ssl=require`, retaining encryption but bypassing certificate-chain validation. This is unsafe and permits man-in-the-middle attacks.
+
+Orbit resolves either the direct password or `password_env` value before launch. It excludes the credential from process arguments, the generated JDBC URL, and the Java child environment, then sends it only through the helper's length-framed standard input after Java starts. The URL and driver properties are built by Orbit from the validated fields.
+
+jTDS 1.3.1 is an old driver whose general SQL Server, Java, authentication, and TLS compatibility should not be assumed. On Linux with Java 25, live verification passed against SQL Server `16.0.4252.3` using explicit domain credentials; SQL Server reported `NTLM`, while deterministic property checks confirm Orbit enabled jTDS `useNTLMv2`. Retained state, structured values, single-database schema acquisition, error recovery, cancellation, and reconnection passed. Multi-database acquisition, including cross-database permissions, Unicode database names, and mixed collations, has deterministic coverage only. The test server's certificate chain was not trusted by the JVM: secure `ssl=authenticate` failed with a PKIX error, while the explicit unsafe path connected with the client configured as `ssl=require`. Server-side encryption-state inspection was unavailable to this account. Successful certificate-chain validation, hostname behavior, other servers, and other authentication modes remain unverified.
 
 </details>
 
@@ -431,7 +518,7 @@ Run `:OrbitProfiles`, change the value in the profile's existing `options` objec
 
 ### Authentication
 
-MSSQL profiles require SQL authentication through either `options.password` or `options.password_env`. Orbit resolves the password before starting Go `sqlcmd` and passes it only as `SQLCMDPASSWORD` in the sanitized child environment. Windows integrated authentication, Kerberos, and Microsoft Entra authentication are not supported.
+Default MSSQL `sqlcmd` profiles require SQL authentication through either `options.password` or `options.password_env`. Orbit resolves the password before starting Go `sqlcmd` and passes it only as `SQLCMDPASSWORD` in the sanitized child environment. JDBC/jTDS profiles instead use an `authentication` object with `sql_password` or explicit `domain_password` credentials and exactly one password source; their resolved password travels only over helper stdin. Windows integrated authentication, Kerberos, and Microsoft Entra authentication are not supported.
 
 PostgreSQL profiles may include `options.password`. Orbit passes it only to `psql` as `PGPASSWORD`, never as a command-line argument. The profile file is owner-protected (`0600`), but a password remains sensitive; use your system's credential management or a `~/.pgpass` file if you prefer not to store it in JSON.
 
@@ -492,7 +579,7 @@ From a workspace query buffer, `/` focuses the workspace filter. Elsewhere, `/` 
 
 Whole-buffer execution rejects ambiguous multi-statement content. Select the exact statement in Visual mode, then run `:OrbitExecute` or `<leader>E`.
 
-With no argument, `:OrbitDoctor` diagnoses every Connector. Supply `mssql`, `mysql`, `postgres`, `sqlite`, `trino`, or `vertica` to restrict the report. For MSSQL, `:OrbitDoctor mssql` validates the profile file, reports the user-installed executable selected from an override or `PATH`, invokes only `--version`, and checks `password_env` presence. It does not install anything, execute SQL, or open a database session, and it redacts known profile secrets from version output.
+With no argument, `:OrbitDoctor` diagnoses every Connector. Supply `mssql`, `mysql`, `postgres`, `sqlite`, `trino`, or `vertica` to restrict the report. For default MSSQL profiles, `:OrbitDoctor mssql` preserves the existing `sqlcmd` checks: it validates the profile file, reports the user-installed executable selected from an override or `PATH`, invokes only `--version`, and checks `password_env` presence. For JDBC profiles, it checks the password source, Java executable, readable jTDS JAR, Java 11+ source-file execution, and exact jTDS 1.3.1 class loading through the helper's doctor mode. It does not install anything, execute SQL, or open a database session, and it redacts known profile secrets from diagnostic output.
 
 ## Keybindings
 
@@ -678,7 +765,7 @@ Once wired up, suggestions appear automatically as you type, no manual trigger n
 - Alias/table scope is limited to the query block and set-operation branch containing the cursor, plus SQL-visible correlated outer blocks. Sibling subqueries and `UNION`/`INTERSECT`/`EXCEPT` branches do not leak aliases; `JOIN ... ON` sees only tables introduced so far; non-`LATERAL` derived tables are isolated, while `LATERAL` derived tables see preceding sources. CTEs and derived tables (`FROM (SELECT ...) sub`) are recognized but do not offer inferred columns.
 - Suggestions are narrowed to whatever you've already typed (case-insensitive prefix match) before being handed to blink.cmp, so its own fuzzy scoring only ever sees genuinely relevant candidates.
 
-MSSQL completion uses bracket-qualified schema and object names such as `[sales].[orders]` and offers schemas as completion namespaces. It uses only objects acquired from the profile's fixed database.
+MSSQL completion uses bracket-qualified schema and object names such as `[sales].[orders]` for string profiles. Array profiles use three-part names such as `[Schema].[sales].[orders]` and complete progressively through database and schema namespaces. They appear in the schema browser under flattened `database.schema` groups. Completion uses only acquired objects, including the login-default database when a JDBC profile omits `database`.
 
 Selecting a profile preloads tables and views in the background; expanding it in the Workspace schema browser fills more of the cache. Completion never runs a Connector executable while you type. SQL keywords and functions, formatting, and highlighting remain the responsibility of your existing SQL tooling.
 
@@ -686,7 +773,7 @@ Set `completion = false` in Orbit's `setup()` to disable the blink source's `ena
 
 ## Execution And Results
 
-Orbit runs statements asynchronously through the selected profile's Connector executable. For MSSQL, SQLite, PostgreSQL, MySQL, and Vertica, schema work and statements share one retained process and execute one at a time. MSSQL keeps one interactive Go `sqlcmd` process per connection profile, so transactions, temporary tables, and other session state can persist until disconnect, cancellation, failure, profile change, or exit. Trino statements each run their own `trino` CLI invocation, still serialized per profile.
+Orbit runs statements asynchronously through the selected profile's Connector client. For MSSQL, SQLite, PostgreSQL, MySQL, and Vertica, schema work and statements share one retained process and execute one at a time. MSSQL keeps either one interactive Go `sqlcmd` process or one Java helper and JDBC connection per connection profile, so transactions, temporary tables, and other session state can persist until disconnect, cancellation, connection failure, malformed helper protocol, profile change, or exit. An ordinary JDBC SQL error is request-scoped and preserves the retained connection. Trino statements each run their own `trino` CLI invocation, still serialized per profile.
 
 One running statement is allowed per query buffer. `:OrbitCancel` terminates an active retained process, fails work queued on that process, and starts a fresh session only when the next Statement is requested. Cancelling work that has not started removes only that queued request. Orbit reports cancellation as cancellation rather than opening diagnostics; server-side completion timing is not asserted after the CLI is terminated.
 
@@ -698,25 +785,42 @@ Result grids are reused per tabpage. They show up to `result_limit` rows and tru
 
 MySQL XML results preserve SQL `NULL`, empty strings, tabs, line feeds, and ordinary Unicode text. Statements returning multiple row-producing result sets fail explicitly because the Result grid represents one set. Arbitrary binary/BLOB bytes are not guaranteed to round-trip through the CLI XML format. MariaDB servers are rejected rather than treated as compatible MySQL servers.
 
-MSSQL output handling is strict best-effort, not a lossless transport. Orbit rejects detectable malformed widths, empty or duplicate headings, informational output mixed into results, and multiple tabular result sets. Detection cannot make the format safe: a unit-separator byte or newline inside a value can collide with framing and may be undetectable; a blank one-column row is indistinguishable from result spacing; leading and trailing whitespace in every heading and cell is trimmed; the literal text `NULL` is indistinguishable from SQL `NULL`; and Go `sqlcmd` may truncate or wrap values despite Orbit's large fixed width and type limits. All cell data, including apparent `NULL`, remains text and Orbit performs no typed decoding. Statements capable of reproducing Orbit's internal marker output can break in-band framing, so framing is not a security boundary. Do not rely on an MSSQL Result grid for byte-for-byte export or type preservation.
+MSSQL `sqlcmd` output handling is strict best-effort, not a lossless transport. Orbit rejects detectable malformed widths, empty or duplicate headings, informational output mixed into results, and multiple tabular result sets. Detection cannot make the format safe: a unit-separator byte or newline inside a value can collide with framing and may be undetectable; a blank one-column row is indistinguishable from result spacing; leading and trailing whitespace in every heading and cell is trimmed; the literal text `NULL` is indistinguishable from SQL `NULL`; and Go `sqlcmd` may truncate or wrap values despite Orbit's large fixed width and type limits. All cell data, including apparent `NULL`, remains text and Orbit performs no typed decoding. Statements capable of reproducing Orbit's internal marker output can break in-band framing, so framing is not a security boundary. Do not rely on an MSSQL `sqlcmd` Result grid for byte-for-byte export or type preservation.
+
+The MSSQL JDBC transport returns one structured tabular result with ordered column labels, string cell values, and SQL `NULL` kept distinct from empty strings and literal `NULL` text. A non-row statement returns an empty result. Empty or duplicate labels and multiple tabular result sets fail explicitly rather than being normalized, merged, or discarded. Schema acquisition and ordinary statements use the same retained JDBC connection; existing MSSQL schema browsing, completion, bracket-qualified names, mutation confirmation, `GO` rejection, and read-only grids are retained.
 
 Orbit rejects other detectable malformed CLI formats rather than rendering partial rows. This includes incomplete CSV/XML/HTML records, duplicate or empty column headings, invalid encoded entities, inconsistent tabular row widths, and JSON rows that are not objects.
 
 ### MSSQL Scope And Limits
 
-This table describes implemented behavior, not verified compatibility. Only Microsoft Go `sqlcmd` is targeted. No live `sqlcmd` or SQL Server verification occurred, so server versions, client versions, TLS behavior, authentication behavior, retained server-session behavior, and result fidelity claims are not release-ready.
+These tables describe implemented behavior plus one narrow live compatibility observation. No live `sqlcmd` transport verification occurred. JDBC verification passed on Linux with Java 25, jTDS 1.3.1, SQL Server `16.0.4252.3`, explicit domain credentials, server-reported NTLM, and the unsafe certificate-trust bypass. Orbit set `useNTLMv2` and `ssl=require`, but this account could not independently inspect the NTLM version or server-side encryption state. Secure certificate-chain validation refused the test server's untrusted chain as expected; a successful trusted-chain connection and hostname behavior remain unverified. Do not generalize this result to other environments.
+
+#### Microsoft Go sqlcmd Transport
 
 | Area | Implemented contract | Current limit |
 | ---- | -------------------- | ------------- |
 | CLI | User-installed Microsoft Go `sqlcmd`, selected from `options.executable` or `PATH` | Other implementations sharing the `sqlcmd` name are not targeted. |
 | Authentication | SQL username/password through sanitized `SQLCMDPASSWORD` | Integrated, Kerberos, and Microsoft Entra authentication are unsupported. |
 | Transport | Mandatory encryption; certificate validation by default | `trust_server_certificate = true` adds unsafe `-C` and bypasses validation. |
-| Addressing | One TCP host, fixed port, and fixed database per profile | Named-instance discovery and cross-database schema browsing are unsupported. |
+| Addressing | One TCP host and fixed port; `database` may list multiple databases on that server | Named-instance discovery is unsupported; every listed database must be accessible to the login. |
 | Session | One retained interactive CLI process per profile | Cancellation, failure, disconnect, profile changes, and exit discard it. |
 | Schema acquisition | User tables and views excluding Microsoft-shipped objects, columns, and optional schema globs | Primary keys, foreign keys, indexes, and definitions are not exposed. |
 | Object UX | `SELECT TOP (N)` samples, columns action, bracket-qualified names, and bracket-aware completion | Result grids are read-only. |
 | Results | Zero or one separator-delimited tabular result parsed into text cells | Output is best-effort and lossy; multiple sets and informational output are rejected. |
 | T-SQL input | One Statement with conservative mutation confirmation | Active `GO` lines and sqlcmd control commands (`:...`, `!!`, `ED`, `RESET`, `ON ERROR`, `EXIT`, and `QUIT`) are rejected. |
+
+#### JDBC Transport With jTDS 1.3.1
+
+| Area | Implemented contract | Current limit |
+| ---- | -------------------- | ------------- |
+| Runtime | User-installed Java 11+ source-file runtime and user-provided jTDS 1.3.1 JAR | Java 25 was verified; Orbit performs no download, bundle, installation, or update. |
+| Authentication | Structured `sql_password` or explicit `domain_password`; NTLMv2 for domain credentials | Integrated authentication, Kerberos, Microsoft Entra, and other modes are unsupported. |
+| Transport | Encrypted TLS with JVM-trusted certificate-chain validation by default | jTDS does not document hostname matching; `trust_server_certificate = true` also bypasses chain validation. |
+| Addressing | Structured host, optional mutually exclusive port or instance, and optional string or array `database` | Port defaults to `1433`; raw JDBC URLs and arbitrary driver properties are unsupported. |
+| Session | One retained Java helper and JDBC connection per profile; ordinary SQL errors preserve it | Connection/protocol failure, cancellation, disconnect, profile changes, and exit discard it. |
+| Cancellation | Active cancellation terminates the JVM and fails work queued on it; later work reconnects | Server-side completion timing after process termination is not asserted. |
+| Schema and object UX | Same tables, views, columns, schema globs, samples, naming, completion, and mutation policy as `sqlcmd` | Result grids remain read-only. |
+| Results | Zero or one structured tabular result with ordered labels, text values, and distinct SQL `NULL` | Empty/duplicate labels and multiple tabular result sets are rejected; SQL types are not retained. |
 
 ## Configuration
 

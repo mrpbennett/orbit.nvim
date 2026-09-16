@@ -41,6 +41,8 @@
 --     The main entry point: opens (or reuses) the results split for the
 --     current tabpage, renders `rows` into it, and wires up all keymaps.
 --     See its own comment below for the full list of supported `options`.
+--   M.cleanup(tabpage) -> nil
+--     Releases retained Result grid state after its tabpage closes.
 
 local grid_model = require("orbit.grid")
 local editable_result = require("orbit.editable_result")
@@ -66,6 +68,13 @@ local result_sequence = 0
 -- the supported keys (e.g. `limit`, `max_cell_width`, `columns`).
 function M.render(rows, options)
   return grid_model.render(rows, options)
+end
+
+-- Forget tabpage-owned Result grid state after Neovim has closed that tabpage.
+-- The window closure handles buffer disposal; removing this reference releases
+-- the grid model and its callbacks without opening UI in another tabpage.
+function M.cleanup(tabpage)
+  tab_results[tabpage] = nil
 end
 
 -- Figures out which grid cell (row/column, in grid-data terms, not buffer

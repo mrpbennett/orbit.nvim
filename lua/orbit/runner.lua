@@ -33,10 +33,10 @@ local M = {}
 -- Returns normalized rows, an error string, and optional execution metadata.
 -- The third value extends the Connector contract without changing existing
 -- two-value row/error parsers.
-local function parse(connector, output)
+local function parse(connector, output, options)
 	local rows, err, metadata
 	if connector.parse then
-		rows, err, metadata = connector.parse(output)
+		rows, err, metadata = connector.parse(output, options)
 	else
 		rows, err, metadata = adapters.parse(output)
 	end
@@ -107,7 +107,7 @@ local function run_once(profile, connector, statement, callback)
         return
       end
 
-			local rows, parse_err, metadata = parse(connector, result.stdout)
+			local rows, parse_err, metadata = parse(connector, result.stdout, profile.options)
       if not rows then
         callback(nil, parse_err, metadata)
         return
@@ -162,7 +162,7 @@ function M.run(profile, statement, callback, connector)
       callback(nil, run_err)
       return
     end
-		local rows, parse_err, metadata = parse(connector, output)
+		local rows, parse_err, metadata = parse(connector, output, profile.options)
 		callback(rows, parse_err, metadata)
   end)
 end
@@ -190,6 +190,12 @@ end
 -- on that session (see orbit.session.close).
 function M.close(profile_name)
   session.close(profile_name)
+end
+
+-- Neovim shutdown owns all retained child processes, not just the profile
+-- associated with the current buffer.
+function M.close_all()
+	session.close_all()
 end
 
 -- Check whether a profile currently has a live, connected session process.

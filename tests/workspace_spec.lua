@@ -1,5 +1,9 @@
 local workspace = require("orbit.workspace")
+local diagnostics = require("orbit.diagnostics")
+local feedback = require("orbit.feedback")
 local profiles = require("orbit.profiles")
+local query = require("orbit.query")
+local results = require("orbit.results")
 local runner = require("orbit.runner")
 
 local function line_number(buffer, text)
@@ -29,6 +33,364 @@ local function highlight_range(buffer, group, line)
 end
 
 return {
+	["native tab closure ends Workspace ownership but preserves query state"] = function()
+		require("orbit").setup()
+		local original = vim.api.nvim_get_current_tabpage()
+		local original_cleanup = results.cleanup
+		local cleanup_count = 0
+		results.cleanup = function(tabpage)
+			cleanup_count = cleanup_count + 1
+			return original_cleanup(tabpage)
+		end
+		local state = workspace.open({ profile_path = vim.fn.tempname() })
+		local buffer = vim.api.nvim_win_get_buf(state.query_window)
+		vim.bo[buffer].bufhidden = "hide"
+		vim.api.nvim_buf_set_lines(buffer, 0, -1, false, { "SELECT retained" })
+		vim.b[buffer].orbit_profile = "local"
+		vim.b[buffer].orbit_sql_dialect = "sqlite"
+		vim.b[buffer].orbit_table = { schema = "main", name = "items", type = "table" }
+		vim.b[buffer].orbit_table_statement = "SELECT retained"
+
+		vim.cmd("tabclose")
+
+		local cleaned = vim.wait(100, function() return vim.b[buffer].orbit_workspace_tab == nil end)
+		results.cleanup = original_cleanup
+		assert(cleaned)
+		assert(cleanup_count == 1)
+		assert(not workspace.is_workspace(state.tabpage))
+		assert(vim.api.nvim_buf_is_valid(buffer))
+		assert(vim.b[buffer].orbit_profile == "local")
+		assert(vim.b[buffer].orbit_sql_dialect == "sqlite")
+		assert(vim.b[buffer].orbit_table.name == "items")
+		assert(vim.b[buffer].orbit_table_statement == "SELECT retained")
+		assert(vim.deep_equal(vim.api.nvim_buf_get_lines(buffer, 0, -1, false), { "SELECT retained" }))
+		vim.api.nvim_buf_delete(buffer, { force = true })
+		vim.api.nvim_set_current_tabpage(original)
+	end,
+
+	["failed tab closure preserves the live Workspace"] = function()
+		local original = vim.api.nvim_get_current_tabpage()
+		local state = workspace.open({ profile_path = vim.fn.tempname() })
+		local buffer = vim.api.nvim_win_get_buf(state.query_window)
+		local original_cmd = vim.cmd
+		vim.cmd = function(command)
+			if command == "tabclose" then error("Neovim refused tab closure") end
+			return original_cmd(command)
+		end
+
+		local closed = pcall(workspace.close, state.tabpage)
+		vim.cmd = original_cmd
+
+		assert(not closed)
+		assert(vim.api.nvim_tabpage_is_valid(state.tabpage))
+		assert(workspace.is_workspace(state.tabpage))
+		assert(vim.b[buffer].orbit_workspace_tab == state.tabpage)
+		workspace.close(state.tabpage)
+		vim.api.nvim_set_current_tabpage(original)
+	end,
+
+	["Workspace closure abandons pending profile selection"] = function()
+		local original = vim.api.nvim_get_current_tabpage()
+		local original_notify = vim.notify
+		local notifications = {}
+		vim.notify = function(message, level)
+			notifications[#notifications + 1] = { message = message, level = level }
+		end
+		local path = vim.fn.tempname()
+		assert(profiles.write(path, {
+			version = 1,
+			profiles = { { name = "selection", kind = "sqlite", options = { path = ":memory:" } } },
+		}))
+		local target = vim.api.nvim_create_buf(false, true)
+		local selected = 0
+		workspace.select_profile({ profile_path = path }, target, function() selected = selected + 1 end)
+		vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Esc>", true, false, true), "mx", false)
+		workspace.close()
+
+		local replacement = workspace.open({ profile_path = path })
+		vim.api.nvim_set_current_win(replacement.sidebar_window)
+		vim.api.nvim_win_set_cursor(replacement.sidebar_window, { assert(line_number(replacement.sidebar, "selection")), 0 })
+		vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<CR>", true, false, true), "mx", false)
+		assert(selected == 0)
+		assert(vim.b[target].orbit_profile == nil)
+		local discarded = 0
+		for _, notification in ipairs(notifications) do
+			if notification.message == "Profile selection discarded: Workspace closed" then
+				assert(notification.level == vim.log.levels.DEBUG)
+				discarded = discarded + 1
+			end
+		end
+		assert(discarded == 1)
+		workspace.close(replacement.tabpage)
+		vim.notify = original_notify
+		vim.api.nvim_buf_delete(target, { force = true })
+		vim.api.nvim_set_current_tabpage(original)
+	end,
+
+	["closed Workspaces discard late Statement rows without cancelling execution"] = function()
+		require("orbit").setup()
+		local original_run = runner.run
+		local original_connected = runner.connected
+		local original_open = results.open
+		local original_notify = vim.notify
+		local original_tabpage = vim.api.nvim_get_current_tabpage()
+		local path = vim.fn.tempname()
+		local profile = { name = "late-result", kind = "sqlite", options = { path = ":memory:" } }
+		assert(profiles.write(path, { version = 1, profiles = { profile } }))
+		local completion
+		local process = { killed = false }
+		function process:kill() self.killed = true end
+		local rendered = 0
+		local notifications = {}
+		runner.connected = function() return false end
+		runner.run = function(_, _, callback)
+			completion = callback
+			return process
+		end
+		results.open = function() rendered = rendered + 1 end
+		vim.notify = function(message, level)
+			notifications[#notifications + 1] = { message = message, level = level }
+		end
+
+		local ok, err = xpcall(function()
+			for _, close in ipairs({ "orbit", "native" }) do
+				local state = workspace.open({ profile_path = path })
+				local buffer = vim.api.nvim_win_get_buf(state.query_window)
+				vim.bo[buffer].bufhidden = "hide"
+				vim.api.nvim_buf_set_lines(buffer, 0, -1, false, { "SELECT 1" })
+				query.bind_profile(buffer, profile)
+				query.execute(buffer, { confirm_mutations = false, profile_path = path })
+				assert(completion)
+				if close == "orbit" then
+					workspace.close(state.tabpage)
+				else
+					vim.cmd("tabclose")
+					assert(vim.wait(100, function() return not workspace.is_workspace(state.tabpage) end))
+				end
+				completion({ { value = close } })
+				completion = nil
+				assert(vim.b[buffer].orbit_workspace_tab == nil)
+				vim.api.nvim_buf_delete(buffer, { force = true })
+			end
+			assert(rendered == 0)
+			assert(not process.killed)
+			local discarded = 0
+			for _, notification in ipairs(notifications) do
+				if notification.message == "Statement result discarded: Workspace closed" then
+					assert(notification.level == vim.log.levels.DEBUG)
+					discarded = discarded + 1
+				end
+			end
+			assert(discarded == 2)
+		end, debug.traceback)
+		runner.run = original_run
+		runner.connected = original_connected
+		results.open = original_open
+		vim.notify = original_notify
+		vim.api.nvim_set_current_tabpage(original_tabpage)
+		assert(ok, err)
+	end,
+
+	["late Statement ownership cannot target a replacement Workspace"] = function()
+		local original_run = runner.run
+		local original_connected = runner.connected
+		local original_open = results.open
+		local original_tabpage = vim.api.nvim_get_current_tabpage()
+		local path = vim.fn.tempname()
+		local profile = { name = "old-owner", kind = "sqlite", options = { path = ":memory:" } }
+		assert(profiles.write(path, { version = 1, profiles = { profile } }))
+		local completion
+		local rendered = 0
+		runner.connected = function() return false end
+		runner.run = function(_, _, callback)
+			completion = callback
+			return {}
+		end
+		results.open = function() rendered = rendered + 1 end
+
+		local old_state
+		local replacement
+		local buffer
+		local ok, err = xpcall(function()
+			old_state = workspace.open({ profile_path = path })
+			buffer = vim.api.nvim_win_get_buf(old_state.query_window)
+			vim.bo[buffer].bufhidden = "hide"
+			vim.api.nvim_buf_set_lines(buffer, 0, -1, false, { "SELECT 1" })
+			query.bind_profile(buffer, profile)
+			query.execute(buffer, { confirm_mutations = false, profile_path = path })
+			workspace.close(old_state.tabpage)
+			replacement = workspace.open({ profile_path = path })
+			completion({ { value = "old" } })
+			assert(rendered == 0)
+			assert(workspace.is_workspace(replacement.tabpage))
+		end, debug.traceback)
+		runner.run = original_run
+		runner.connected = original_connected
+		results.open = original_open
+		if replacement and vim.api.nvim_tabpage_is_valid(replacement.tabpage) then workspace.close(replacement.tabpage) end
+		if buffer and vim.api.nvim_buf_is_valid(buffer) then vim.api.nvim_buf_delete(buffer, { force = true }) end
+		vim.api.nvim_set_current_tabpage(original_tabpage)
+		assert(ok, err)
+	end,
+
+	["late Statement failures notify without opening diagnostics outside the Workspace"] = function()
+		local original_run = runner.run
+		local original_connected = runner.connected
+		local original_open = diagnostics.open
+		local original_notify = vim.notify
+		local original_tabpage = vim.api.nvim_get_current_tabpage()
+		local path = vim.fn.tempname()
+		local profile = { name = "late-error", kind = "sqlite", options = { path = ":memory:" } }
+		assert(profiles.write(path, { version = 1, profiles = { profile } }))
+		local completion
+		local diagnostics_opened = 0
+		local notifications = {}
+		runner.connected = function() return false end
+		runner.run = function(_, _, callback)
+			completion = callback
+			return {}
+		end
+		diagnostics.open = function() diagnostics_opened = diagnostics_opened + 1 end
+		vim.notify = function(message, level)
+			notifications[#notifications + 1] = { message = message, level = level }
+		end
+
+		local state
+		local buffer
+		local ok, err = xpcall(function()
+			state = workspace.open({ profile_path = path })
+			buffer = vim.api.nvim_win_get_buf(state.query_window)
+			vim.bo[buffer].bufhidden = "hide"
+			vim.api.nvim_buf_set_lines(buffer, 0, -1, false, { "SELECT invalid" })
+			query.bind_profile(buffer, profile)
+			query.execute(buffer, { confirm_mutations = false, profile_path = path })
+			workspace.close(state.tabpage)
+			completion(nil, "database failure")
+			assert(diagnostics_opened == 0)
+			local errors = 0
+			for _, notification in ipairs(notifications) do
+				if notification.message == "database failure" then
+					assert(notification.level == vim.log.levels.ERROR)
+					errors = errors + 1
+				end
+			end
+			assert(errors == 1)
+		end, debug.traceback)
+		runner.run = original_run
+		runner.connected = original_connected
+		diagnostics.open = original_open
+		vim.notify = original_notify
+		if state and vim.api.nvim_tabpage_is_valid(state.tabpage) then workspace.close(state.tabpage) end
+		if buffer and vim.api.nvim_buf_is_valid(buffer) then vim.api.nvim_buf_delete(buffer, { force = true }) end
+		vim.api.nvim_set_current_tabpage(original_tabpage)
+		assert(ok, err)
+	end,
+
+	["Workspace closure finishes Schema acquisition feedback without cancelling acquisition"] = function()
+		local original_run = runner.run
+		local original_start = feedback.start
+		local original_finish = feedback.finish
+		local original_tabpage = vim.api.nvim_get_current_tabpage()
+		local path = vim.fn.tempname()
+		assert(profiles.write(path, {
+			version = 1,
+			profiles = { { name = "slow-schema", kind = "sqlite", options = { path = ":memory:" } } },
+		}))
+		local completion
+		local finishes = {}
+		runner.run = function(_, _, callback)
+			completion = callback
+			return {}
+		end
+		feedback.start = function() return {} end
+		feedback.finish = function(_, message, level)
+			finishes[#finishes + 1] = { message = message, level = level }
+		end
+
+		local state
+		local ok, err = xpcall(function()
+			state = workspace.open({ profile_path = path })
+			vim.api.nvim_set_current_win(state.sidebar_window)
+			vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "slow-schema")), 0 })
+			vim.api.nvim_feedkeys("l", "mx", false)
+			assert(completion)
+			workspace.close(state.tabpage)
+			assert(#finishes == 1)
+			assert(finishes[1].message == "Schema load discarded: Workspace closed")
+			assert(finishes[1].level == vim.log.levels.DEBUG)
+			completion({ { schema = "main", name = "items", type = "table" } })
+			assert(#finishes == 1)
+		end, debug.traceback)
+		runner.run = original_run
+		feedback.start = original_start
+		feedback.finish = original_finish
+		if state and vim.api.nvim_tabpage_is_valid(state.tabpage) then workspace.close(state.tabpage) end
+		vim.api.nvim_set_current_tabpage(original_tabpage)
+		assert(ok, err)
+	end,
+
+	["Workspace closure discards Statement rows waiting for Table metadata"] = function()
+		local original_run = runner.run
+		local original_connected = runner.connected
+		local original_open = results.open
+		local original_notify = vim.notify
+		local original_tabpage = vim.api.nvim_get_current_tabpage()
+		local path = vim.fn.tempname()
+		local profile = { name = "late-metadata", kind = "sqlite", options = { path = ":memory:" } }
+		assert(profiles.write(path, { version = 1, profiles = { profile } }))
+		local statement_completion
+		local metadata_completion
+		local rendered = 0
+		local notifications = {}
+		runner.connected = function() return false end
+		runner.run = function(_, statement, callback)
+			if statement == "SELECT * FROM items" then
+				statement_completion = callback
+			else
+				metadata_completion = callback
+			end
+			return {}
+		end
+		results.open = function() rendered = rendered + 1 end
+		vim.notify = function(message, level)
+			notifications[#notifications + 1] = { message = message, level = level }
+		end
+
+		local state
+		local buffer
+		local ok, err = xpcall(function()
+			state = workspace.open({ profile_path = path })
+			buffer = vim.api.nvim_win_get_buf(state.query_window)
+			vim.bo[buffer].bufhidden = "hide"
+			vim.api.nvim_buf_set_lines(buffer, 0, -1, false, { "SELECT * FROM items" })
+			query.bind_profile(buffer, profile)
+			vim.b[buffer].orbit_table = { schema = "main", name = "items", type = "table" }
+			vim.b[buffer].orbit_table_statement = "SELECT * FROM items"
+			query.execute(buffer, { confirm_mutations = false, profile_path = path })
+			statement_completion({ { id = "1" } }, nil, { columns = { "id" } })
+			assert(metadata_completion)
+			workspace.close(state.tabpage)
+			metadata_completion({ { name = "id" } })
+			assert(rendered == 0)
+			local discarded = 0
+			for _, notification in ipairs(notifications) do
+				if notification.message == "Statement result discarded: Workspace closed" then
+					assert(notification.level == vim.log.levels.DEBUG)
+					discarded = discarded + 1
+				end
+			end
+			assert(discarded == 1)
+		end, debug.traceback)
+		runner.run = original_run
+		runner.connected = original_connected
+		results.open = original_open
+		vim.notify = original_notify
+		if state and vim.api.nvim_tabpage_is_valid(state.tabpage) then workspace.close(state.tabpage) end
+		if buffer and vim.api.nvim_buf_is_valid(buffer) then vim.api.nvim_buf_delete(buffer, { force = true }) end
+		vim.api.nvim_set_current_tabpage(original_tabpage)
+		assert(ok, err)
+	end,
+
   ["workspace.open creates a dedicated tabpage"] = function()
     local original = vim.api.nvim_get_current_tabpage()
     local state = workspace.open({ profile_path = vim.fn.tempname() })

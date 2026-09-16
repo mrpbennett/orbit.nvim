@@ -109,13 +109,16 @@ end
 -- is what lets the same logical node (e.g. "the public schema") keep its
 -- expanded state across re-renders.
 -- Parameter: node - a node table with a `.kind` field of "schema", "group",
--- "table", or "metadata", plus kind-specific fields (see M.lines for how
+-- "catalog", "table", or "metadata", plus kind-specific fields (see M.lines for how
 -- each kind is constructed).
 -- Returns: a string key, or nil if node.kind isn't one of the recognized
 -- kinds (defensive fallback -- shouldn't normally happen).
 local function node_key(node)
 	if node.kind == "schema" then
 		return "schema\0" .. node.key
+	end
+	if node.kind == "catalog" then
+		return "catalog\0" .. node.key
 	end
 	if node.kind == "group" then
 		return group_key(node.key, node.group)
@@ -276,17 +279,75 @@ function M.lines(tree, profile, filter, options)
 	elseif #groups == 0 then
 		table.insert(lines, "No matching tables or views")
 	end
+	-- Catalog-aware connectors retain catalog identity separately from schemas,
+	-- so the browser can expose each catalog as its own expandable tier.
+	local catalog_groups = {}
+	local display_groups = {}
 	for _, schema_group in ipairs(groups) do
-		local schema_node = { kind = "schema", key = schema_group.key, name = schema_group.name }
+		local objects = #schema_group.tables > 0 and schema_group.tables or schema_group.views
+		local catalog = objects[1].catalog
+		if catalog then
+			local key = schema.identity({ catalog = catalog })
+			local catalog_group = catalog_groups[key]
+			if not catalog_group then
+				catalog_group = { key = key, name = catalog, schemas = {} }
+				catalog_groups[key] = catalog_group
+				table.insert(display_groups, catalog_group)
+			end
+			table.insert(catalog_group.schemas, schema_group)
+		else
+			table.insert(display_groups, schema_group)
+		end
+	end
+	for _, catalog_group in pairs(catalog_groups) do
+		table.sort(catalog_group.schemas, function(left, right)
+			return left.name < right.name
+		end)
+	end
+	for index, display_group in ipairs(display_groups) do
+		local indent = ""
+		local schema_group = display_group
+		if display_group.schemas then
+			local catalog_node = { kind = "catalog", key = display_group.key, name = display_group.name }
+			local catalog_expanded = M.is_expanded(tree, catalog_node) or filter ~= ""
+			table.insert(
+				lines,
+				string.format("%s %s %s", catalog_expanded and icons.expanded or icons.collapsed, icons.schema, display_group.name)
+			)
+			nodes[#lines] = catalog_node
+			add_icon_highlight(
+				highlights,
+				#lines,
+				"OrbitIconSchema",
+				#(catalog_expanded and icons.expanded or icons.collapsed) + 1,
+				icons.schema
+			)
+			if catalog_expanded then
+				for child_index = #display_group.schemas, 1, -1 do
+					table.insert(display_groups, index + 1, { schema = display_group.schemas[child_index], indent = "  " })
+				end
+			end
+		else
+			if display_group.schema then
+				schema_group = display_group.schema
+				indent = display_group.indent
+			end
+			local schema_name = schema_group.name
+			if indent ~= "" then
+				local objects = #schema_group.tables > 0 and schema_group.tables or schema_group.views
+				schema_name = objects[1].schema or "main"
+			end
+			local schema_node = { kind = "schema", key = schema_group.key, name = schema_name }
 		-- Filtering reveals matching ancestors without changing the user's saved expansion state.
 		local schema_expanded = M.is_expanded(tree, schema_node) or filter ~= ""
 		table.insert(
 			lines,
 			string.format(
-				"%s %s %s",
+				"%s%s %s %s",
+				indent,
 				schema_expanded and icons.expanded or icons.collapsed,
 				icons.schema,
-				schema_group.name
+				schema_name
 			)
 		)
 		nodes[#lines] = schema_node
@@ -294,7 +355,7 @@ function M.lines(tree, profile, filter, options)
 			highlights,
 			#lines,
 			"OrbitIconSchema",
-			#(schema_expanded and icons.expanded or icons.collapsed) + 1,
+			#indent + #(schema_expanded and icons.expanded or icons.collapsed) + 1,
 			icons.schema
 		)
 		for _, kind in ipairs({ "tables", "views" }) do
@@ -310,10 +371,10 @@ function M.lines(tree, profile, filter, options)
 				if kind == "tables" then
 					label = string.format("%s %s", icons.with, label)
 				end
-				table.insert(lines, string.format("  %s %s", marker, label))
+				table.insert(lines, string.format("%s  %s %s", indent, marker, label))
 				nodes[#lines] = group_node
 				if kind == "tables" then
-					add_icon_highlight(highlights, #lines, "OrbitIconTable", #("  " .. marker .. " "), icons.with)
+					add_icon_highlight(highlights, #lines, "OrbitIconTable", #(indent .. "  " .. marker .. " "), icons.with)
 				end
 				if group_expanded then
 					for _, row in ipairs(objects) do
@@ -323,7 +384,8 @@ function M.lines(tree, profile, filter, options)
 						table.insert(
 							lines,
 							string.format(
-								"    %s %s %s",
+								"%s    %s %s %s",
+								indent,
 								table_expanded and icons.expanded or icons.collapsed,
 								icons[object_kind],
 								row.name
@@ -338,7 +400,7 @@ function M.lines(tree, profile, filter, options)
 							highlights,
 							#lines,
 							object_kind == "view" and "OrbitIconView" or "OrbitIconTable",
-							#("    " .. (table_expanded and icons.expanded or icons.collapsed) .. " "),
+								#(indent .. "    " .. (table_expanded and icons.expanded or icons.collapsed) .. " "),
 							icons[object_kind]
 						)
 						if table_expanded then
@@ -365,7 +427,8 @@ function M.lines(tree, profile, filter, options)
 								table.insert(
 									lines,
 									string.format(
-										"      %s %s %s",
+										"%s      %s %s %s",
+										indent,
 										metadata_expanded and icons.expanded or icons.collapsed,
 										icons.folder,
 										label
@@ -376,7 +439,7 @@ function M.lines(tree, profile, filter, options)
 									highlights,
 									#lines,
 									"OrbitIconFolder",
-									#("      " .. (metadata_expanded and icons.expanded or icons.collapsed) .. " "),
+										#(indent .. "      " .. (metadata_expanded and icons.expanded or icons.collapsed) .. " "),
 									icons.folder
 								)
 								if metadata_expanded then
@@ -385,7 +448,8 @@ function M.lines(tree, profile, filter, options)
 											table.insert(
 												lines,
 												string.format(
-													"        %s %s",
+														"%s        %s %s",
+														indent,
 													metadata_entry_icon(icons, category),
 													metadata_label(category, entry)
 												)
@@ -399,7 +463,7 @@ function M.lines(tree, profile, filter, options)
 												highlights,
 												#lines,
 												metadata_icon_group(category),
-												#"        ",
+														#(indent .. "        "),
 												entry_icon
 											)
 										end
@@ -407,7 +471,7 @@ function M.lines(tree, profile, filter, options)
 										-- entries is nil here: the category has been expanded
 										-- but its data hasn't arrived yet (the workspace
 										-- should be triggering an async fetch for it).
-										table.insert(lines, "        loading " .. category.label .. "...")
+										table.insert(lines, indent .. "        loading " .. category.label .. "...")
 									end
 								end
 							end
@@ -416,6 +480,7 @@ function M.lines(tree, profile, filter, options)
 				end
 			end
 		end
+	end
 	end
 	return lines, nodes, highlights, #groups > 0
 end

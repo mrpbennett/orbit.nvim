@@ -45,6 +45,88 @@ return {
 			assert(vim.deep_equal(all, { "[Sales]]West].", "[Sales]]West].[Order.Items]", "[dbo].", "[dbo].[users]" }))
 		end)
 	end,
+	["MSSQL database arrays complete catalogs schemas and relations"] = function()
+		local profile = {
+			name = "mssql-multiple-completion",
+			kind = "mssql",
+			options = { host = "sql.example", database = { "Database", "Databaserpt" }, user = "orbit" },
+		}
+		local rows = {
+			{ catalog = "Database", schema = "dbo", name = "users", type = "table" },
+			{ catalog = "Databaserpt", schema = "report", name = "clicks", type = "view" },
+		}
+		with_acquisition(profile, rows, function(done)
+			cache.load_tables(profile, {}, done)
+		end, function()
+			local root = "SELECT * FROM "
+			assert(vim.deep_equal(words(completion.items(profile, { root }, 1, #root)), {
+				"[Database].",
+				"[Database].[dbo].[users]",
+				"[Databaserpt].",
+				"[Databaserpt].[report].[clicks]",
+			}))
+			local catalog = "SELECT * FROM [Databaserpt]."
+			assert(vim.deep_equal(words(completion.items(profile, { catalog }, 1, #catalog)), {
+				"[Databaserpt].[report].",
+			}))
+			local schema = "SELECT * FROM [Databaserpt].[report]."
+			assert(vim.deep_equal(words(completion.items(profile, { schema }, 1, #schema)), {
+				"[Databaserpt].[report].[clicks]",
+			}))
+			local partial_catalog = "SELECT * FROM Databaserp"
+			assert(vim.deep_equal(words(completion.items(profile, { partial_catalog }, 1, #partial_catalog)), {
+				"[Databaserpt].",
+				"[Databaserpt].[report].[clicks]",
+			}))
+			local partial_schema = "SELECT * FROM [Databaserpt].rep"
+			assert(vim.deep_equal(words(completion.items(profile, { partial_schema }, 1, #partial_schema)), {
+				"[Databaserpt].[report].",
+			}))
+		end)
+	end,
+	["MSSQL unqualified aliases resolve against the first database"] = function()
+		local profile = {
+			name = "mssql-default-database-completion",
+			kind = "mssql",
+			options = { host = "sql.example", database = { "Database", "Databaserpt" }, user = "orbit" },
+		}
+		local reporting = { catalog = "Databaserpt", schema = "dbo", name = "users", type = "table" }
+		local default = { catalog = "Database", schema = "dbo", name = "users", type = "table" }
+		with_acquisition(profile, { reporting, default }, function(done)
+			cache.load_tables(profile, {}, done)
+		end, function()
+			with_acquisition(profile, { { name = "reporting_id", type = "int" } }, function(done)
+				cache.load_columns(profile, reporting, {}, done)
+			end, function()
+				with_acquisition(profile, { { name = "default_id", type = "int" } }, function(done)
+					cache.load_columns(profile, default, {}, done)
+				end, function()
+					local line = "SELECT u. FROM dbo.users u"
+					assert(vim.deep_equal(words(completion.items(profile, { line }, 1, #"SELECT u.")), {
+						"u.default_id",
+					}))
+				end)
+			end)
+		end)
+	end,
+	["MSSQL unqualified aliases do not fall through to another database"] = function()
+		local profile = {
+			name = "mssql-non-default-completion",
+			kind = "mssql",
+			options = { host = "sql.example", database = { "Database", "Databaserpt" }, user = "orbit" },
+		}
+		local reporting = { catalog = "Databaserpt", schema = "dbo", name = "audit", type = "table" }
+		with_acquisition(profile, { reporting }, function(done)
+			cache.load_tables(profile, {}, done)
+		end, function()
+			with_acquisition(profile, { { name = "reporting_id", type = "int" } }, function(done)
+				cache.load_columns(profile, reporting, {}, done)
+			end, function()
+				local line = "SELECT a. FROM dbo.audit a"
+				assert(vim.deep_equal(words(completion.items(profile, { line }, 1, #"SELECT a.")), {}))
+			end)
+		end)
+	end,
 	["MySQL completion recognizes backtick-qualified namespaces"] = function()
 		local profile = { name = "mysql-completion", kind = "mysql", options = { database = "orbit_dev" } }
 		local rows = { { schema = "orbit_dev", name = "users", type = "table" } }

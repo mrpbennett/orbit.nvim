@@ -152,7 +152,11 @@ local function validate_profile(profile)
 	local required = profile.kind == "trino" and { "server", "user", "catalog" }
 		or profile.kind == "postgres" and { "database" }
 		or profile.kind == "mysql" and { "database" }
-		or profile.kind == "mssql" and { "host", "database", "user" }
+		-- MSSQL requirements depend on the selected transport and are validated
+		-- inside its Connector rather than flattened into this generic gate.
+		or profile.kind == "mssql" and profile.options.transport == "jdbc" and {}
+		or profile.kind == "mssql" and (profile.options.transport == nil or profile.options.transport == "sqlcmd") and { "host", "user" }
+		or profile.kind == "mssql" and {}
 		or profile.kind == "vertica" and { "host", "user", "database" }
 		or { "path" }
   for _, field in ipairs(required) do

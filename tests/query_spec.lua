@@ -93,4 +93,69 @@ return {
 		end
 		assert(ok, test_err)
 	end,
+	["superseded Table metadata finishes the earlier Statement feedback"] = function()
+		local original = {
+			connected = runner.connected,
+			finish = feedback.finish,
+			open = results.open,
+			run = runner.run,
+			start = feedback.start,
+		}
+		local path = vim.fn.tempname()
+		assert(profiles.write(path, {
+			version = 1,
+			profiles = { { name = "superseded", kind = "sqlite", options = { path = ":memory:" } } },
+		}))
+		local buffer = vim.api.nvim_create_buf(false, true)
+		vim.api.nvim_win_set_buf(0, buffer)
+		vim.api.nvim_buf_set_lines(buffer, 0, -1, false, { "SELECT * FROM items" })
+		vim.b[buffer].orbit_profile = "superseded"
+		vim.b[buffer].orbit_table = { schema = "main", name = "items", type = "table" }
+		vim.b[buffer].orbit_table_statement = "SELECT * FROM items"
+		local statement_callbacks = {}
+		local metadata_callbacks = {}
+		local finishes = {}
+		runner.connected = function() return false end
+		runner.run = function(_, statement, callback)
+			if statement == "SELECT * FROM items" then
+				statement_callbacks[#statement_callbacks + 1] = callback
+			else
+				metadata_callbacks[#metadata_callbacks + 1] = callback
+			end
+			return {}
+		end
+		feedback.start = function() return {} end
+		feedback.finish = function(_, message, level)
+			finishes[#finishes + 1] = { message = message, level = level }
+		end
+		results.open = function() return {} end
+
+		local ok, test_err = xpcall(function()
+			local config = { confirm_mutations = false, profile_path = path }
+			query.execute(buffer, config)
+			statement_callbacks[1]({ { id = "old" } })
+			metadata_callbacks[1]({ { name = "id" } })
+			assert(metadata_callbacks[2])
+			vim.b[buffer].orbit_table = nil
+			vim.b[buffer].orbit_table_statement = nil
+			query.execute(buffer, config)
+			statement_callbacks[2]({ { id = "new" } })
+			metadata_callbacks[2]({ { name = "id" } })
+			local superseded = 0
+			for _, finish in ipairs(finishes) do
+				if finish.message == "Statement result superseded" then
+					assert(finish.level == vim.log.levels.DEBUG)
+					superseded = superseded + 1
+				end
+			end
+			assert(superseded == 1)
+		end, debug.traceback)
+		runner.connected = original.connected
+		runner.run = original.run
+		feedback.start = original.start
+		feedback.finish = original.finish
+		results.open = original.open
+		if vim.api.nvim_buf_is_valid(buffer) then vim.api.nvim_buf_delete(buffer, { force = true }) end
+		assert(ok, test_err)
+	end,
 }

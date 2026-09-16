@@ -365,6 +365,7 @@ function M.execute(buffer, config, selection, context)
 		notice = notice,
 		result_generation = result_generation[buffer],
 	}
+	state.workspace = require("orbit.workspace").capture(state.tabpage)
 	running[buffer] = state
 	-- Start a repeating libuv timer (fires once immediately at 0ms, then every
 	-- 1000ms) purely to force the statusline to redraw periodically, so that a
@@ -404,11 +405,21 @@ function M.execute(buffer, config, selection, context)
 			return
 		end
 		if run_err then
+			local workspace = require("orbit.workspace")
+			if state.workspace and not workspace.is_live(state.workspace) then
+				feedback.finish(state.notice, run_err, vim.log.levels.ERROR)
+				return
+			end
 			feedback.finish(state.notice, "Query failed: " .. profile.name, vim.log.levels.ERROR)
 			vim.notify(run_err, vim.log.levels.ERROR)
 			-- diagnostics.open likely renders the raw database error in a
 			-- dedicated diagnostics window/panel so long error text isn't lost.
 			diagnostics.open(run_err)
+			return
+		end
+		local workspace = require("orbit.workspace")
+		if state.workspace and not workspace.is_live(state.workspace) then
+			feedback.finish(state.notice, "Statement result discarded: Workspace closed", vim.log.levels.DEBUG)
 			return
 		end
 		-- Options passed through to whichever UI ends up rendering the result
@@ -453,6 +464,10 @@ function M.execute(buffer, config, selection, context)
 			-- which may itself hit the database) to figure out whether rows in
 			-- the grid can be edited in place.
 			schema_cache.load_metadata(profile, table, "primary_keys", {}, function(primary_keys, metadata_err)
+				if state.workspace and not workspace.is_live(state.workspace) then
+					feedback.finish(state.notice, "Statement result discarded: Workspace closed", vim.log.levels.DEBUG)
+					return
+				end
 				if metadata_err then
 					vim.notify(metadata_err, vim.log.levels.WARN)
 				else
@@ -486,6 +501,7 @@ function M.execute(buffer, config, selection, context)
 					-- result_generation[buffer]). If so, this callback is for a
 					-- stale run and must not render its (now outdated) results.
 					if result_generation[buffer] ~= state.result_generation then
+						feedback.finish(state.notice, "Statement result superseded", vim.log.levels.DEBUG)
 						return
 					end
 					if columns and not result_options.columns then
@@ -493,24 +509,28 @@ function M.execute(buffer, config, selection, context)
 							return column.name
 						end, columns)
 					end
-					local workspace = require("orbit.workspace")
-					if workspace.is_workspace(state.tabpage) then
-						workspace.open_results(rows, result_options)
+					if state.workspace then
+						if not workspace.open_results(rows, result_options, state.workspace) then
+							feedback.finish(state.notice, "Statement result discarded: Workspace closed", vim.log.levels.DEBUG)
+							return
+						end
 					else
 						results.open(rows, result_options)
 					end
+					feedback.finish(
+						state.notice,
+						string.format("Query finished: %d rows in %ds", #rows, math.floor((vim.uv.hrtime() - state.started_at) / 1000000000))
+					)
 				end)
 			end)
-			feedback.finish(
-				state.notice,
-				string.format("Query finished: %d rows in %ds", #rows, math.floor((vim.uv.hrtime() - state.started_at) / 1000000000))
-			)
 			return
 		end
-		local workspace = require("orbit.workspace")
-		if workspace.is_workspace(state.tabpage) then
+		if state.workspace then
 			-- Workspace-owned grids preserve its fixed result region and close behavior.
-			workspace.open_results(rows, result_options)
+			if not workspace.open_results(rows, result_options, state.workspace) then
+				feedback.finish(state.notice, "Statement result discarded: Workspace closed", vim.log.levels.DEBUG)
+				return
+			end
 		else
 			results.open(rows, result_options)
 		end

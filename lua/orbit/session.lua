@@ -30,6 +30,7 @@
     M.run(profile, connector, statement, callback) -> request handle
     M.cancel(request)
     M.close(profile_name)
+    M.close_all()
     M.connected(profile_name) -> boolean
 --]]
 local M = {}
@@ -160,7 +161,19 @@ local function start_next(session)
 				if not session.active then
 					return
 				end
-				local output, consumed = session.connector.session_output(session.stdout, session.active.marker)
+				local output, consumed, framing_err = session.connector.session_output(
+					session.stdout,
+					session.active.marker,
+					session.profile.options
+				)
+				if framing_err then
+					local process = session.process
+					fail(session, framing_err)
+					if process then
+						process:kill(15)
+					end
+					return
+				end
 				if output then
 					if not valid_consumed(consumed, session.stdout) then
 						local process = session.process
@@ -198,6 +211,7 @@ local function start_next(session)
 		}
 		if session.connector.inherit_environment == false then
 			options.env = environment
+			options.clear_env = true
 		elseif next(environment) then
 			options.env = vim.tbl_extend("force", inherited, environment)
 		end
@@ -218,7 +232,7 @@ local function start_next(session)
 					stderr = session.active.stderr
 				end
 				if session.connector.session_exit_error then
-					stderr = session.connector.session_exit_error(session.stdout, stderr) or stderr
+					stderr = session.connector.session_exit_error(session.stdout, stderr, session.profile.options) or stderr
 				end
 				fail(
 					session,
@@ -239,7 +253,7 @@ local function start_next(session)
 	-- Ask the connector to format the statement plus the unique marker into
 	-- whatever text needs to be sent to the CLI's stdin (e.g. "SELECT ...;
 	-- \echo __orbit_marker__").
-	local input, input_err = session.connector.session_request(request.statement, request.marker)
+	local input, input_err = session.connector.session_request(request.statement, request.marker, session.profile.options)
 	if not input then
 		session.active = nil
 		finish(request, nil, input_err)
@@ -299,7 +313,9 @@ function M.run(profile, connector, statement, callback)
 	local request = {
 		callback = callback,
 		-- The unique sentinel delimits one response in a long-lived CLI output stream.
-		marker = string.format("__orbit_%s_%d_%d", profile.name:gsub("[^%w]", "_"), vim.uv.hrtime(), session.sequence),
+		-- Markers are internal and fixed-width; profile names can be arbitrarily
+		-- long and must not overflow a Connector's response-header limit.
+		marker = string.format("__orbit_%016x_%08x", vim.uv.hrtime(), session.sequence % 0x100000000),
 		stderr = "",
 		statement = statement,
 	}
@@ -326,10 +342,11 @@ function M.cancel(request)
 	end
 	for _, session in pairs(sessions) do
 		if session.active == request then
-			-- Cancelling active work kills its shared process; queued work is removed independently.
-			if session.process then
-				session.process:kill(15)
-			end
+			-- Invalidate the generation before signaling the child. Buffered output
+			-- from a terminating process must never complete cancelled work.
+			local process = session.process
+			fail(session, "query cancelled")
+			if process then process:kill(15) end
 			return
 		end
 		for index, queued in ipairs(session.queue) do
@@ -361,6 +378,15 @@ function M.close(profile_name)
 	fail(session, "connection closed")
 	if process then
 		process:kill(15)
+	end
+end
+
+-- Close every retained child during Neovim shutdown. Copy the names first
+-- because M.close removes entries from the sessions table as it iterates.
+function M.close_all()
+	local names = vim.tbl_keys(sessions)
+	for _, profile_name in ipairs(names) do
+		M.close(profile_name)
 	end
 end
 

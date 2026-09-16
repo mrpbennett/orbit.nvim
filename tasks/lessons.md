@@ -15,3 +15,4 @@
 - When a safer transport has fidelity tradeoffs, preserve the existing transport as an explicit profile choice instead of forcing every user onto one representation.
 - Do not present a managed installer as usable before its pinned release assets exist; unpublished development builds must fail immediately with actionable local-build guidance.
 - Before implementing an owned helper, confirm that the maintainer accepts the ongoing binary build, publication, signing, security-update, and support burden rather than only confirming the end-user installation UX.
+- Never read a profile-file slice that may contain unrelated credentials; use a field-selective redacting parser even when the requested profile itself uses environment-backed secrets.

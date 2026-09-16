@@ -1,5 +1,136 @@
 # Orbit.nvim v0.1 Plan
 
+## Workspace Lifetime Deepening 2026-09-16
+
+- [x] Add interface-level regressions for Orbit-driven and native Workspace closure, late Statement outcomes, and surviving query-buffer state.
+- [x] Concentrate Workspace liveness, idempotent teardown, pending interaction abandonment, and Result grid disposal behind the Workspace lifetime seam.
+- [x] Guard every Workspace-owned asynchronous projection while allowing Statements and profile-scoped Schema acquisition to finish.
+- [x] Record the visible fix, run focused and complete verification, inspect the diff, and review the implementation.
+
+### Settled Design
+
+- Closing a Workspace does not cancel active Statements or profile-scoped Schema acquisition, but no late Workspace-owned UI may be opened or rerouted.
+- Native and Orbit-driven closure share one teardown implementation; failed Neovim closure preserves the live Workspace.
+- Liveness requires the original registered Workspace state and a valid tabpage, not a tabpage handle alone.
+- Surviving query buffers lose only Workspace ownership and retain their selected connection profile, SQL dialect, contents, and generated Table metadata.
+- Late Statement failures retain one error notification without opening diagnostics elsewhere; abandoned Workspace interactions finish at debug level.
+- Standalone Statement and Result grid behavior remains unchanged.
+
+### Review
+
+- Workspace now owns one idempotent teardown path for Orbit-driven and native tab closure. Failed Neovim closure leaves the original state registered; successful closure releases pending selection, feedback notices, query-buffer ownership markers, and Result grid state.
+- Query execution captures the original Workspace state as opaque lifetime ownership. Late normal and Table-metadata results are discarded instead of rerouted, replacement Workspaces cannot receive stale results, and late failures notify once without opening diagnostics elsewhere.
+- Active Statements and profile-scoped Schema acquisition continue after closure. Superseded Table-metadata work also finishes its feedback timer rather than leaking it.
+- Interface-level coverage exercises native cleanup, exactly-once Result grid disposal, failed closure, retained query state/content, pending selection, original-versus-replacement identity, late success/error/metadata outcomes, Schema feedback, and superseded metadata.
+- `CHANGELOG.md` records the visible fix; no README change was needed because commands and configuration are unchanged.
+- Verification: every new and existing Workspace/query lifetime test passes, and `git diff --check` passes. The complete suite remains blocked by the same unrelated MSSQL JDBC profile/framing expectation failures and large Trino schema performance budget. `stylua` is unavailable.
+- Independent Standards and Specification re-reviews returned `CLEAN`.
+- No commit or GitHub write was made.
+
+## Architecture Review 2026-09-16
+
+- [x] Explore the recent Workspace and MSSQL Connector hot spots, following adjacent seams only where understanding requires it.
+- [x] Apply the deletion test and validate deepening candidates against the domain model, ADRs, tests, and prior architecture reviews.
+- [x] Produce, validate, and open a fresh temporary HTML report with visual before/after comparisons and a top recommendation.
+
+### Scope
+
+- Prioritize Workspace lifecycle and interaction plus the MSSQL Connector's selectable transports because they dominate recent history.
+- Treat Session, Statement, connection-profile, and Connector modules as adjacent context rather than scan targets unless friction crosses their seams.
+- Do not re-suggest completed Schema acquisition, Schema object identity, retained Statement framing, Saved query, Completion scope, or Table metadata work.
+
+### Review
+
+- Report: `/tmp/architecture-review-20260916-135735.html`; opened in the existing browser session.
+- Top recommendation: deepen Workspace lifetime ownership so native tab closure and Orbit-driven closure have one authoritative outcome; the current stale registry path can route late Statement results into an unrelated tabpage.
+- Additional candidates deepen the real two-adapter MSSQL transport seam and the existing Workspace profile-selection interaction without proposing interfaces.
+- ADR-0004's selectable MSSQL transports and all previously completed architecture deepening decisions were preserved.
+- Verification: HTML validation and `git diff --check` pass. The complete suite is blocked by current failures in MSSQL JDBC profile/framing expectations and the large Trino schema performance budget.
+
+## Schema Browser Catalog Hierarchy Plan
+
+- [x] Add a catalog tier above schema groups so catalog-aware objects no longer render as flattened `catalog.schema` nodes.
+- [x] Preserve filtering, expansion, metadata loading, and schema-less object rendering beneath the new catalog tier.
+- [x] Add focused schema-tree coverage and run whitespace checks.
+- [ ] Resolve the pre-existing complete-suite failures in the MSSQL JDBC and large Trino schema performance tests.
+
+### Proposed Behavior
+
+- The Workspace profile remains the first expandable connection-profile tier.
+- Catalog-aware rows render their catalog as the next expandable tier, with schemas underneath; schema-less rows render directly beneath that catalog.
+- Existing non-catalog connectors retain their current schema-to-tables/views hierarchy.
+
+### Review
+
+- Catalog-aware rows now render as an expandable catalog followed by their separately expandable schemas. Catalog, schema, group, table, and metadata expansion use their existing structural identities.
+- The complete suite exercises and passes every schema-tree case, including the new catalog hierarchy. `git diff --check` passes.
+- Full-suite verification remains blocked by existing failures in two MSSQL JDBC tests and the large Trino schema performance budget; none of their source or tests were changed.
+
+## MSSQL Multiple Database Plan
+
+- [x] Accept `options.database` as either one non-empty string or a non-empty array of unique non-empty strings for both MSSQL transports.
+- [x] Keep a string profile's current behavior; for an array, use the first database as the retained connection's default and acquire schema objects from every listed database.
+- [x] Return each database as the schema object's `catalog`, qualify MSSQL names as `[database].[schema].[object]` for array profiles, and use database-qualified catalog views for tables, views, and columns.
+- [x] Extend completion through database and schema namespaces while preserving current two-part completion for string profiles.
+- [x] Add focused validation, session, schema, action, and completion tests for both profile forms and identifier escaping.
+- [x] Update MSSQL profile documentation and domain terminology without changing either transport protocol.
+- [x] Run focused tests, the complete verification suite, diff checks, and independent standards/specification review.
+
+### Settled Design
+
+- Existing string-valued `database` profiles remain valid and retain their current names, browser layout, completion, and statements.
+- An array must contain at least one unique non-empty database name. Its first entry is the JDBC `databaseName` or `sqlcmd -d` default; later entries are schema-acquisition targets on the same SQL Server.
+- Array profiles use the existing catalog-aware schema identity and flattened `database.schema` browser grouping. A new database hierarchy level is outside scope.
+- Existing `schema_patterns` apply to SQL Server schemas in every selected database.
+- Cross-database acquisition and metadata use three-part catalog-view references, so the retained `sqlcmd` and JDBC session protocols do not change.
+
+### Review
+
+- Added string-or-array MSSQL `database` validation for both transports, with case-insensitive duplicate rejection and the first array entry retained as the session default.
+- Multi-database schema acquisition carries database identity as `catalog`, applies schema patterns within each database, and uses bracket-quoted three-part names for metadata and generated statements.
+- Completion traverses database, schema, and relation namespaces, supports partial quoted namespaces, and resolves unqualified aliases only against the first/default database.
+- Existing string-valued profiles preserve their previous two-part names, schema acquisition, completion, and session behavior.
+- `bash tests/verify.sh` passes the complete Lua suite, Java helper suite, and `git diff --check`.
+- Independent standards and specification re-reviews found no remaining actionable issues after regressions were added for default-database resolution, partial namespaces, Unicode catalog literals, and per-database schema filtering.
+- Live multi-database SQL Server verification remains outstanding for permissions, Unicode database names, and mixed collations.
+- No commit, push, pull request, or other GitHub write was made.
+
+## MSSQL jTDS Transport Plan
+
+- [x] Publish the accepted jTDS specification and tracer-bullet tickets in the local issue tracker.
+- [x] Add a profile-selected JDBC transport while preserving omitted-transport `sqlcmd` behavior exactly.
+- [x] Add the Orbit-owned Java source helper, length-framed structured protocol, explicit domain authentication, and mandatory TLS.
+- [x] Integrate structured JDBC results, ordinary-error recovery, cancellation by process termination, and explicit shutdown cleanup through the existing retained Session.
+- [x] Extend `:OrbitDoctor mssql` for Java source launching and jTDS driver loading without connecting.
+- [x] Add deterministic Lua/Java coverage, run live domain-auth acceptance against the test environment, and document only verified compatibility.
+- [x] Update public and domain documentation, run complete verification, and independently review the implementation.
+
+### Settled Design
+
+- Existing MSSQL profiles omit `transport` and continue to use user-installed Go `sqlcmd`; JDBC profiles select `transport = "jdbc"` and initially require `driver = "jtds"`.
+- JDBC profiles use structured host, optional port or instance, optional database, explicit authentication, and TLS fields. Raw JDBC URLs and arbitrary driver properties are unsupported.
+- Users provide Java 11 or newer and an explicit path to the jTDS 1.3.1 JAR. Orbit bundles neither a JVM nor jTDS and performs no dependency download.
+- Orbit ships a Java source-file helper and owns its structured protocol. The helper retains one JDBC connection per profile and reports ordered labels, string values, and distinct SQL `NULL` values.
+- JDBC authentication initially supports `sql_password` and `domain_password`; domain authentication requires domain, user, and exactly one of a direct or environment-backed password, with NTLMv2 enabled.
+- JDBC TLS defaults to encryption with JVM-trusted certificate-chain validation. jTDS does not document hostname matching; the explicit unsafe certificate-trust bypass also disables chain validation, and plaintext fallback is forbidden.
+- Credentials never enter argv, a JDBC URL, or the Java child environment. The resolved password travels only in the framed helper input after Java starts.
+- Empty or duplicate column labels and multiple tabular result sets fail explicitly. Non-row statements return an empty result.
+- Ordinary SQL errors preserve the retained JDBC session. Connection failures and malformed protocol terminate it. Active cancellation terminates the JVM and queued work; later work reconnects.
+- Neovim shutdown explicitly closes all retained Connector children. Doctor validates Java, helper source execution, and jTDS class loading without connecting.
+- Release acceptance requires deterministic coverage plus live verification of domain authentication, TLS, schema acquisition, value fidelity, retained state, error recovery, and cancellation/reconnection.
+
+### Review
+
+- Added an opt-in JDBC MSSQL transport using jTDS 1.3.1 and an Orbit-owned Java source helper while preserving omitted-transport Go sqlcmd profiles.
+- Domain and SQL password profiles use validated structured fields, length-framed stdin credentials, strict child-environment allowlisting, required TLS, and structured single-result responses with distinct SQL NULL.
+- Session now rejects malformed/fatal helper responses by generation, invalidates active cancellation before child output can race, reconnects later work, and closes every retained child on Neovim shutdown.
+- `:OrbitDoctor mssql` verifies the Java source launcher and exact jTDS class version without connecting or inheriting credential/JVM injection variables.
+- `bash tests/verify.sh` passes the complete Lua suite, Java 11 API-floor compilation, black-box Java helper suite, and whitespace checks.
+- Live verification passed on Linux with Java 25, jTDS 1.3.1, and SQL Server `16.0.4252.3` using explicit domain credentials and server-reported NTLM. Structured values, SQL NULL, schema acquisition, retained temporary state across an ordinary error, cancellation, queue invalidation, and reconnection passed.
+- The secure default correctly rejected the server's untrusted certificate chain with a PKIX error. The explicit unsafe `ssl=require` path connected; successful trusted-chain and hostname behavior remain unverified, as do live SQL-password, named-instance, and sqlcmd paths.
+- Independent reviews found and drove fixes for cancellation races, malformed-response reuse, inherited secret/JVM environments, long profile markers, minimum Java compilation, diagnostic gaps, and overbroad mise environment inheritance. The final reported blocker was removed before the complete deterministic and live suites were rerun.
+- No commit, push, pull request, or other GitHub write was made.
+
 ## Microsoft SQL Server Design
 
 - [x] Validate the MSSQL research against the current connector, Session, Result grid, profile, SQL-analysis, and release seams.

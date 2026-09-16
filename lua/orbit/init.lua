@@ -520,6 +520,12 @@ local function configure_ux()
 			end
 		end,
 	})
+	vim.api.nvim_create_autocmd("VimLeavePre", {
+		group = vim.api.nvim_create_augroup("OrbitSession", { clear = true }),
+		callback = function()
+			require("orbit.runner").close_all()
+		end,
+	})
 	vim.api.nvim_create_autocmd({ "BufEnter", "WinEnter" }, {
 		group = vim.api.nvim_create_augroup("OrbitStructure", { clear = true }),
 		callback = function(event)
@@ -549,6 +555,14 @@ local function configure_ux()
 		callback = function()
 			vim.schedule(function()
 				require("orbit.structure").cleanup()
+			end)
+		end,
+	})
+	vim.api.nvim_create_autocmd("TabClosed", {
+		group = vim.api.nvim_create_augroup("OrbitWorkspace", { clear = true }),
+		callback = function()
+			vim.schedule(function()
+				require("orbit.workspace").cleanup()
 			end)
 		end,
 	})
