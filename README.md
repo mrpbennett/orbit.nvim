@@ -521,13 +521,10 @@ Orbit starts a new Trino CLI process for each statement. With Trino CLI 481 or n
 
 ```json
 {
-  "server": "https://trino.example.com:8443",
+  "server": "https://trino.example.com:8443?externalAuthenticationTokenCache=SYSTEM",
   "user": "alice",
   "catalog": "hive",
-  "arguments": [
-    "--external-authentication",
-    "--external-authentication-token-cache=SYSTEM"
-  ]
+  "arguments": ["--external-authentication"]
 }
 ```
 
