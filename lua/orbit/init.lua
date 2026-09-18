@@ -412,8 +412,9 @@ local function define_highlights()
 end
 
 -- Sets up orbit's buffer-local keymaps (cancel/execute/select_profile/
--- workspace) on a single SQL buffer, based on the key sequences configured
--- in `M.config.keymaps`.
+-- workspace) on a single query buffer, based on the key sequences configured
+-- in `M.config.keymaps`. SQL and Redis query buffers share these mappings,
+-- except that the SQL-only Structure action is omitted from Redis buffers.
 -- Parameters:
 --   buffer - the buffer number (as returned by e.g.
 --            `vim.api.nvim_get_current_buf()`) to attach the keymaps to.
@@ -442,7 +443,7 @@ local function apply_keymaps(buffer)
 		-- Only wire up actions we recognize, and only when the user gave an
 		-- actual key-sequence string (a user can disable a default mapping
 		-- by setting its value to `false` or removing it).
-		if command and type(lhs) == "string" then
+		if command and type(lhs) == "string" and not (action == "structure" and vim.bo[buffer].filetype == "redis") then
 			local options = {
 				buffer = buffer,
 				desc = "Orbit " .. action:gsub("_", " "),
@@ -463,26 +464,25 @@ end
 
 -- One-time initialization of orbit's "ambient" editor UX: highlight groups
 -- plus the autocommands that keep keymaps/completion/winbar applied to SQL
--- buffers as the user opens new ones or switches colorschemes.
+-- and Redis query buffers as the user opens new ones or switches colorschemes.
 -- `vim.api.nvim_create_autocmd(event, opts)` registers a callback to run
 -- whenever the given Neovim event fires; `opts.group` (created via
 -- `vim.api.nvim_create_augroup(name, { clear = true })`) namespaces the
 -- autocommand so re-running this function would replace rather than
 -- duplicate it (`clear = true` wipes any previous autocommands in that
--- group first). `opts.pattern` restricts the autocommand to matching
--- values (here, the `FileType` event only fires this callback for the
--- `sql` filetype).
+-- group first). `opts.pattern` restricts the FileType callback to Orbit's
+-- supported `sql` and `redis` query-buffer filetypes.
 -- Parameters: none.
 -- Returns: nothing.
 -- Side effects:
 --   * Calls `define_highlights()` immediately.
 --   * Creates the `OrbitHighlights` augroup/autocmd, which re-applies
 --     highlight links whenever the user's colorscheme changes.
---   * Creates the `OrbitKeymaps` augroup/autocmd, which applies buffer-local
---     keymaps, completion, and (if enabled) the winbar to any buffer as soon
---     as its filetype becomes `sql`.
+	--   * Creates the `OrbitKeymaps` augroup/autocmd, which applies buffer-local
+	--     keymaps, completion, and (if enabled) the winbar to supported query
+	--     buffers as soon as their filetype becomes `sql` or `redis`.
 --   * Creates the `OrbitWinbar` augroup/autocmd, which (re)applies the
---     winbar expression whenever the user enters a window showing a `sql`
+	--     winbar expression whenever the user enters a window showing a query
 --     buffer - this covers windows/splits that existed before `winbar` was
 --     turned on, or before the `FileType` event had a chance to fire.
 -- Called once from `M.setup`, guarded by the `configured` flag.
@@ -500,7 +500,7 @@ local function configure_ux()
 	})
 	vim.api.nvim_create_autocmd("FileType", {
 		group = vim.api.nvim_create_augroup("OrbitKeymaps", { clear = true }),
-		pattern = "sql",
+		pattern = { "sql", "redis" },
 		callback = function(event)
 			apply_keymaps(event.buf)
 			if M.config.winbar then
@@ -515,7 +515,7 @@ local function configure_ux()
 	vim.api.nvim_create_autocmd("WinEnter", {
 		group = vim.api.nvim_create_augroup("OrbitWinbar", { clear = true }),
 		callback = function()
-			if M.config.winbar and vim.bo.filetype == "sql" then
+			if M.config.winbar and (vim.bo.filetype == "sql" or vim.bo.filetype == "redis") then
 				vim.wo.winbar = status_winbar
 			end
 		end,
@@ -524,6 +524,7 @@ local function configure_ux()
 		group = vim.api.nvim_create_augroup("OrbitSession", { clear = true }),
 		callback = function()
 			require("orbit.runner").close_all()
+			require("orbit.redis_cache").close_all()
 		end,
 	})
 	vim.api.nvim_create_autocmd({ "BufEnter", "WinEnter" }, {
@@ -568,22 +569,22 @@ local function configure_ux()
 	})
 end
 
--- Re-applies keymaps/completion/winbar to every *currently open* SQL buffer
+-- Re-applies keymaps/completion/winbar to every currently open SQL or Redis buffer
 -- (and, for the winbar, every window currently showing one). This is needed
 -- because `configure_ux`'s `FileType` autocommand only fires for buffers
--- opened/re-typed *after* it is registered - buffers that were already open
--- SQL files before `setup()` ran (or before `winbar`/`keymaps` changed on a
+-- opened/re-typed *after* it is registered - query buffers that were already open
+-- before `setup()` ran (or before `winbar`/`keymaps` changed on a
 -- later `setup()` call) need to be updated explicitly.
 -- Parameters: none.
 -- Returns: nothing.
--- Side effects: for each loaded buffer whose filetype is `sql`, calls
+-- Side effects: for each loaded buffer whose filetype is `sql` or `redis`, calls
 -- `apply_keymaps`; if `M.config.winbar` is enabled, also sets `winbar` on
 -- every window currently displaying that buffer via
 -- `vim.fn.win_findbuf(buffer)` (a Vim function that returns the list of
 -- window IDs showing a given buffer).
 local function apply_ux_to_buffers()
 	for _, buffer in ipairs(vim.api.nvim_list_bufs()) do
-		if vim.bo[buffer].filetype == "sql" then
+		if vim.bo[buffer].filetype == "sql" or vim.bo[buffer].filetype == "redis" then
 			apply_keymaps(buffer)
 			if M.config.winbar then
 				for _, window in ipairs(vim.fn.win_findbuf(buffer)) do
@@ -647,7 +648,7 @@ end
 --     table that every other orbit module reads).
 --   * On the first call only: registers all `:Orbit*` user commands, and
 --     sets up highlight groups + autocommands.
---   * On every call: re-applies keymaps/winbar to already-open SQL
+	--   * On every call: re-applies keymaps/winbar to already-open query
 --     buffers, and (re)applies the global workspace keymap.
 function M.setup(options)
 	-- `saved_query_dir` (singular) was replaced by `saved_query_dirs`
@@ -709,7 +710,7 @@ function M.setup(options)
 	-- must never linger in `M.config` where other modules might see it.
 	M.config.default_profile = nil
 	if not configured then
-		-- Commands and autocommands are registered once; current SQL buffers are updated below.
+		-- Commands and autocommands are registered once; current query buffers are updated below.
 		create_commands()
 		configure_ux()
 		configured = true

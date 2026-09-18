@@ -6,6 +6,8 @@ All notable changes to Orbit.nvim are documented in this file.
 
 ### Added
 
+- Added a Redis Connector backed by user-installed `redis-cli`, with structured endpoint, logical-database, environment-backed authentication, TLS, one-shot RESP3 JSON execution, `.redis` saved queries, and textual Result grids.
+- Added cached Redis command and key completion through Blink. Orbit prewarms a bounded, profile-scoped key index with cursor-based `SCAN`, never automatic `KEYS`, and uses server command metadata for key positions and readonly mutation classification.
 - Added an MSSQL Connector backed by user-installed Microsoft Go `sqlcmd`, with SQL authentication through a sanitized `SQLCMDPASSWORD` environment, mandatory encryption, an explicit unsafe certificate-trust bypass, a retained interactive session, schema browsing, object actions, bracket-qualified completion, and read-only Result grids.
 - Added an opt-in MSSQL JDBC transport using an Orbit-owned Java source helper and the user-provided jTDS 1.3.1 JDBC driver. Profiles can use structured SQL-password or domain-password authentication, JVM-trusted certificate-chain validation by default, retained sessions, and structured results with distinct SQL `NULL` values while omitted-transport profiles retain the existing `sqlcmd` behavior.
 - Added local Connector diagnostics through `:OrbitDoctor [kind]`; `:OrbitDoctor mssql` checks the configured user-installed executable, its version output, profile validation, and `password_env` presence without connecting.

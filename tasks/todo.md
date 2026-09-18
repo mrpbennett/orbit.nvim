@@ -1,5 +1,38 @@
 # Orbit.nvim v0.1 Plan
 
+## Redis Connector And Completion Plan 2026-09-17
+
+- [x] Publish primary-source Redis CLI research and the settled MVP behavior.
+- [x] Add Redis connection-profile validation, secure `redis-cli` invocation, one-shot statement execution, and textual Result grid normalization.
+- [x] Add asynchronous, cancellable, bounded Redis key acquisition through cursor-based `SCAN`, partitioned by connection-profile identity and logical database.
+- [x] Add Redis command and key-argument analysis, cached command/key completion through Blink, and exact Redis CLI quoting on insertion.
+- [x] Integrate Redis query-buffer behavior, key-index prewarming and refresh, Doctor diagnostics, and user documentation without changing existing Connector defaults.
+- [x] Add deterministic connector, parsing, acquisition, completion, runner, profile, Doctor, and Workspace coverage.
+- [x] Run focused and complete verification, inspect the diff, and independently review standards and specification compliance.
+
+### Accepted Direction
+
+- Match DataGrip's model: Redis keys are asynchronously introspected database objects, not arbitrary cells harvested from prior statement results.
+- Populate completion from a bounded in-memory Redis key index using cursor-based `SCAN`; never invoke `KEYS` automatically.
+- Prewarm the index when a Redis profile is bound, refresh only on explicit request thereafter, and expose truncation when the configured cap is reached.
+- Scope the MVP to one standalone Redis endpoint and one profile-selected logical database, defaulting to database `0`; defer Cluster and cross-database browsing.
+- Execute statements through one-shot `redis-cli` processes; `SELECT`, `MULTI`, `WATCH`, and other connection-local state do not persist between executions.
+- Offer Redis key candidates only in key-argument positions. Keep command completion and key discovery separate, and use the existing Blink frontend only.
+- Use structured profile fields, environment-backed passwords, and explicit TLS certificate settings rather than credential-bearing URIs or arbitrary CLI arguments.
+- Render pragmatic textual results, including a single `value` column for `KEYS`; document that exact RESP and arbitrary binary fidelity are outside the MVP.
+
+### Review
+
+- Added a one-shot Redis Connector with strict structured profiles, sanitized `REDISCLI_AUTH`, TLS options, Redis CLI-compatible argument parsing, RESP3 JSON projection, readonly mutation classification, Doctor checks, and cancellation cleanup.
+- Added a profile-identity-scoped Redis key index that walks `SCAN` to cursor zero, deduplicates keys, enforces `key_limit`, reports truncation, coalesces refreshes, and keeps completion cache-only while typing.
+- Added server-authoritative Redis command completion and key completion only in metadata-identified key positions, including Redis CLI-safe insertion for whitespace, quotes, control bytes, and backslashes.
+- Redis-bound buffers use current-line execution and the `redis` filetype, close SQL Structure panels, support `.redis` saved queries, and refresh command/key metadata through the Workspace profile action without rendering a relational schema tree.
+- Research and onboarding are documented in `docs/redis-connector-research.md` and `README.md`, including a local Docker profile and the explicit `KEYS`/`SCAN`, Cluster, binary-fidelity, and retained-state limits.
+- Live verification passed with `redis-cli 8.10.1` against the official `redis:8-alpine` container for `SET`, RESP3 JSON `COMMAND`, cursor-based `SCAN`, readonly metadata, and key indexing. Authentication and TLS remain deterministic-only.
+- Focused Redis and affected integration tests pass; `bash tests/java_spec.sh` and `git diff --check` pass. The complete Lua suite reaches all Redis tests successfully and remains blocked only by the same pre-existing MSSQL JDBC profile/framing failures and large Trino schema performance budget recorded before this work.
+- Independent standards and specification reviews drove fixes for CLI quoting parity, variadic key positions, callback reentrancy, metadata cancellation, credential inheritance, malformed command metadata, authoritative fallback behavior, Redis-only Workspace status, and Structure cleanup. Final actionable findings were resolved.
+- No commit, push, pull request, or other GitHub write was made.
+
 ## Workspace Lifetime Deepening 2026-09-16
 
 - [x] Add interface-level regressions for Orbit-driven and native Workspace closure, late Statement outcomes, and surviving query-buffer state.

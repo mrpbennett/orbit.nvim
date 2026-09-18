@@ -39,6 +39,8 @@ local KIND_TO_LSP = {
 	Catalog = 9,
 	Schema = 9,
 	Alias = 6,
+	Command = 3,
+	Key = 6,
 }
 
 -- A single, consistent "database" glyph (Nerd Font: nf-md-database) for

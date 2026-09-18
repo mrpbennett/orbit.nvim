@@ -619,6 +619,16 @@ function M.close(tabpage)
 	end
 end
 
+-- Close every Structure panel currently attached to one query buffer. This is
+-- used when a buffer changes to a backend, such as Redis, with no SQL structure.
+function M.close_for_buffer(buffer)
+	local tabpages = {}
+	for tabpage, state in pairs(states) do
+		if state.source_buffer == buffer then tabpages[#tabpages + 1] = tabpage end
+	end
+	for _, tabpage in ipairs(tabpages) do M.close(tabpage) end
+end
+
 -- Toggle the current tabpage's Structure panel. Opening is valid only from a
 -- SQL query buffer; an existing panel closes regardless of current buffer so
 -- `:OrbitStructure` also works while focus is inside the panel itself.

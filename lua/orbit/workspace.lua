@@ -243,8 +243,8 @@ end
 
 -- Saved queries accept file names, not paths. Keeping this validation shared
 -- prevents Rename and OrbitSave from drifting into subtly different rules.
-local function saved_query_filename(filename, operation)
-	local normalized = saved_queries.filename(filename)
+local function saved_query_filename(filename, operation, default_extension)
+	local normalized = saved_queries.filename(filename, default_extension)
 	if not normalized then
 		vim.notify(operation .. " filename must be a file name without a path", vim.log.levels.ERROR)
 		return
@@ -319,17 +319,23 @@ local function render(state)
 			or profile.kind:lower():find(state.filter:lower(), 1, true)
 		local tree_lines, tree_nodes, tree_highlights, has_matches = {}, {}, {}, false
 		if expanded then
-			-- Delegate to schema_tree.lines for everything under this profile
-			-- (schemas -> tables/views -> columns/keys/indexes). If the profile
-			-- line itself already matched the filter, pass "" down so every
-			-- child of a matching profile is shown unfiltered; otherwise pass
-			-- the real filter through so schema_tree can narrow its own lines.
-			tree_lines, tree_nodes, tree_highlights, has_matches = schema_tree.lines(
-				state.tree,
-				profile,
-				profile_matches and "" or state.filter,
-				{ icons = icons, loading = state.loading }
-			)
+			if profile.kind == "redis" then
+				local status = require("orbit.redis_cache").status(profile)
+				local label = (state.loading or status.loading) and "Redis keys: loading"
+					or status.error and "Redis keys: unavailable"
+					or status.loaded and string.format("Redis keys: %d%s", status.count, status.truncated and " (truncated)" or "")
+					or "Redis keys: not loaded"
+				tree_lines = { label }
+				has_matches = profile_matches or label:lower():find(state.filter:lower(), 1, true) ~= nil
+			else
+				-- Relational Connectors delegate their complete hierarchy to schema_tree.
+				tree_lines, tree_nodes, tree_highlights, has_matches = schema_tree.lines(
+					state.tree,
+					profile,
+					profile_matches and "" or state.filter,
+					{ icons = icons, loading = state.loading }
+				)
+			end
 		end
 		-- Show the profile's own line if it matches the filter directly, OR
 		-- if it's expanded and something inside its (filtered) tree matched --
@@ -417,7 +423,7 @@ local function render(state)
 				})
 				if expanded then
 					if #node.children == 0 then
-						table.insert(lines, string.rep("  ", depth + 1) .. "No saved SQL files")
+						table.insert(lines, string.rep("  ", depth + 1) .. "No saved query files")
 					else
 						for _, child in ipairs(node.children) do
 							render_saved(child, depth + 1)
@@ -564,9 +570,40 @@ local function load_schema(state, profile, force)
 	render(state)
 	state.schema_notice = start_notice(
 		state,
-		"Loading schema for " .. profile.name .. "...",
+		(profile.kind == "redis" and "Loading Redis keys for " or "Loading schema for ") .. profile.name .. "...",
 		"Schema load discarded: Workspace closed"
 	)
+	if profile.kind == "redis" then
+		local redis_cache = require("orbit.redis_cache")
+		local pending = 2
+		local keys, key_status, load_err
+		local function completed(err)
+			load_err = load_err or err
+			pending = pending - 1
+			if pending > 0 or state.generation ~= generation or not is_live(state) then
+				return
+			end
+			local message
+			if load_err then
+				message = "Redis completion load failed: " .. profile.name
+			else
+				message = string.format("Redis keys loaded: %d%s", #(keys or {}), key_status.truncated and " (truncated)" or "")
+			end
+			finish_notice(state, state.schema_notice, message, load_err and vim.log.levels.ERROR or vim.log.levels.INFO)
+			state.schema_notice = nil
+			state.loading = false
+			render(state)
+			if load_err then vim.notify(load_err, vim.log.levels.ERROR) end
+		end
+		redis_cache.load_keys(profile, { refresh = force }, function(rows, err, status)
+			keys, key_status = rows, status
+			completed(err)
+		end)
+		redis_cache.load_commands(profile, { refresh = force }, function(_, err)
+			completed(err)
+		end)
+		return
+	end
 	cache.load_tables(profile, { refresh = force }, function(rows, err)
 		-- Ignore callbacks from replaced loads and from a workspace that has been closed.
 		if state.generation ~= generation or not is_live(state) then
@@ -929,7 +966,7 @@ local function copy_object_name(profile, row)
 end
 
 -- Handle activating (<CR>) a "saved_query" node: open the underlying
--- .sql file for editing in the query window, wired up like any other
+-- .sql or .redis file for editing in the query window, wired up like any other
 -- query buffer.
 --   state: workspace state table.
 --   node: the "saved_query" node (has `.path`, `.name`).
@@ -937,8 +974,8 @@ end
 -- Side effects: refuses (with a warning) if no profile is currently
 -- selected/bound; otherwise focuses the query window, opens the file
 -- with :edit (vim.fn.fnameescape guards against the path containing
--- characters Vimscript would otherwise interpret specially), sets
--- filetype to sql, configures the buffer (completion, "/" mapping,
+-- characters Vimscript would otherwise interpret specially), selects a
+-- filetype from the extension, configures the buffer (completion, "/" mapping,
 -- workspace tag), and binds the currently selected profile to it.
 local function open_saved_query(state, node)
 	if not state.selected then
@@ -948,7 +985,7 @@ local function open_saved_query(state, node)
 	vim.api.nvim_set_current_win(ensure_query_window(state))
 	vim.cmd.edit(vim.fn.fnameescape(node.path))
 	local buffer = vim.api.nvim_get_current_buf()
-	vim.bo[buffer].filetype = "sql"
+	vim.bo[buffer].filetype = node.name:lower():sub(-6) == ".redis" and "redis" or "sql"
 	configure_query_buffer(state, buffer)
 	require("orbit.query").bind_profile(buffer, state.selected)
 end
@@ -970,7 +1007,7 @@ local function preview_saved_query(node)
 	local lines = vim.fn.readfile(node.path)
 	local buffer = vim.api.nvim_create_buf(false, true)
 	vim.api.nvim_buf_set_lines(buffer, 0, -1, false, lines)
-	vim.bo[buffer].filetype = "sql"
+	vim.bo[buffer].filetype = node.name:lower():sub(-6) == ".redis" and "redis" or "sql"
 	vim.bo[buffer].modifiable = false
 	-- Size the floating window to fit the file (up to a reasonable cap),
 	-- but never let it be so small it's unreadable, and never let it
@@ -1016,6 +1053,8 @@ local function relocate_saved_query(state, node, destination, directory, operati
 end
 
 local function rename_saved_query(state, node)
+	local extension = node.name:lower():sub(-6) == ".redis" and "redis" or "sql"
+	local suffix_length = extension == "redis" and 6 or 4
 	local source_directory = vim.fs.dirname(node.path)
 	local directory
 	for _, candidate in ipairs(saved_query_directories(state)) do
@@ -1031,12 +1070,12 @@ local function rename_saved_query(state, node)
 
 	vim.ui.input({
 		prompt = "Rename saved query: ",
-		default = node.name:sub(1, -5),
+		default = node.name:sub(1, -(suffix_length + 1)),
 	}, function(filename)
 		if filename == nil then
 			return
 		end
-		filename = saved_query_filename(filename, "Rename saved query")
+		filename = saved_query_filename(filename, "Rename saved query", extension)
 		if filename then
 			relocate_saved_query(state, node, directory.path .. "/" .. filename, directory, "Rename saved query")
 		end
@@ -1688,12 +1727,13 @@ function M.save_query(buffer)
 			return
 		end
 		local current_name = vim.api.nvim_buf_get_name(buffer)
-		local default_name = current_name ~= "" and vim.fs.basename(current_name) or "query.sql"
+		local extension = vim.bo[buffer].filetype == "redis" and "redis" or "sql"
+		local default_name = current_name ~= "" and vim.fs.basename(current_name) or "query." .. extension
 		vim.ui.input({ prompt = "Save query as: ", default = default_name }, function(filename)
 			if filename == nil then
 				return
 			end
-			filename = saved_query_filename(filename, "OrbitSave")
+			filename = saved_query_filename(filename, "OrbitSave", extension)
 			if not filename then
 				return
 			end

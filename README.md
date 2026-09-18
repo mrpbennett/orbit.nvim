@@ -4,7 +4,7 @@
 
 Your database revolves around your editor, not the other way around.
 
-Orbit runs statements through backend-specific Connectors using user-installed database clients. It retains one connection per profile where the client supports it, keeps profiles per query buffer, browses schemas, completes cached objects, and renders normalized results in a navigable grid.
+Orbit runs statements through backend-specific Connectors using user-installed database clients. It retains one connection per profile where the client supports it, keeps profiles per query buffer, browses schemas, completes cached objects and Redis keys, and renders normalized results in a navigable grid.
 
 ![preview](./assets/preview.png)
 
@@ -32,7 +32,7 @@ Orbit runs statements through backend-specific Connectors using user-installed d
 - Inspect and copy raw result values, including structured JSON values.
 - Confirm potentially mutating statements before they run.
 - Complete cached tables, views, columns, and table aliases, clause-aware, through a blink.cmp source.
-- Browse reusable SQL files from multiple named saved-query locations.
+- Browse reusable SQL and Redis files from multiple named saved-query locations.
 
 ## Requirements
 
@@ -46,6 +46,7 @@ Orbit runs statements through backend-specific Connectors using user-installed d
 | `trino`      | [`trino`](https://trino.io/docs/current/client/cli.html)                                                                                                                                          | Defaults to CSV with headers; JSON is optional.      |
 | `sqlite`     | `sqlite3`                                                                                                                                                                                         | Requires a build that supports `-json`.              |
 | `postgres`   | [`psql`](https://www.postgresql.org/docs/current/app-psql.html)                                                                                                                                   | Requires a version that supports `--csv`.            |
+| `redis`      | [`redis-cli`](https://redis.io/docs/latest/develop/tools/cli/)                                                                                                                                    | Uses RESP3 JSON through one-shot processes.           |
 | `mysql`      | Oracle [`mysql`](https://dev.mysql.com/doc/refman/8.4/en/mysql.html) 8.x or MariaDB [`mariadb`](https://mariadb.com/docs/server/clients-and-utilities/mariadb-client/mariadb-command-line-client) | Connects to MySQL 8.x servers using XML.             |
 | `vertica`    | [`vsql`](https://docs.vertica.com/24.3.x/en/connecting-to/using-vsql/)                                                                                                                            | Uses HTML table output.                              |
 
@@ -87,9 +88,9 @@ Run `:OrbitDoctor mssql` after configuring the profile. For JDBC profiles it val
 1. Run `:OrbitProfiles`. This creates `~/.local/share/orbit.nvim/profiles.json` with owner-only (`0600`) permissions and opens it for editing.
 2. For MSSQL, install the dependencies for the selected `sqlcmd` or JDBC/jTDS transport, then run `:OrbitDoctor mssql`.
 3. Add a connection profile using the format below.
-4. Open `:OrbitWorkspace` or a SQL buffer.
+4. Open `:OrbitWorkspace`, a SQL buffer, or a Redis buffer.
 5. Bind a profile with `:OrbitProfile`, or press `<CR>` on a profile in the workspace.
-6. Run `:OrbitExecute`, or use `<leader>E` in Normal or Visual mode in a SQL buffer.
+6. Run `:OrbitExecute`, or use `<leader>E` in Normal or Visual mode in a query buffer.
 
 If a query buffer has no profile, executing it opens profile selection and retries after you choose one.
 
@@ -102,10 +103,11 @@ If a query buffer has no profile, executing it opens profile selection and retri
 | `trino`    | `server`, `user`, `catalog` | `schema`, `schema_patterns`, `executable`, `arguments`, `confirm_mutations`                                                     | Tables, views, and columns from `information_schema`. Omitting `schema` browses the catalog except `information_schema`. |
 | `sqlite`   | `path`                      | `schema_patterns`, `executable`, `arguments`, `confirm_mutations`                                                               | Tables and views from `sqlite_master`, plus columns from `PRAGMA table_info`, under `main`.                              |
 | `postgres` | `database`                  | `schema_patterns`, `host`, `port`, `user`, `password`, `sslmode`, `executable`, `arguments`, `confirm_mutations`                | Tables and views outside PostgreSQL system schemas, plus columns, primary keys, foreign keys, and indexes.               |
+| `redis`    | `host`                      | `port`, `database`, `user`, `password_env`, `tls`, `cacert`, `cacertdir`, `cert`, `key`, `sni`, `key_pattern`, `key_limit`, `scan_count`, `executable`, `confirm_mutations` | Cached Redis keys for completion; no schema tree. |
 | `mysql`    | `database`                  | `schema_patterns`, `host`, `port`, `socket`, `user`, `client_family`, `sslmode`, `executable`, `arguments`, `confirm_mutations` | MySQL 8.x tables and views, plus columns, primary keys, foreign keys, indexes, and view definitions.                     |
 | `vertica`  | `host`, `user`, `database`  | `schema_patterns`, `port`, `password`, `sslmode`, `executable`, `arguments`, `confirm_mutations`                                | User tables and views, plus columns, primary keys, foreign keys, projections, and view definitions.                      |
 
-`executable` replaces a CLI-backed Connector's default executable. `arguments` is supported only by CLI-backed Connectors and adds an array of string arguments before Orbit's generated arguments; MSSQL intentionally does not accept `arguments`. For MSSQL, SQLite, PostgreSQL, MySQL, and Vertica, Orbit retains one child process per profile; statements, schema browsing, and completion prewarming share it and are serialized per profile. MSSQL retains either an interactive Go `sqlcmd` process or a Java helper with one JDBC connection as one SQL Server session. A changed profile definition, failed executable, `:OrbitDisconnect`, cancellation, or Neovim exit closes the retained process; the next request reconnects automatically. Trino statements instead run one `trino` CLI invocation per statement, serialized per profile, because the `trino` CLI does not flush its output while held open on a retained connection.
+`executable` replaces a CLI-backed Connector's default executable. `arguments` is supported only by Connectors that explicitly accept it and adds an array of string arguments before Orbit's generated arguments; MSSQL and Redis intentionally do not accept `arguments`. For MSSQL, SQLite, PostgreSQL, MySQL, and Vertica, Orbit retains one child process per profile; statements, schema browsing, and completion prewarming share it and are serialized per profile. MSSQL retains either an interactive Go `sqlcmd` process or a Java helper with one JDBC connection as one SQL Server session. A changed profile definition, failed executable, `:OrbitDisconnect`, cancellation, or Neovim exit closes the retained process; the next request reconnects automatically. Trino and Redis use one CLI invocation per statement. Redis therefore does not preserve `SELECT`, `MULTI`, `WATCH`, or other connection-local state between executions.
 
 Schema browsing and completion cache rows only while the connection profile's kind and options are unchanged. Updating a profile clears its prior schema rows before Orbit acquires replacements. Connector metadata that is unavailable for an object, such as Trino primary keys, is shown as unavailable rather than treated as a statement failure. Explicit Workspace refreshes run after pending acquisitions and coalesce with other refresh requests.
 
@@ -268,6 +270,81 @@ The helper always requests encrypted TLS. By default, jTDS uses `ssl=authenticat
 Orbit resolves either the direct password or `password_env` value before launch. It excludes the credential from process arguments, the generated JDBC URL, and the Java child environment, then sends it only through the helper's length-framed standard input after Java starts. The URL and driver properties are built by Orbit from the validated fields.
 
 jTDS 1.3.1 is an old driver whose general SQL Server, Java, authentication, and TLS compatibility should not be assumed. On Linux with Java 25, live verification passed against SQL Server `16.0.4252.3` using explicit domain credentials; SQL Server reported `NTLM`, while deterministic property checks confirm Orbit enabled jTDS `useNTLMv2`. Retained state, structured values, single-database schema acquisition, error recovery, cancellation, and reconnection passed. Multi-database acquisition, including cross-database permissions, Unicode database names, and mixed collations, has deterministic coverage only. The test server's certificate chain was not trusted by the JVM: secure `ssl=authenticate` failed with a PKIX error, while the explicit unsafe path connected with the client configured as `ssl=require`. Server-side encryption-state inspection was unavailable to this account. Successful certificate-chain validation, hostname behavior, other servers, and other authentication modes remain unverified.
+
+</details>
+
+<details>
+<summary>Redis</summary>
+
+### Local Redis
+
+Start a local Redis container and verify it independently of Orbit:
+
+```sh
+docker run --name orbit-redis -p 127.0.0.1:6379:6379 -d redis:8-alpine
+redis-cli -h 127.0.0.1 -p 6379 PING
+```
+
+The second command should print `PONG`. Add this profile to the profile file:
+
+```json
+{
+  "version": 1,
+  "profiles": [
+    {
+      "name": "local-redis",
+      "kind": "redis",
+      "options": {
+        "host": "127.0.0.1",
+        "port": 6379,
+        "database": 0
+      }
+    }
+  ]
+}
+```
+
+Run `:OrbitDoctor redis`, open `:OrbitWorkspace`, select `local-redis`, and create a query buffer with `n`. Redis commands execute from the current line. Stop and remove the example container with `docker rm -f orbit-redis` when it is no longer needed.
+
+### Authenticated Redis
+
+Set the password variable before starting Neovim when the Redis ACL identity requires authentication:
+
+```sh
+export REDIS_PASSWORD='replace-me'
+```
+
+```json
+{
+  "version": 1,
+  "profiles": [
+    {
+      "name": "app-cache",
+      "kind": "redis",
+      "options": {
+        "host": "redis.example.com",
+        "port": 6379,
+        "database": 0,
+        "user": "orbit",
+        "password_env": "REDIS_PASSWORD",
+        "tls": true,
+        "cacert": "/home/you/.local/share/redis/ca.pem",
+        "key_pattern": "app:*",
+        "key_limit": 10000,
+        "scan_count": 1000
+      }
+    }
+  ]
+}
+```
+
+`host` is required. `port` defaults to `6379`, `database` to `0`, `key_pattern` to `*`, `key_limit` to `10000`, and `scan_count` to `1000`. `database` is a non-negative integer; the limits are positive integers. `password_env` is optional; setting the optional ACL `user` also requires `password_env`. Orbit passes the resolved password only as `REDISCLI_AUTH` in a sanitized child environment, never in argv.
+
+Set `tls = true` to enable TLS. Optional `cacert` and `cacertdir` are mutually exclusive; optional client `cert` and `key` must be configured together; `sni` sets the TLS server name. TLS fields are rejected unless TLS is enabled. `executable` can replace `redis-cli`, and `confirm_mutations` retains its ordinary per-profile meaning. Free-form `arguments`, credential-bearing URIs, Cluster mode, and insecure TLS are not accepted.
+
+Binding the profile asynchronously runs `COMMAND` and cursor-based `SCAN MATCH <key_pattern> COUNT <scan_count>`. The Redis key index is in memory, scoped to the complete profile and logical database, deduplicated, and capped by `key_limit`. Press `r` on the profile in the Workspace to refresh it. Orbit never runs `KEYS` automatically; `KEYS` is blocking and intended only for deliberate use. If ACLs deny `COMMAND` or `SCAN`, statement execution remains available but precise key completion does not.
+
+Redis query buffers execute the current nonblank line; a visual selection must contain exactly one line. Each Statement launches one `redis-cli` process with RESP3 JSON output. Scalar and array replies render under `value`; map replies render under `key` and `value`; nested replies are JSON text. This projection is not binary-lossless. `.redis` saved queries are supported, while the SQL Structure panel is disabled for Redis buffers.
 
 </details>
 
@@ -535,16 +612,16 @@ Orbit passes profile values to the CLI as literal arguments. It does **not** exp
 
 ## Workspace Workflow
 
-`:OrbitWorkspace` toggles a dedicated Orbit tabpage with a profile/schema browser and a normal SQL editing window. Run it once to open the Workspace and again to close it.
+`:OrbitWorkspace` toggles a dedicated Orbit tabpage with a profile/schema browser and a normal query-editing window. Run it once to open the Workspace and again to close it.
 
 1. Press `<CR>` on a profile to select it and bind it to the active query buffer.
-2. Optionally press `l` to load its schema for browsing and completion.
-3. Press `n` to open a new SQL buffer already bound to the selected profile.
+2. Optionally press `l` to load its schema or Redis key index for browsing and completion.
+3. Press `n` to open a new query buffer already bound to the selected profile.
 4. Execute a statement. Results appear in the reusable bottom result grid.
 
 Schema browser labels normally retain their familiar dotted form. If distinct catalog/schema combinations would display the same label, Orbit quotes their segments to distinguish them, for example `"a.b"."c"` versus `"a"."b.c"`. These labels stay stable while filtering, and each group's expansion and metadata state remain independent. Copied qualified names and SQL completion formatting are unchanged.
 
-Set `saved_query_dirs` to add ordered, named recursive trees of `.sql` files to the sidebar:
+Set `saved_query_dirs` to add ordered, named recursive trees of `.sql` and `.redis` files to the sidebar:
 
 ```lua
 saved_query_dirs = {
@@ -555,7 +632,7 @@ saved_query_dirs = {
 
 Each entry must contain one unique display name and directory. Orbit preserves the configured order, expands paths such as `~`, and shows each location as a separate top-level tree collapsed by default. Select a profile, then press `<CR>` on a saved query to open it in the Workspace query window bound to that profile; loading the schema is not required. Press `r` on any saved-query directory to rescan only its top-level location.
 
-Run `:OrbitSave` from a Workspace query buffer to save it into a configured location. Orbit lets you choose from the available locations and their existing subdirectories, prompts for a filename, and adds `.sql` when needed. Existing files require confirmation. After saving, the current buffer becomes the saved file, so later `:w` writes it normally, and the Workspace reveals it in the saved-query tree.
+Run `:OrbitSave` from a Workspace query buffer to save it into a configured location. Orbit lets you choose from the available locations and their existing subdirectories, prompts for a filename, and adds `.sql` or `.redis` according to the bound profile when needed. Existing files require confirmation. After saving, the current buffer becomes the saved file, so later `:w` writes it normally, and the Workspace reveals it in the saved-query tree.
 
 Press `a` on a saved query to open, preview, rename, move, or delete it. Rename and Move refuse to overwrite an existing file and keep an open query buffer attached to its new path, including unsaved edits. Move can target any existing directory under a configured saved query location. Delete requires confirmation and preserves an open query as an unnamed buffer so its contents are not lost.
 
@@ -579,7 +656,7 @@ From a workspace query buffer, `/` focuses the workspace filter. Elsewhere, `/` 
 
 Whole-buffer execution rejects ambiguous multi-statement content. Select the exact statement in Visual mode, then run `:OrbitExecute` or `<leader>E`.
 
-With no argument, `:OrbitDoctor` diagnoses every Connector. Supply `mssql`, `mysql`, `postgres`, `sqlite`, `trino`, or `vertica` to restrict the report. For default MSSQL profiles, `:OrbitDoctor mssql` preserves the existing `sqlcmd` checks: it validates the profile file, reports the user-installed executable selected from an override or `PATH`, invokes only `--version`, and checks `password_env` presence. For JDBC profiles, it checks the password source, Java executable, readable jTDS JAR, Java 11+ source-file execution, and exact jTDS 1.3.1 class loading through the helper's doctor mode. It does not install anything, execute SQL, or open a database session, and it redacts known profile secrets from diagnostic output.
+With no argument, `:OrbitDoctor` diagnoses every Connector. Supply `mssql`, `mysql`, `postgres`, `redis`, `sqlite`, `trino`, or `vertica` to restrict the report. For default MSSQL profiles, `:OrbitDoctor mssql` preserves the existing `sqlcmd` checks: it validates the profile file, reports the user-installed executable selected from an override or `PATH`, invokes only `--version`, and checks `password_env` presence. For JDBC profiles, it checks the password source, Java executable, readable jTDS JAR, Java 11+ source-file execution, and exact jTDS 1.3.1 class loading through the helper's doctor mode. It does not install anything, execute SQL, or open a database session, and it redacts known profile secrets from diagnostic output.
 
 ## Keybindings
 
@@ -624,8 +701,8 @@ require("orbit").setup({
 | `y`             | Copy the qualified selected table or view name.                                                             |
 | `P`             | Preview the selected saved query without opening or binding it.                                             |
 | `/`             | Focus the filter from the sidebar or a Workspace query buffer.                                              |
-| `r`             | Reload the profile file and refresh the selected profile schema, or rescan saved queries.                   |
-| `Z`             | Collapse the open profile schema tree.                                                                      |
+| `r`             | Reload the profile file and refresh its schema or Redis key index, or rescan saved queries.                 |
+| `Z`             | Collapse the open profile metadata tree.                                                                    |
 | `<2-LeftMouse>` | Activate the clicked node; expandable nodes toggle, profiles bind, and saved queries open.                  |
 | `?`             | Show help.                                                                                                  |
 | `q`             | Close the workspace.                                                                                        |
@@ -638,7 +715,7 @@ Expanding a table reveals its available metadata folders. MSSQL provides columns
 
 ![saved](./assets/savedqueries.png)
 
-Saved queries are `.sql` files kept in named directories that appear as their own section in the Workspace sidebar. Configure one or more via `saved_query_dirs`:
+Saved queries are `.sql` or `.redis` files kept in named directories that appear as their own section in the Workspace sidebar. Configure one or more via `saved_query_dirs`:
 
 ```lua
 require("orbit").setup({
@@ -740,7 +817,7 @@ Available actions are intentionally connector-specific. Orbit does not present m
 
 ## Completion
 
-Orbit's schema-aware completion (tables, views, columns, table aliases) is provided entirely through a [blink.cmp](https://github.com/Saghen/blink.cmp) source — there is no native/omnifunc fallback, so blink.cmp is required to get any Orbit completion suggestions. blink.cmp has no API for a plugin to register itself as a source at runtime, so add it to your own blink.cmp config:
+Orbit's metadata-aware completion (tables, views, columns, table aliases, Redis commands, and Redis keys) is provided entirely through a [blink.cmp](https://github.com/Saghen/blink.cmp) source — there is no native/omnifunc fallback, so blink.cmp is required to get any Orbit completion suggestions. blink.cmp has no API for a plugin to register itself as a source at runtime, so add it to your own blink.cmp config:
 
 ```lua
 {
@@ -764,22 +841,25 @@ Once wired up, suggestions appear automatically as you type, no manual trigger n
 - Table aliases: `SELECT u.| FROM users u` resolves `u` to `users`'s columns, including old-style comma joins (`FROM a, b`). With more than one table in scope, unqualified columns are offered from every table, each annotated with its source alias.
 - Alias/table scope is limited to the query block and set-operation branch containing the cursor, plus SQL-visible correlated outer blocks. Sibling subqueries and `UNION`/`INTERSECT`/`EXCEPT` branches do not leak aliases; `JOIN ... ON` sees only tables introduced so far; non-`LATERAL` derived tables are isolated, while `LATERAL` derived tables see preceding sources. CTEs and derived tables (`FROM (SELECT ...) sub`) are recognized but do not offer inferred columns.
 - Suggestions are narrowed to whatever you've already typed (case-insensitive prefix match) before being handed to blink.cmp, so its own fuzzy scoring only ever sees genuinely relevant candidates.
+- Redis command names are offered in the first token. Redis keys are offered only where cached `COMMAND` metadata identifies a key argument; matching is case-sensitive because Redis keys are binary strings. Keys requiring Redis CLI quoting are inserted with exact escaping.
 
 MSSQL completion uses bracket-qualified schema and object names such as `[sales].[orders]` for string profiles. Array profiles use three-part names such as `[Schema].[sales].[orders]` and complete progressively through database and schema namespaces. They appear in the schema browser under flattened `database.schema` groups. Completion uses only acquired objects, including the login-default database when a JDBC profile omits `database`.
 
-Selecting a profile preloads tables and views in the background; expanding it in the Workspace schema browser fills more of the cache. Completion never runs a Connector executable while you type. SQL keywords and functions, formatting, and highlighting remain the responsibility of your existing SQL tooling.
+Selecting a relational profile preloads tables and views in the background. Selecting Redis preloads command metadata and a bounded key index through `SCAN`; explicit Workspace refresh reloads it. Completion never runs a Connector executable while you type. SQL keywords and functions, formatting, and highlighting remain the responsibility of your existing SQL tooling.
 
 Set `completion = false` in Orbit's `setup()` to disable the blink source's `enabled()` check.
 
 ## Execution And Results
 
-Orbit runs statements asynchronously through the selected profile's Connector client. For MSSQL, SQLite, PostgreSQL, MySQL, and Vertica, schema work and statements share one retained process and execute one at a time. MSSQL keeps either one interactive Go `sqlcmd` process or one Java helper and JDBC connection per connection profile, so transactions, temporary tables, and other session state can persist until disconnect, cancellation, connection failure, malformed helper protocol, profile change, or exit. An ordinary JDBC SQL error is request-scoped and preserves the retained connection. Trino statements each run their own `trino` CLI invocation, still serialized per profile.
+Orbit runs statements asynchronously through the selected profile's Connector client. For MSSQL, SQLite, PostgreSQL, MySQL, and Vertica, schema work and statements share one retained process and execute one at a time. MSSQL keeps either one interactive Go `sqlcmd` process or one Java helper and JDBC connection per connection profile, so transactions, temporary tables, and other session state can persist until disconnect, cancellation, connection failure, malformed helper protocol, profile change, or exit. An ordinary JDBC SQL error is request-scoped and preserves the retained connection. Trino and Redis statements each run their own CLI invocation.
 
 One running statement is allowed per query buffer. `:OrbitCancel` terminates an active retained process, fails work queued on that process, and starts a fresh session only when the next Statement is requested. Cancelling work that has not started removes only that queued request. Orbit reports cancellation as cancellation rather than opening diagnostics; server-side completion timing is not asserted after the CLI is terminated.
 
 Potentially mutating statements require confirmation by default. A single `SELECT`, `SHOW`, `DESCRIBE`, `EXPLAIN`, `USE`, or `VALUES` statement runs without confirmation; everything else requires it. This is a convenience guardrail, not a security boundary.
 
 The MSSQL Connector uses a stricter T-SQL classifier: only a single `SELECT` without top-level `INTO` runs without confirmation. Data mutations, DDL, `SELECT INTO`, `EXEC`, CTEs whose effective operation mutates, and ambiguous or multiple statements require confirmation; an `OUTPUT` clause does not make a mutation read-only. Standalone `GO` batch separators are rejected rather than split.
+
+The Redis Connector uses cached server `COMMAND` metadata. Commands marked `readonly` run without confirmation; mutating, unknown, and custom commands require confirmation. This remains a convenience guardrail rather than an ACL or security boundary.
 
 Result grids are reused per tabpage. They show up to `result_limit` rows and truncate displayed cell text to `max_cell_width` characters while retaining the raw value for copy and inspection.
 
@@ -885,13 +965,13 @@ require("orbit").setup({
 | `profile_path`            | `~/.local/share/orbit.nvim/profiles.json` | Location of the profile file.                                                                                                                                        |
 | `result_limit`            | `200`                                     | Maximum returned rows displayed in the result grid.                                                                                                                  |
 | `result_height`           | `15`                                      | Height of a standalone result grid.                                                                                                                                  |
-| `saved_query_dirs`        | `{}`                                      | Ordered named directories of recursively discovered `.sql` files shown in the Workspace sidebar.                                                                     |
+| `saved_query_dirs`        | `{}`                                      | Ordered named directories of recursively discovered `.sql` and `.redis` files shown in the Workspace sidebar.                                                        |
 | `max_cell_width`          | `48`                                      | Maximum displayed width of a result cell.                                                                                                                            |
 | `structure_view`          | All fields `true`                         | Structure display controls: `group_by_type`, `show_ddl`, `show_dml`, `show_other`, `show_select`, and `sort_alphabetically`.                                         |
 | `structure_width`         | `40`                                      | Width of the right-side Structure panel.                                                                                                                             |
 | `workspace_sidebar_width` | `32`                                      | Width of the workspace sidebar.                                                                                                                                      |
 | `workspace_result_ratio`  | `0.30`                                    | Fraction of editor height used by workspace results, with a six-line minimum.                                                                                        |
-| `winbar`                  | `false`                                   | Show Orbit status in SQL-window winbars.                                                                                                                             |
+| `winbar`                  | `false`                                   | Show Orbit status in query-window winbars.                                                                                                                           |
 | `keymaps`                 | See above                                 | Configurable action mappings.                                                                                                                                        |
 | `icons`                   | Nerd Font glyphs                          | Override tree, schema, Workspace, result, and Structure-panel icons shown above. The legacy `query` key supplies `query_block` when the precise key is omitted.      |
 

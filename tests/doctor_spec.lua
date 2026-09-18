@@ -5,6 +5,50 @@ local function assert_match(value, pattern)
 end
 
 return {
+	["doctor checks redis-cli without inheriting Redis credentials"] = function()
+		local report
+		doctor.run("redis", { profile_path = "/profiles.json" }, function(value) report = value end, {
+			executable = function(command) return command == "/custom/redis-cli" end,
+			exepath = function(command) return command end,
+			getenv = function(name) return name == "REDIS_PASSWORD" and "secret" or nil end,
+			environ = function()
+				return { PATH = "/bin", REDIS_PASSWORD = "secret", REDISCLI_AUTH = "stale", KEEP = "value" }
+			end,
+			load_profiles = function()
+				return { profiles = { { name = "cache", kind = "redis", options = {
+					executable = "/custom/redis-cli", host = "localhost", password_env = "REDIS_PASSWORD",
+				} } } }
+			end,
+			run = function(command, callback, options)
+				assert(vim.deep_equal(command, { "/custom/redis-cli", "--version" }))
+				assert(options.clear_env == true)
+				assert(vim.deep_equal(options.env, { PATH = "/bin", KEEP = "value" }))
+				callback({ code = 0, stdout = "redis-cli 8.10.1\n", stderr = "" })
+			end,
+			uname = function() return { sysname = "Linux", machine = "x86_64" } end,
+		})
+		assert_match(report, "%[OK%] redis profile \"cache\" environment REDIS_PASSWORD")
+		assert_match(report, "version: redis%-cli 8%.10%.1")
+		assert(not report:match("secret"))
+	end,
+
+	["doctor strips ambient Redis authentication without a Redis profile"] = function()
+		local report
+		doctor.run("redis", { profile_path = "/profiles.json" }, function(value) report = value end, {
+			executable = function() return true end,
+			exepath = function(command) return command end,
+			environ = function() return { PATH = "/bin", REDISCLI_AUTH = "ambient-secret" } end,
+			load_profiles = function() return { profiles = {} } end,
+			run = function(_, callback, options)
+				assert(vim.deep_equal(options.env, { PATH = "/bin" }))
+				callback({ code = 0, stdout = "redis-cli 8.10.1\n", stderr = "" })
+			end,
+			uname = function() return { sysname = "Linux", machine = "x86_64" } end,
+		})
+		assert_match(report, "%[OK%] redis version")
+		assert(not report:match("ambient%-secret"))
+	end,
+
 	["doctor checks sqlcmd and password environment without connecting"] = function()
 		local commands = {}
 		local report
@@ -131,7 +175,7 @@ return {
 			load_profiles = function() return { profiles = {} } end,
 			uname = function() return { sysname = "Linux", machine = "x86_64" } end,
 		})
-		for _, kind in ipairs({ "mssql", "mysql", "postgres", "sqlite", "trino", "vertica" }) do
+		for _, kind in ipairs({ "mssql", "mysql", "postgres", "redis", "sqlite", "trino", "vertica" }) do
 			assert_match(report, "%[FAIL%] " .. kind .. ":")
 		end
 		require("orbit").setup()

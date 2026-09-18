@@ -5,12 +5,13 @@ local connector_defaults = {
 	mssql = { executable = "sqlcmd", version_args = { "--version" } },
 	mysql = { executable = "mysql", version_args = { "--version" } },
 	postgres = { executable = "psql", version_args = { "--version" } },
+	redis = { executable = "redis-cli", version_args = { "--version" } },
 	sqlite = { executable = "sqlite3", version_args = { "--version" } },
 	trino = { executable = "trino", version_args = { "--version" } },
 	vertica = { executable = "vsql", version_args = { "--version" } },
 }
 
-local kinds = { "mssql", "mysql", "postgres", "sqlite", "trino", "vertica" }
+local kinds = { "mssql", "mysql", "postgres", "redis", "sqlite", "trino", "vertica" }
 
 local function default_dependencies()
 	return {
@@ -161,6 +162,15 @@ function M.run(kind, config, callback, overrides)
 				entry[#entry + 1] = "[FAIL] " .. label .. " credential: password or password_env is required"
 			end
 		end
+		if check.kind == "redis" and profile and profile.options.password_env then
+			local value = deps.getenv(profile.options.password_env)
+			entry[#entry + 1] = string.format(
+				"%s %s environment %s",
+				value ~= nil and value ~= "" and "[OK]" or "[FAIL]",
+				label,
+				profile.options.password_env
+			)
+		end
 
 		local dependency_missing = false
 		if jdbc_profile(profile) then
@@ -200,6 +210,11 @@ function M.run(kind, config, callback, overrides)
 				run_options = {
 					clear_env = true,
 					env = require("orbit.connectors.mssql_jdbc").sanitize_environment(profile.options, deps.environ()),
+				}
+			elseif check.kind == "redis" then
+				run_options = {
+					clear_env = true,
+					env = require("orbit.connectors.redis").sanitize_environment(profile and profile.options or {}, deps.environ()),
 				}
 			end
 			deps.run(command, function(result)

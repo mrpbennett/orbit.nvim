@@ -58,6 +58,12 @@ return {
     assert(vim.fn.maparg("<leader>s", "n", false, true).rhs == "<Cmd>OrbitStructure<CR>")
     assert(not vim.fn.maparg("<leader>D", "n", false, true).rhs)
 
+		local redis_buffer = vim.api.nvim_create_buf(false, true)
+		vim.api.nvim_set_current_buf(redis_buffer)
+		vim.bo[redis_buffer].filetype = "redis"
+		assert(vim.fn.maparg("<leader>x", "n", false, true).rhs == "<Cmd>OrbitExecute<CR>")
+		assert(vim.fn.maparg("<leader>s", "n", false, true).rhs == nil)
+
     vim.api.nvim_set_current_buf(original)
   end,
 }

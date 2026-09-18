@@ -2,6 +2,34 @@ local runner = require("orbit.runner")
 local session = require("orbit.session")
 
 return {
+	["runner applies one-shot Connector process options"] = function()
+		local original_system = vim.system
+		local received_options
+		vim.system = function(_, options, callback)
+			received_options = options
+			callback({ code = 0, stdout = "", stderr = "" })
+			return { kill = function() end }
+		end
+		local completed
+		local connector = {
+			prepare = function()
+				return { "fake" }, nil, { clear_env = true, env = { TOKEN = "secret" } }
+			end,
+			parse = function() return {} end,
+		}
+
+		local ok, test_err = xpcall(function()
+			runner.run({ name = "options", options = {} }, "GET key", function(rows, err)
+				completed = rows and not err
+			end, connector)
+			assert(vim.wait(100, function() return completed ~= nil end))
+			assert(received_options.text == true and received_options.clear_env == true)
+			assert(vim.deep_equal(received_options.env, { TOKEN = "secret" }))
+		end, debug.traceback)
+		vim.system = original_system
+		assert(ok, test_err)
+	end,
+
 	["runner preserves optional Connector execution metadata"] = function()
 		local original_system = vim.system
 		vim.system = function(_, _, callback)

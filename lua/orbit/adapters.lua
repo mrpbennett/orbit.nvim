@@ -136,6 +136,7 @@ local connectors = {
 	mssql = require("orbit.connectors.mssql"),
 	mysql = require("orbit.connectors.mysql"),
 	postgres = require("orbit.connectors.postgres"),
+	redis = require("orbit.connectors.redis"),
 	sqlite = require("orbit.connectors.sqlite"),
 	trino = require("orbit.connectors.trino"),
 	vertica = require("orbit.connectors.vertica"),

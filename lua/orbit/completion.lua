@@ -77,6 +77,41 @@ local function partial_matches(name, partial)
 	return name:sub(1, #partial):lower() == partial:lower()
 end
 
+local function redis_items(profile, connector, lines, row, col)
+	local context = connector.completion_context(lines[row] or "", col)
+	if not context then
+		return {}
+	end
+	local redis_cache = require("orbit.redis_cache")
+	local items = {}
+	if context.token_index == 1 then
+		for _, name in ipairs(redis_cache.command_names(profile)) do
+			if partial_matches(name, context.partial) then
+				items[#items + 1] = item(name, "Command", profile.name)
+			end
+		end
+	else
+		local command = context.arguments[1]
+		local argument_position = context.token_index - 1
+		if command and redis_cache.is_key_argument(profile, command, argument_position, context.total_arguments) then
+			for _, key in ipairs(redis_cache.keys(profile)) do
+				if key:sub(1, #context.partial) == context.partial then
+					items[#items + 1] = item(
+						connector.quote_argument(key),
+						"Key",
+						string.format("%s (%d)", profile.name, profile.options.database or 0)
+					)
+				end
+			end
+		end
+	end
+	for _, entry in ipairs(items) do
+		entry.replace_start_row = row
+		entry.replace_start_col = context.replace_start_col
+	end
+	return sorted(items)
+end
+
 -- Case-insensitive equality for unquoted SQL identifiers (schema/table/
 -- catalog/alias names) so that one person typing `FROM orders o` and
 -- another typing `FROM ORDERS O` (or any mix) both resolve against the same
@@ -366,6 +401,9 @@ function M.items(profile, lines, row, col)
 	if not connector then
 		return {}
 	end
+	if profile.kind == "redis" then
+		return redis_items(profile, connector, lines, row, col)
+	end
 
 	-- Delegate all the SQL-structure understanding to orbit.sql.tokenizer
 	-- and orbit.sql.scope: tokenize the buffer, find which statement the
@@ -445,7 +483,13 @@ M._profile_for_buffer = profile_for_buffer
 -- database round-trip. Fire-and-forget: any error is handled wherever
 -- schema_cache.load_tables reports it, not here.
 function M.prewarm(profile)
-	cache.load_tables(profile)
+	if profile.kind == "redis" then
+		local redis_cache = require("orbit.redis_cache")
+		redis_cache.load_commands(profile)
+		redis_cache.load_keys(profile)
+	else
+		cache.load_tables(profile)
+	end
 end
 
 return M

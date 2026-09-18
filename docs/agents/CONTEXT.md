@@ -1,6 +1,6 @@
 # Orbit.nvim
 
-Orbit.nvim is a personal Neovim database query workspace for MSSQL, MySQL, PostgreSQL, SQLite, Trino, and Vertica. It provides statement execution, schema browsing, and formatted results through backend-specific Connectors.
+Orbit.nvim is a personal Neovim database query workspace for MSSQL, MySQL, PostgreSQL, Redis, SQLite, Trino, and Vertica. It provides statement execution, metadata-backed completion, schema browsing where applicable, and formatted results through backend-specific Connectors.
 
 ## Language
 
@@ -76,11 +76,11 @@ A Neovim buffer containing statements and optionally associated with a specific 
 _Avoid_: SQL file, editor buffer
 
 **Saved query**:
-A reusable `.sql` file contained within a saved query location. Orbit can open it as a query buffer and organize it within the configured saved query locations.
+A reusable `.sql` or `.redis` file contained within a saved query location. Orbit can open it as a query buffer and organize it within the configured saved query locations.
 _Avoid_: query file, saved file
 
 **Saved query location**:
-A named directory containing reusable `.sql` files that can be opened as query buffers.
+A named directory containing reusable `.sql` and `.redis` files that can be opened as query buffers.
 _Avoid_: save directory, save location
 
 **Workspace**:
@@ -110,3 +110,15 @@ _Avoid_: alias (bare), table nickname
 **Derived table**:
 A subquery given a table alias in a `FROM`/`JOIN` clause. Orbit recognizes the alias as valid but does not infer its columns.
 _Avoid_: subquery table, inline view
+
+**Redis logical database**:
+The numbered key namespace selected by a Redis connection profile. A Redis key belongs to exactly one logical database within that profile.
+_Avoid_: Redis schema, Redis catalog
+
+**Redis key index**:
+A connection-profile- and logical-database-scoped collection of Redis keys available to completion. It may be stale or incomplete relative to the live keyspace.
+_Avoid_: result completion, key cache
+
+**Redis key candidate**:
+A key from the Redis key index offered for a key argument in a Redis statement.
+_Avoid_: result value, generic value completion

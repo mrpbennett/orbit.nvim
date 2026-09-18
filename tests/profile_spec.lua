@@ -198,6 +198,7 @@ return {
     assert(adapters.connector({ kind = "vertica" }) == connector("vertica"))
     assert(adapters.connector({ kind = "mysql" }) == connector("mysql"))
     assert(adapters.connector({ kind = "mssql" }) == connector("mssql"))
+		assert(adapters.connector({ kind = "redis" }) == connector("redis"))
     local unknown, err = adapters.connector({ kind = "unknown" })
     assert(unknown == nil)
     assert(err == "unsupported profile kind: unknown")

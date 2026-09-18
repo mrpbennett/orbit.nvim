@@ -6,6 +6,55 @@ local runner = require("orbit.runner")
 local workspace = require("orbit.workspace")
 
 return {
+	["disconnect cancels Redis metadata with the bound profile session"] = function()
+		local redis_cache = require("orbit.redis_cache")
+		local original_close = runner.close
+		local original_cancel = redis_cache.cancel
+		local original_notify = vim.notify
+		local closed, cancelled
+		runner.close = function(name) closed = name end
+		redis_cache.cancel = function(name) cancelled = name end
+		vim.notify = function() end
+		local buffer = vim.api.nvim_create_buf(false, true)
+		vim.b[buffer].orbit_profile = "cache"
+		local ok, err = xpcall(function()
+			query.disconnect(buffer)
+			assert(closed == "cache" and cancelled == "cache")
+		end, debug.traceback)
+		runner.close = original_close
+		redis_cache.cancel = original_cancel
+		vim.notify = original_notify
+		if vim.api.nvim_buf_is_valid(buffer) then vim.api.nvim_buf_delete(buffer, { force = true }) end
+		assert(ok, err)
+	end,
+
+	["binding Redis profiles selects the Redis filetype and prewarms completion"] = function()
+		local completion = require("orbit.completion")
+		local structure = require("orbit.structure")
+		local original_prewarm = completion.prewarm
+		local original_close_for_buffer = structure.close_for_buffer
+		local original_notify = vim.notify
+		local warmed, closed_structure
+		completion.prewarm = function(profile) warmed = profile end
+		structure.close_for_buffer = function(buffer) closed_structure = buffer end
+		vim.notify = function() end
+		local buffer = vim.api.nvim_create_buf(false, true)
+		local profile = { name = "cache", kind = "redis", options = { host = "localhost" } }
+		local ok, err = xpcall(function()
+			query.bind_profile(buffer, profile)
+			assert(vim.bo[buffer].filetype == "redis")
+			assert(warmed == profile)
+			assert(closed_structure == buffer)
+			query.bind_profile(buffer, { name = "db", kind = "sqlite", options = { path = ":memory:" } })
+			assert(vim.bo[buffer].filetype == "sql")
+		end, debug.traceback)
+		completion.prewarm = original_prewarm
+		structure.close_for_buffer = original_close_for_buffer
+		vim.notify = original_notify
+		if vim.api.nvim_buf_is_valid(buffer) then vim.api.nvim_buf_delete(buffer, { force = true }) end
+		assert(ok, err)
+	end,
+
 	["MSSQL mutation confirmation follows CTE verbs and SELECT INTO semantics"] = function()
 		local confirm = require("orbit.connectors.mssql").requires_confirmation
 		local read_only = {

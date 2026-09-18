@@ -33,10 +33,10 @@ local M = {}
 -- Returns normalized rows, an error string, and optional execution metadata.
 -- The third value extends the Connector contract without changing existing
 -- two-value row/error parsers.
-local function parse(connector, output, options)
+local function parse(connector, output, options, statement)
 	local rows, err, metadata
 	if connector.parse then
-		rows, err, metadata = connector.parse(output, options)
+		rows, err, metadata = connector.parse(output, options, statement)
 	else
 		rows, err, metadata = adapters.parse(output)
 	end
@@ -84,7 +84,7 @@ local function run_once(profile, connector, statement, callback)
 	-- Ask the connector to turn the SQL statement into an actual shell command
 	-- (e.g. { "psql", "-c", statement, ... }). This can fail if options are
 	-- invalid, in which case there is nothing to run.
-	local command, command_err = connector.prepare(profile.options, statement)
+	local command, command_err, process_options = connector.prepare(profile.options, statement)
   if not command then
     vim.schedule(function()
       callback(nil, command_err)
@@ -98,16 +98,21 @@ local function run_once(profile, connector, statement, callback)
   -- itself throw (e.g. if the executable path is malformed), so it's wrapped
   -- in pcall; `ok` tells us whether the process was actually started, and
   -- `process` is either the process handle or the pcall error message.
-  local ok, process = pcall(vim.system, command, { text = true }, function(result)
+	process_options = vim.tbl_extend("force", process_options or {}, { text = true })
+	local ok, process = pcall(vim.system, command, process_options, function(result)
     vim.schedule(function()
       if result.code ~= 0 then
-        -- Non-zero exit code means the CLI itself reported an error (bad SQL,
-        -- connection refused, etc); surface its stderr to the caller.
-        callback(nil, string.format("command failed (%d): %s", result.code, vim.trim(result.stderr)))
+		-- Non-zero exit code means the CLI itself reported an error. Prefer
+		-- stderr, but some clients such as redis-cli report command errors on stdout.
+				local message = vim.trim(result.stderr or "")
+				if message == "" then
+					message = vim.trim(result.stdout or "")
+				end
+				callback(nil, string.format("command failed (%d): %s", result.code, message))
         return
       end
 
-			local rows, parse_err, metadata = parse(connector, result.stdout, profile.options)
+			local rows, parse_err, metadata = parse(connector, result.stdout, profile.options, statement)
       if not rows then
         callback(nil, parse_err, metadata)
         return
@@ -153,7 +158,7 @@ function M.run(profile, statement, callback, connector)
 			return nil
 		end
 	end
-  -- Trino uses one-shot processes; supported connectors retain a serialized CLI session.
+	-- Trino and Redis use one-shot processes; other supported Connectors retain a serialized CLI session.
 	if not connector.session_command then
 		return run_once(profile, connector, statement, callback)
   end
@@ -162,7 +167,7 @@ function M.run(profile, statement, callback, connector)
       callback(nil, run_err)
       return
     end
-		local rows, parse_err, metadata = parse(connector, output, profile.options)
+		local rows, parse_err, metadata = parse(connector, output, profile.options, statement)
 		callback(rows, parse_err, metadata)
   end)
 end
