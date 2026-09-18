@@ -514,6 +514,21 @@ Switch to JSON for scalar-only results:
 ```
 
 Run `:OrbitProfiles`, change the value in the profile's existing `options` object, and save the profile file. The next statement uses the new format. Omitting `output_format` is equivalent to `"CSV_HEADER"`.
+
+### External Authentication Token Reuse
+
+Orbit starts a new Trino CLI process for each statement. With Trino CLI 481 or newer, external authentication can reuse a filesystem-backed token across those processes instead of opening a browser for every statement:
+
+```json
+{
+  "server": "https://trino.example.com:8443?externalAuthenticationTokenCache=SYSTEM",
+  "user": "alice",
+  "catalog": "hive",
+  "arguments": ["--external-authentication"]
+}
+```
+
+The Trino CLI stores the token under `~/.trino/`. Its `SYSTEM` cache is shared by Trino CLI and JDBC processes for the current operating-system user and is not separated by coordinator or Trino username, so use it only when that account does not connect to multiple Trino clusters or identities. See Trino's [`externalAuthenticationTokenCache` documentation](https://trino.io/docs/current/client/jdbc.html#parameter-reference) for cache behavior and alternatives.
 </details>
 
 ### Authentication
