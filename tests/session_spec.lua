@@ -145,6 +145,13 @@ return {
     )
     assert(malformed_payload_err:match("not text or NULL"), malformed_payload_err)
   end,
+  ["MSSQL keeps GO rejection and exit diagnostics across transport dispatch"] = function()
+    local mssql = require("orbit.connectors.mssql")
+    local jdbc = { transport = "jdbc" }
+    local framed, err = mssql.session_request("SELECT 1\nGO", "marker", jdbc)
+    assert(framed == nil and err:match("GO batch separator"), err)
+    assert(mssql.session_exit_error("ignored stdout", " JDBC failed ", jdbc) == "JDBC failed")
+  end,
   ["MSSQL JDBC keeps one process after an ordinary statement error"] = function()
     local original_system = vim.system
     local process

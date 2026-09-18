@@ -1,18 +1,21 @@
--- Microsoft SQL Server connector backed by Microsoft's Go sqlcmd.
+-- Microsoft SQL Server connector with profile-selected transports.
 local M = {
 	sql_dialect = "mssql",
-	-- The environment returned below is complete, not an overlay. Session can
-	-- honor this flag to keep inherited SQLCMD configuration out of the child.
+	-- Each transport returns a complete child environment, not an overlay.
 	inherit_environment = false,
 }
 
 local metadata = require("orbit.connectors.metadata")
 local jdbc = require("orbit.connectors.mssql_jdbc")
+local sqlcmd = require("orbit.connectors.mssql_sqlcmd")
 local schema_pattern = require("orbit.connectors.utils.schema_pattern")
 local tokenizer = require("orbit.sql.tokenizer")
 
-local separator = string.char(31)
-local default_port = 1433
+-- Select once at the Connector seam so transport lifecycle details do not leak
+-- into shared MSSQL behavior.
+local function transport(options)
+	return jdbc.selected(options or {}) and jdbc or sqlcmd
+end
 
 local function default_database(options)
 	return type(options.database) == "table" and options.database[1] or options.database
@@ -34,378 +37,39 @@ local function qualified(options, row)
 	return name
 end
 
-local function is_integer(value, minimum, maximum)
-	return type(value) == "number"
-		and value == value
-		and value ~= math.huge
-		and value ~= -math.huge
-		and value % 1 == 0
-		and (minimum == nil or value >= minimum)
-		and (maximum == nil or value <= maximum)
-end
-
 function M.validate_options(profile_name, options)
-	if jdbc.selected(options) then
-		return jdbc.validate_options(profile_name, options)
-	end
-	if options.transport ~= nil and options.transport ~= "sqlcmd" then
-		return nil, string.format("profile %q has unsupported MSSQL transport %q", profile_name, tostring(options.transport))
-	end
-	local allowed = {
-		confirm_mutations = true,
-		database = true,
-		executable = true,
-		host = true,
-		password = true,
-		password_env = true,
-		port = true,
-		schema_patterns = true,
-		trust_server_certificate = true,
-		transport = true,
-		user = true,
-	}
-	for name in pairs(options) do
-		if not allowed[name] then
-			return nil, string.format("profile %q has unsupported MSSQL option %q", profile_name, name)
-		end
-	end
-	if options.executable ~= nil and (type(options.executable) ~= "string" or options.executable == "") then
-		return nil, string.format("profile %q options.executable must be a non-empty string", profile_name)
-	end
-	if options.confirm_mutations ~= nil and type(options.confirm_mutations) ~= "boolean" then
-		return nil, string.format("profile %q options.confirm_mutations must be a boolean", profile_name)
-	end
-	for _, name in ipairs({ "host", "user" }) do
-		if type(options[name]) ~= "string" or options[name] == "" then
-			return nil, string.format("profile %q requires options.%s", profile_name, name)
-		end
-	end
-	if type(options.database) == "table" then
-		if not vim.islist(options.database) or #options.database == 0 then
-			return nil, string.format("profile %q options.database must be a non-empty string or array", profile_name)
-		end
-		local seen = {}
-		for _, database in ipairs(options.database) do
-			if type(database) ~= "string" or database == "" then
-				return nil, string.format("profile %q options.database must contain non-empty strings", profile_name)
-			end
-			local normalized = database:lower()
-			if seen[normalized] then
-				return nil, string.format("profile %q options.database must not contain duplicates", profile_name)
-			end
-			seen[normalized] = true
-		end
-	elseif type(options.database) ~= "string" or options.database == "" then
-		return nil, string.format("profile %q requires options.database", profile_name)
-	end
-	for _, name in ipairs({ "password", "password_env" }) do
-		if options[name] ~= nil and (type(options[name]) ~= "string" or options[name] == "") then
-			return nil, string.format("profile %q options.%s must be a non-empty string", profile_name, name)
-		end
-	end
-	if options.password ~= nil and options.password_env ~= nil then
-		return nil, string.format("profile %q options.password and options.password_env are mutually exclusive", profile_name)
-	end
-	if options.port ~= nil and not is_integer(options.port, 1, 65535) then
-		return nil, string.format("profile %q options.port must be an integer between 1 and 65535", profile_name)
-	end
-	if options.trust_server_certificate ~= nil and type(options.trust_server_certificate) ~= "boolean" then
-		return nil, string.format("profile %q options.trust_server_certificate must be a boolean", profile_name)
-	end
-	if options.schema_patterns ~= nil then
-		if type(options.schema_patterns) ~= "table" or not vim.islist(options.schema_patterns) or #options.schema_patterns == 0 then
-			return nil, string.format("profile %q options.schema_patterns must be a non-empty array", profile_name)
-		end
-		for _, pattern in ipairs(options.schema_patterns) do
-			if type(pattern) ~= "string" or pattern == "" then
-				return nil, string.format("profile %q options.schema_patterns must contain non-empty strings", profile_name)
-			end
-		end
-	end
-	return true
-end
-
-local function password(options)
-	local password = options.password
-	if options.password_env then
-		password = vim.env[options.password_env]
-		if password == nil or password == "" then
-			return nil, string.format("environment variable %q does not contain an MSSQL password", options.password_env)
-		end
-	end
-	if password == nil or password == "" then
-		return nil, "MSSQL password is required through options.password or options.password_env"
-	end
-	return password
+	return transport(options).validate_options(profile_name, options)
 end
 
 function M.session_command(options)
-	if jdbc.selected(options) then
-		return jdbc.session_command(options)
-	end
-	local _, err = password(options)
-	if err then
-		return nil, err
-	end
-	local command = {
-		options.executable or "sqlcmd",
-		"-S", string.format("tcp:%s,%d", options.host, options.port or default_port),
-		"-d", default_database(options),
-		"-U", options.user,
-		"-N", "mandatory",
-	}
-	if options.trust_server_certificate then
-		command[#command + 1] = "-C"
-	end
-	vim.list_extend(command, { "-s", separator, "-w", "65535", "-y", "8000", "-Y", "8000", "-x" })
-	return command
+	return transport(options).session_command(options)
 end
 
--- Return a complete child environment with every inherited SQLCMD setting
--- removed. The retained Session must replace, rather than merge, this table.
+-- Return the selected transport's complete child environment. The retained
+-- Session must replace, rather than merge, this table.
 function M.environment(options, inherited)
-	if jdbc.selected(options) then
-		return jdbc.environment(options, inherited)
-	end
-	local resolved, err = password(options)
-	if not resolved then
-		return nil, err
-	end
-	local environment = {}
-	for name, value in pairs(inherited or vim.fn.environ()) do
-		local normalized = tostring(name):upper()
-		if not normalized:match("^SQLCMD") and normalized ~= tostring(options.password_env or ""):upper() then
-			environment[name] = value
-		end
-	end
-	environment.SQLCMDPASSWORD = resolved
-	return environment
+	return transport(options).environment(options, inherited)
 end
 
-local function sqlcmd_control(statement)
-	local bare_commands = {
-		ED = true,
-		EXIT = true,
-		QUIT = true,
-		RESET = true,
-	}
-	local statement_lines = vim.split(statement, "\n", { plain = true })
-	local eligible = tokenizer.mssql_command_rows(statement_lines)
-	for row, line in ipairs(statement_lines) do
-		local command = line:match("^%s*(.-)%s*$")
-		local upper = command:upper()
-		if eligible[row] and (command:sub(1, 1) == ":" or command:sub(1, 2) == "!!") then
-			return command:match("^%S+")
-		end
-		for name in pairs(bare_commands) do
-			if eligible[row]
-				and (upper == name or upper:match("^" .. name .. "[ \t]") or (name == "EXIT" and upper:match("^EXIT[ \t]*%("))) then
-				return name
-			end
-		end
-		if eligible[row] and (upper == "ON ERROR" or upper:match("^ON[ \t]+ERROR[ \t]")) then
-			return "ON ERROR"
-		end
-	end
-	return nil
-end
-
--- Preserve fatal sqlcmd diagnostics when the process exits before its end
--- marker. Ordinary SQL errors remain inside complete framed stdout responses.
+-- Preserve the selected transport's fatal diagnostics when a retained process
+-- exits before it completes its frame.
 function M.session_exit_error(stdout, stderr, options)
-	if jdbc.selected(options or {}) then
-		return stderr and vim.trim(stderr) ~= "" and vim.trim(stderr) or nil
-	end
-	stdout = stdout or ""
-	local start_at = stdout:find("Msg %d+,") or stdout:find("[Ss]qlcmd:")
-	local details = {}
-	if start_at then
-		details[#details + 1] = vim.trim(stdout:sub(start_at))
-	end
-	if stderr and vim.trim(stderr) ~= "" then
-		details[#details + 1] = vim.trim(stderr)
-	end
-	return #details > 0 and table.concat(details, "\n") or nil
+	return transport(options).session_exit_error(stdout, stderr, options)
 end
 
 function M.session_request(statement, marker, options)
 	if tokenizer.has_mssql_batch_separator(vim.split(statement, "\n", { plain = true })) then
 		return nil, "MSSQL statements containing a GO batch separator are not supported"
 	end
-	if jdbc.selected(options or {}) then
-		return jdbc.session_request(statement, marker, options)
-	end
-	local control = sqlcmd_control(statement)
-	if control then
-		return nil, "MSSQL sqlcmd control command " .. string.format("%q", control) .. " is not supported"
-	end
-	return table.concat({
-		"SET NOCOUNT ON;",
-		"SELECT " .. literal(marker .. ":BEGIN") .. " AS [__orbit_frame];",
-		"GO",
-		statement,
-		"GO",
-		"SET NOCOUNT ON;",
-		"SELECT " .. literal(marker .. ":END") .. " AS [__orbit_frame];",
-		"GO",
-		"",
-	}, "\n")
-end
-
-local function lines(output)
-	local result, start_at = {}, 1
-	while true do
-		local newline = output:find("\n", start_at, true)
-		if not newline then
-			break
-	end
-		local text = output:sub(start_at, newline - 1)
-		if text:sub(-1) == "\r" then
-			text = text:sub(1, -2)
-		end
-		result[#result + 1] = { text = text, start_at = start_at, finish = newline }
-		start_at = newline + 1
-	end
-	return result
-end
-
-local function marker_record(records, marker, suffix, first)
-	for index = first or 1, #records - 3 do
-		local heading = vim.trim(records[index].text)
-		local underline = vim.trim(records[index + 1].text)
-		local value = vim.trim(records[index + 2].text)
-		if heading == "__orbit_frame"
-			and underline ~= ""
-			and underline:match("^%-+$")
-			and value == marker .. suffix
-			and records[index + 3].text == ""
-		then
-			return index
-		end
-	end
-	return nil
+	return transport(options).session_request(statement, marker, options)
 end
 
 function M.session_output(output, marker, options)
-	if jdbc.selected(options or {}) then
-		return jdbc.session_output(output, marker)
-	end
-	local records = lines(output)
-	local begin = marker_record(records, marker, ":BEGIN")
-	if not begin then
-		return nil
-	end
-	local ending = marker_record(records, marker, ":END", begin + 4)
-	if not ending then
-		return nil
-	end
-	local payload_start = records[begin + 3].finish + 1
-	local payload_finish = records[ending].start_at - 1
-	return output:sub(payload_start, payload_finish), records[ending + 3].finish
-end
-
-local function split_fields(line)
-	return vim.split(line, separator, { plain = true })
-end
-
-local function message_line(line)
-	local value = vim.trim(line)
-	return value:match("^Msg %d+,")
-		or value:match("^[Ss]qlcmd:")
-		or value:match("^%(%d+ row affected%)$")
-		or value:match("^%(%d+ rows affected%)$")
-		or value:match("^Changed database context to ")
+	return transport(options).session_output(output, marker, options)
 end
 
 function M.parse(output, options)
-	if jdbc.selected(options or {}) then
-		return jdbc.parse(output)
-	end
-	if type(output) ~= "string" then
-		return nil, "MSSQL output is required"
-	end
-	output = output:gsub("\r\n", "\n")
-	if output:find("\r", 1, true) then
-		return nil, "MSSQL output contains an unexpected carriage return"
-	end
-	local blocks, block = {}, {}
-	for line in (output .. "\n"):gmatch("(.-)\n") do
-		if line == "" then
-			if #block > 0 then
-				blocks[#blocks + 1] = block
-				block = {}
-			end
-		else
-			block[#block + 1] = line
-		end
-	end
-	if #blocks == 0 then
-		return {}
-	end
-
-	local result, columns
-	for block_index, current in ipairs(blocks) do
-		if message_line(current[1]) then
-			return nil, "MSSQL output contains a server message:\n" .. table.concat(current, "\n")
-		end
-		if #current < 2 then
-			return nil, string.format("MSSQL output block %d is a message or malformed result: %s", block_index, current[1])
-		end
-		local headings = split_fields(current[1])
-		local underlines = split_fields(current[2])
-		if #underlines ~= #headings then
-			return nil, string.format("MSSQL result %d underline has %d fields for %d headings", block_index, #underlines, #headings)
-		end
-		for index, underline in ipairs(underlines) do
-			underline = vim.trim(underline)
-			if underline == "" or not underline:match("^%-+$") then
-				return nil, string.format("MSSQL result %d has a malformed underline for column %d", block_index, index)
-			end
-		end
-		if columns then
-			return nil, "MSSQL output contains multiple tabular results"
-		end
-		columns, result = {}, {}
-		local seen = {}
-		for index, heading in ipairs(headings) do
-			heading = vim.trim(heading)
-			if heading == "" then
-				return nil, string.format("MSSQL result %d column %d heading must not be empty", block_index, index)
-			end
-			if seen[heading] then
-				return nil, "MSSQL result has duplicate heading " .. string.format("%q", heading)
-			end
-			seen[heading] = true
-			columns[index] = heading
-		end
-		for row_index = 3, #current do
-			if row_index < #current then
-				local possible_underlines = split_fields(current[row_index + 1])
-				local all_underlines = #possible_underlines == #columns
-				for _, underline in ipairs(possible_underlines) do
-					underline = vim.trim(underline)
-					all_underlines = all_underlines and underline ~= "" and underline:match("^%-+$") ~= nil
-				end
-				if all_underlines then
-					return nil, "MSSQL output contains multiple tabular results"
-				end
-			end
-			if message_line(current[row_index]) then
-				return nil, string.format("MSSQL output contains a server message at result %d row %d:\n%s", block_index, row_index - 2, table.concat(vim.list_slice(current, row_index), "\n"))
-			end
-			local values = split_fields(current[row_index])
-			if #values ~= #columns then
-				return nil, string.format("MSSQL result %d row %d has %d fields for %d headings", block_index, row_index - 2, #values, #columns)
-			end
-			local row = {}
-			for index, value in ipairs(values) do
-				value = vim.trim(value)
-				row[columns[index]] = value
-			end
-			result[#result + 1] = row
-		end
-	end
-	return result, nil, { columns = columns }
+	return transport(options).parse(output, options)
 end
 
 function M.qualified_name(options, row)

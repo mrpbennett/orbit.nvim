@@ -14,6 +14,7 @@ local modules = {
 	"orbit.connectors.mysql",
 	"orbit.connectors.mssql",
 	"orbit.connectors.mssql_jdbc",
+	"orbit.connectors.mssql_sqlcmd",
 	"orbit.connectors.metadata",
 	"orbit.connectors.utils.entities",
 	"orbit.connectors.utils.mutation_sql",

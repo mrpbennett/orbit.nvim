@@ -1,5 +1,48 @@
 # Orbit.nvim v0.1 Plan
 
+## Architecture Review 2026-09-18
+
+- [x] Inspect the recent Redis Connector and MSSQL transport hot spots, following adjacent seams only where understanding requires it.
+- [x] Apply the deletion test and validate candidates against the domain model, ADRs, tests, and completed architecture work.
+- [x] Produce, validate, and open a fresh temporary HTML report with visual before/after comparisons and a top recommendation.
+
+### Scope
+
+- Prioritize Redis connection-profile execution, key acquisition, completion, and Workspace projection because they dominate the newest change.
+- Assess the MSSQL Connector's two transport implementations only where the real transport seam exposes repeated caller knowledge.
+- Preserve ADR-0004 and do not re-suggest completed Workspace lifetime, retained Statement framing, Schema acquisition, Schema object identity, Saved query, Completion scope, or Table metadata work.
+
+### Review
+
+- Report: `/tmp/architecture-review-20260918-145023.html`.
+- Top recommendation: make the MSSQL transport seam explicit because the sqlcmd implementation and JDBC implementation are real adapters but their lifecycle knowledge is split through the shared MSSQL module.
+- Additional candidates: keep Redis reply decoding separate from Result grid projection, then consider concentrating Redis COMMAND and SCAN refresh fan-in in `redis_cache`.
+- ADR-0004 is preserved; no candidate reopens a settled decision.
+- Verification: `xmllint --html --noout /tmp/architecture-review-20260918-145023.html` passed.
+
+## MSSQL Transport Seam Deepening 2026-09-18
+
+- [x] Inspect the current MSSQL Connector transport lifecycle and its tests.
+- [x] Extract the internal sqlcmd transport adapter and centralize transport selection.
+- [x] Add transport-interface regression coverage for shared Connector dispatch.
+- [x] Run focused and complete verification, then review the change.
+
+### Settled Design
+
+- The transport seam is private to the MSSQL Connector; no other Orbit module selects a transport adapter.
+- The Connector selects sqlcmd or JDBC once from the connection profile, then delegates transport lifecycle behavior through that seam.
+- The Connector retains shared MSSQL qualification, Schema acquisition, Completion, object actions, and mutation classification.
+- sqlcmd and JDBC adapters retain their own profile validation, process lifecycle, credential delivery, framing, parsing, cancellation behavior, and exit diagnostics.
+- Tests cross the transport interface through the Connector while Session retains its shared framing coverage.
+
+### Review
+
+- `lua/orbit/connectors/mssql_sqlcmd.lua` now owns the sqlcmd adapter's validation, command/environment construction, control-command rejection, retained framing, exit diagnostics, and strict Result parsing.
+- `lua/orbit/connectors/mssql.lua` now selects a transport once and retains only shared MSSQL behavior; JDBC now declares the same exit-diagnostic operation as sqlcmd.
+- Regression coverage verifies shared Connector `GO` rejection and transport-specific exit diagnostics; the test runner loads the extracted sqlcmd module.
+- Verification: `git diff --check` passes. `bash tests/verify.sh` reaches and passes the seam coverage plus Java helper coverage, then retains three established unrelated failures: JDBC profile-validation expectation, JDBC request-frame-length expectation, and the Trino large-schema performance budget.
+- Independent review found and resolved an unused sqlcmd selection export and insufficient comments around sqlcmd framing and strict parsing. No commit or GitHub write was made.
+
 ## Redis Connector And Completion Plan 2026-09-17
 
 - [x] Publish primary-source Redis CLI research and the settled MVP behavior.

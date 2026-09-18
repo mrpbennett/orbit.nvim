@@ -266,6 +266,10 @@ function M.environment(options, inherited)
 	return M.sanitize_environment(options, inherited)
 end
 
+function M.session_exit_error(_, stderr)
+	return stderr and vim.trim(stderr) ~= "" and vim.trim(stderr) or nil
+end
+
 -- Length-prefix every UTF-8 field so credentials and arbitrary SQL remain on
 -- stdin without becoming ambiguous or appearing in process metadata.
 function M.session_request(statement, marker, options)
