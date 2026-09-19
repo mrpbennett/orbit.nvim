@@ -2,7 +2,12 @@
 
 ## A database IDE for Neovim
 
-Your database revolves around your editor, not the other way around.
+<blockquote><p>[!NOTE]
+This project has been created with agents using https://github.com/mattpocock/skills from Matt Pocock - https://github.com/mattpocock. I do use this plugin on the daily in my workflow and ❤️ it!.
+
+It's also a project to help me learn Lua.</p></blockquote>
+
+### Your database revolves around your editor, not the other way around.
 
 Orbit runs statements through backend-specific Connectors using user-installed database clients. It retains one connection per profile where the client supports it, keeps profiles per query buffer, browses schemas, completes cached objects, and renders normalized results in a navigable grid.
 
