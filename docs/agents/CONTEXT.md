@@ -1,6 +1,6 @@
 # Orbit.nvim
 
-Orbit.nvim is a personal Neovim database query workspace for MSSQL, MySQL, PostgreSQL, Redis, SQLite, Trino, and Vertica. It provides statement execution, metadata-backed completion, schema browsing where applicable, and formatted results through backend-specific Connectors.
+Orbit.nvim is a personal Neovim database query workspace for SQL Server, MySQL, PostgreSQL, Redis, SQLite, Trino, and Vertica. It provides statement execution, metadata-backed completion, schema browsing where applicable, and formatted results through backend-specific Connectors.
 
 ## Language
 
@@ -12,12 +12,12 @@ _Avoid_: connection, config, data source
 The backend-specific component selected by a connection profile's `kind`. It implements the capabilities supported by that backend using the profile's backend-specific options.
 _Avoid_: adapter, driver
 
-**MSSQL transport**:
-The execution mechanism used by the MSSQL Connector to communicate with SQL Server. A connection profile selects a transport when more than one is available.
+**SQL Server transport**:
+The execution mechanism used by the SQL Server Connector to communicate with SQL Server. A connection profile selects a transport when more than one is available.
 _Avoid_: Connector, driver
 
 **JDBC driver**:
-A Java library used by a JDBC-based MSSQL transport to communicate with SQL Server, such as jTDS. It is not an Orbit Connector or a standalone executable.
+A Java library used by a JDBC-based SQL Server transport to communicate with SQL Server, such as jTDS. It is not an Orbit Connector or a standalone executable.
 _Avoid_: Connector, transport
 
 **Profile file**:
@@ -38,7 +38,7 @@ A table or view exposed by a connection profile, identified by its catalog, sche
 A recognized kind of metadata for a schema object: columns, primary keys, foreign keys, or indexes. A connector exposes only the categories it supports for that object.
 
 **Qualified name**:
-The canonical SQL-pasteable identifier for a schema object. It is Connector-specific: MSSQL uses bracket-quoted schema and object names, prefixed by a bracket-quoted database for multi-database profiles; SQLite uses a quoted object name; PostgreSQL uses quoted schema and object names; MySQL uses backtick-quoted database and object names; and Trino uses quoted catalog, schema, and object names.
+The canonical SQL-pasteable identifier for a schema object. It is Connector-specific: SQL Server uses bracket-quoted schema and object names, prefixed by a bracket-quoted database for multi-database profiles; SQLite uses a quoted object name; PostgreSQL uses quoted schema and object names; MySQL uses backtick-quoted database and object names; and Trino uses quoted catalog, schema, and object names.
 _Avoid_: table name, object path
 
 **Completion qualifier**:

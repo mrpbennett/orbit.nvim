@@ -133,7 +133,7 @@ end
 -- kind of database. Adding support for a new database kind means adding one
 -- more connector module and one more entry here.
 local connectors = {
-	mssql = require("orbit.connectors.mssql"),
+	sqlserver = require("orbit.connectors.sqlserver"),
 	mysql = require("orbit.connectors.mysql"),
 	postgres = require("orbit.connectors.postgres"),
 	redis = require("orbit.connectors.redis"),

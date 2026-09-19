@@ -133,8 +133,8 @@ function M.target(request)
 		if request.kind == "redis" and explicit:find("[\r\n]") then
 			return nil, "Redis execution requires a selection on exactly one line"
 		end
-		if request.dialect == "mssql" and tokenizer.has_mssql_batch_separator(vim.split(explicit, "\n", { plain = true })) then
-			return nil, "MSSQL GO batch separators are not supported"
+		if request.dialect == "mssql" and tokenizer.has_sqlserver_batch_separator(vim.split(explicit, "\n", { plain = true })) then
+			return nil, "SQL Server GO batch separators are not supported"
 		end
 		return explicit
 	end
@@ -188,8 +188,8 @@ function M.target(request)
 	if semicolons > 1 or (semicolons == 1 and not trailing_terminator) then
 		return nil, "statement is ambiguous; select the statement explicitly"
 	end
-	if request.dialect == "mssql" and tokenizer.has_mssql_batch_separator(request.lines) then
-		return nil, "MSSQL GO batch separators are not supported"
+	if request.dialect == "mssql" and tokenizer.has_sqlserver_batch_separator(request.lines) then
+		return nil, "SQL Server GO batch separators are not supported"
 	end
 
 	return contents

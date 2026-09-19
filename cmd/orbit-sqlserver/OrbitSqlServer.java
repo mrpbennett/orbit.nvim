@@ -18,8 +18,8 @@ import java.util.List;
 import java.util.Properties;
 import java.util.Set;
 
-/** Retained, protocol-only JDBC process used by Orbit's MSSQL Connector. */
-public final class OrbitMssql {
+/** Retained, protocol-only JDBC process used by Orbit's SQL Server Connector. */
+public final class OrbitSqlServer {
     private static final String PROTOCOL = "ORBIT/1";
     private static final int MAX_HEADER_BYTES = 8192;
     private static final int MAX_FIELD_BYTES = 128 * 1024 * 1024;
@@ -31,25 +31,25 @@ public final class OrbitMssql {
 
     public static void main(String[] args) {
         if (Runtime.version().feature() < 11) {
-            System.err.println("Orbit MSSQL helper requires Java 11 or newer");
+            System.err.println("Orbit SQL Server helper requires Java 11 or newer");
             System.exit(2);
         }
         try {
             Class<?> driverClass = Class.forName("net.sourceforge.jtds.jdbc.Driver");
             String driverVersion = driverClass.getPackage().getImplementationVersion();
             if (!"1.3.1".equals(driverVersion)) {
-                throw new IllegalStateException("Orbit MSSQL helper requires jTDS 1.3.1, found " + driverVersion);
+                throw new IllegalStateException("Orbit SQL Server helper requires jTDS 1.3.1, found " + driverVersion);
             }
             if (args.length == 1 && "--doctor".equals(args[0])) {
-                System.out.println("Orbit MSSQL helper: Java " + Runtime.version().feature() + "; jTDS 1.3.1 loaded");
+                System.out.println("Orbit SQL Server helper: Java " + Runtime.version().feature() + "; jTDS 1.3.1 loaded");
                 return;
             }
             if (args.length != 0) {
-                throw new IllegalArgumentException("Orbit MSSQL helper accepts only --doctor");
+                throw new IllegalArgumentException("Orbit SQL Server helper accepts only --doctor");
             }
-            new OrbitMssql().run();
+            new OrbitSqlServer().run();
         } catch (Throwable error) {
-            System.err.println("Orbit MSSQL helper failed: " + safeMessage(error));
+            System.err.println("Orbit SQL Server helper failed: " + safeMessage(error));
             System.exit(1);
         }
     }
@@ -81,10 +81,10 @@ public final class OrbitMssql {
     private void ensureConnection(ConnectionSettings settings) throws SQLException {
         if (connection != null) {
             if (connection.isClosed()) {
-                throw new SQLException("MSSQL JDBC connection is closed", "08003");
+                throw new SQLException("SQL Server JDBC connection is closed", "08003");
             }
             if (!settings.equals(connectionSettings)) {
-                throw new SQLException("MSSQL JDBC settings changed inside a retained session", "08003");
+                throw new SQLException("SQL Server JDBC settings changed inside a retained session", "08003");
             }
             return;
         }
@@ -122,7 +122,7 @@ public final class OrbitMssql {
                 if (resultAvailable) {
                     tabularResults++;
                     if (tabularResults > 1) {
-                        throw new SQLException("MSSQL JDBC statements may return only one tabular result");
+                        throw new SQLException("SQL Server JDBC statements may return only one tabular result");
                     }
                     try (ResultSet result = statement.getResultSet()) {
                         ResultData data = readResult(result);
@@ -150,10 +150,10 @@ public final class OrbitMssql {
         for (int index = 1; index <= width; index++) {
             String label = metadata.getColumnLabel(index);
             if (label == null || label.isEmpty()) {
-                throw new SQLException("MSSQL JDBC result column " + index + " label must not be empty");
+                throw new SQLException("SQL Server JDBC result column " + index + " label must not be empty");
             }
             if (!seen.add(label)) {
-                throw new SQLException("MSSQL JDBC result has duplicate label " + label);
+                throw new SQLException("SQL Server JDBC result has duplicate label " + label);
             }
             columns.add(label);
         }

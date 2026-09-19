@@ -1,10 +1,10 @@
--- Opt-in live acceptance for the MSSQL JDBC transport. All connection values
+-- Opt-in live acceptance for the SQL Server JDBC transport. All connection values
 -- come from the environment so credentials never enter this repository.
 local root = vim.fn.getcwd()
 package.path = table.concat({ root .. "/lua/?.lua", root .. "/lua/?/init.lua", package.path }, ";")
 
 local runner = require("orbit.runner")
-local connector = require("orbit.connectors.mssql")
+local connector = require("orbit.connectors.sqlserver")
 
 local function required(name)
 	local value = vim.env[name]
@@ -13,22 +13,22 @@ local function required(name)
 end
 
 local profile = {
-	name = "live-mssql-jdbc",
-	kind = "mssql",
+	name = "live-sqlserver-jdbc",
+	kind = "sqlserver",
 	options = {
 		transport = "jdbc",
 		driver = "jtds",
-		driver_path = required("ORBIT_MSSQL_JTDS_JAR"),
-		java_executable = vim.env.ORBIT_MSSQL_JAVA or "java",
-		host = required("ORBIT_MSSQL_HOST"),
-		port = tonumber(required("ORBIT_MSSQL_PORT")),
+		driver_path = required("ORBIT_SQLSERVER_JTDS_JAR"),
+		java_executable = vim.env.ORBIT_SQLSERVER_JAVA or "java",
+		host = required("ORBIT_SQLSERVER_HOST"),
+		port = tonumber(required("ORBIT_SQLSERVER_PORT")),
 		authentication = {
 			type = "domain_password",
-			domain = required("ORBIT_MSSQL_DOMAIN"),
-			user = required("ORBIT_MSSQL_USER"),
-			password_env = vim.env.ORBIT_MSSQL_PASSWORD_ENV or "MSSQL_PASSWORD",
+			domain = required("ORBIT_SQLSERVER_DOMAIN"),
+			user = required("ORBIT_SQLSERVER_USER"),
+			password_env = vim.env.ORBIT_SQLSERVER_PASSWORD_ENV or "SQLSERVER_PASSWORD",
 		},
-		trust_server_certificate = vim.env.ORBIT_MSSQL_TRUST_SERVER_CERTIFICATE == "1",
+		trust_server_certificate = vim.env.ORBIT_SQLSERVER_TRUST_SERVER_CERTIFICATE == "1",
 	},
 }
 local tls_mode = profile.options.trust_server_certificate and "ssl=require" or "ssl=authenticate"
@@ -40,7 +40,7 @@ local function execute(statement)
 	local request = runner.run(profile, statement, function(result, run_err, result_metadata)
 		rows, err, metadata, completed = result, run_err, result_metadata, true
 	end, connector)
-	assert(vim.wait(15000, function() return completed end), "timed out waiting for MSSQL JDBC statement")
+	assert(vim.wait(15000, function() return completed end), "timed out waiting for SQL Server JDBC statement")
 	return rows, err, metadata, request
 end
 
@@ -104,7 +104,7 @@ end, debug.traceback)
 runner.close(profile.name)
 assert(ok, test_err)
 print(string.format(
-	"PASS live MSSQL JDBC: SQL Server %s %s, %s observed; jTDS configured %s",
+	"PASS live SQL Server JDBC: SQL Server %s %s, %s observed; jTDS configured %s",
 	live_evidence.product_version,
 	live_evidence.edition,
 	live_evidence.auth_scheme,

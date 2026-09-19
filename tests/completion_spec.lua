@@ -30,8 +30,8 @@ local function with_acquisition(profile, rows, acquire, callback)
 end
 
 return {
-	["MSSQL completion recognizes bracket-qualified schemas"] = function()
-		local profile = { name = "mssql-completion", kind = "mssql", options = { host = "sql.example", database = "warehouse", user = "orbit" } }
+	["SQL Server completion recognizes bracket-qualified schemas"] = function()
+		local profile = { name = "mssql-completion", kind = "sqlserver", options = { host = "sql.example", database = "warehouse", user = "orbit" } }
 		local rows = {
 			{ schema = "Sales]West", name = "Order.Items", type = "table" },
 			{ schema = "dbo", name = "users", type = "view" },
@@ -45,10 +45,10 @@ return {
 			assert(vim.deep_equal(all, { "[Sales]]West].", "[Sales]]West].[Order.Items]", "[dbo].", "[dbo].[users]" }))
 		end)
 	end,
-	["MSSQL database arrays complete catalogs schemas and relations"] = function()
+	["SQL Server database arrays complete catalogs schemas and relations"] = function()
 		local profile = {
 			name = "mssql-multiple-completion",
-			kind = "mssql",
+			kind = "sqlserver",
 			options = { host = "sql.example", database = { "Database", "Databaserpt" }, user = "orbit" },
 		}
 		local rows = {
@@ -84,10 +84,10 @@ return {
 			}))
 		end)
 	end,
-	["MSSQL unqualified aliases resolve against the first database"] = function()
+	["SQL Server unqualified aliases resolve against the first database"] = function()
 		local profile = {
 			name = "mssql-default-database-completion",
-			kind = "mssql",
+			kind = "sqlserver",
 			options = { host = "sql.example", database = { "Database", "Databaserpt" }, user = "orbit" },
 		}
 		local reporting = { catalog = "Databaserpt", schema = "dbo", name = "users", type = "table" }
@@ -109,10 +109,10 @@ return {
 			end)
 		end)
 	end,
-	["MSSQL unqualified aliases do not fall through to another database"] = function()
+	["SQL Server unqualified aliases do not fall through to another database"] = function()
 		local profile = {
 			name = "mssql-non-default-completion",
-			kind = "mssql",
+			kind = "sqlserver",
 			options = { host = "sql.example", database = { "Database", "Databaserpt" }, user = "orbit" },
 		}
 		local reporting = { catalog = "Databaserpt", schema = "dbo", name = "audit", type = "table" }

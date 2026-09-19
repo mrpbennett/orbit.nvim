@@ -3,15 +3,15 @@
 Research date: 2026-09-11. Updated for the selectable-transport design on 2026-09-16. Sources are limited to this repository and primary documentation from Microsoft, OpenJDK, Arch Linux, Homebrew, FreeTDS, unixODBC, and upstream driver projects.
 
 > [!IMPORTANT]
-> **Current decision:** Orbit preserves Microsoft's user-installed Go `sqlcmd` as the default MSSQL transport and also implements a profile-selected JDBC transport with the jTDS 1.3.1 JDBC driver. The original recommendation to build and distribute a custom compiled SQL Server executable remains superseded. The prior `sqlcmd` investigation, source comparisons, output-fidelity findings, and platform constraints below remain applicable to that transport.
+> **Current decision:** Orbit preserves Microsoft's user-installed Go `sqlcmd` as the default SQL Server transport and also implements a profile-selected JDBC transport with the jTDS 1.3.1 JDBC driver. The original recommendation to build and distribute a custom compiled SQL Server executable remains superseded. The prior `sqlcmd` investigation, source comparisons, output-fidelity findings, and platform constraints below remain applicable to that transport.
 
 ## Accepted Decision
 
-Under [ADR-0004](./adr/0004-selectable-mssql-transports.md), the MSSQL Connector has two transports. A profile that omits `transport`, or explicitly selects `sqlcmd`, preserves the existing user-installed Microsoft Go `sqlcmd` path. A profile with `transport = "jdbc"` selects Orbit's retained Java-helper transport and initially requires `driver = "jtds"`. The MSSQL transport is Orbit's execution mechanism; jTDS is the JDBC driver library used by the JDBC transport, not a Connector or standalone client.
+Under [ADR-0004](./adr/0004-selectable-sqlserver-transports.md), the SQL Server Connector has two transports. A profile that omits `transport`, or explicitly selects `sqlcmd`, preserves the existing user-installed Microsoft Go `sqlcmd` path. A profile with `transport = "jdbc"` selects Orbit's retained Java-helper transport and initially requires `driver = "jtds"`. The SQL Server transport is Orbit's execution mechanism; jTDS is the JDBC driver library used by the JDBC transport, not a Connector or standalone client.
 
-Users install and update `sqlcmd` through Microsoft's [installation guide](https://learn.microsoft.com/en-us/sql/tools/sqlcmd/sqlcmd-download-install?view=sql-server-ver17). JDBC users provide a [Java 11-or-newer source-file runtime](https://openjdk.org/jeps/330) and explicitly download the [jTDS 1.3.1 JAR](https://sourceforge.net/projects/jtds/files/jtds/1.3.1/). Orbit ships only its [Java source helper](../cmd/orbit-mssql/OrbitMssql.java); it does not bundle, download, install, or update Java or jTDS.
+Users install and update `sqlcmd` through Microsoft's [installation guide](https://learn.microsoft.com/en-us/sql/tools/sqlcmd/sqlcmd-download-install?view=sql-server-ver17). JDBC users provide a [Java 11-or-newer source-file runtime](https://openjdk.org/jeps/330) and explicitly download the [jTDS 1.3.1 JAR](https://sourceforge.net/projects/jtds/files/jtds/1.3.1/). Orbit ships only its [Java source helper](../cmd/orbit-sqlserver/OrbitSqlServer.java); it does not bundle, download, install, or update Java or jTDS.
 
-The two transports make different tradeoffs. `sqlcmd` keeps the smaller dependency and maintenance surface but its compatibility text is inherently lossy. JDBC/jTDS adds a helper and driver dependency to support explicit domain credentials, retained JDBC state, framed structured rows, and distinct SQL `NULL`. The accepted structured profile and protocol are implemented in the [MSSQL JDBC transport](../lua/orbit/connectors/mssql_jdbc.lua).
+The two transports make different tradeoffs. `sqlcmd` keeps the smaller dependency and maintenance surface but its compatibility text is inherently lossy. JDBC/jTDS adds a helper and driver dependency to support explicit domain credentials, retained JDBC state, framed structured rows, and distinct SQL `NULL`. The accepted structured profile and protocol are implemented in the [SQL Server JDBC transport](../lua/orbit/connectors/sqlserver_jdbc.lua).
 
 Java 25 source-file helper execution and jTDS 1.3.1 class loading were verified locally. Live JDBC verification passed on Linux against SQL Server `16.0.4252.3` with explicit domain credentials, server-reported NTLM, and the unsafe certificate-trust bypass. Orbit set `useNTLMv2` and `ssl=require`; the account could not independently inspect the negotiated NTLM version or server-side encryption state. Secure certificate-chain validation rejected the test server's chain because its issuer was absent from the JVM trust store. No live `sqlcmd` verification occurred, and JDBC observations must not be generalized beyond the tested combination.
 
@@ -32,11 +32,11 @@ The JDBC profile shape, including the complete approved domain-password endpoint
 
 TLS is encrypted without plaintext fallback. The default maps to jTDS `ssl=authenticate`, which upstream defines as requiring a certificate signed by an authority trusted by the JVM. jTDS does not document hostname matching for this mode, so it is not claimed equivalent to a modern hostname-verified TLS client. The explicit `trust_server_certificate = true` bypass maps to `ssl=require`: encryption remains, but certificate-chain validation is disabled and man-in-the-middle attacks become possible.
 
-One Java helper and JDBC connection are retained per connection profile. Statements and schema acquisition share that connection, preserving the existing MSSQL schema browser, bracket-qualified names, completion, mutation policy, `GO` rejection, and read-only Result grids. Structured results retain ordered column labels, string values, and distinct SQL `NULL`; non-row statements return an empty result. Empty or duplicate labels and multiple tabular result sets are rejected.
+One Java helper and JDBC connection are retained per connection profile. Statements and schema acquisition share that connection, preserving the existing SQL Server schema browser, bracket-qualified names, completion, mutation policy, `GO` rejection, and read-only Result grids. Structured results retain ordered column labels, string values, and distinct SQL `NULL`; non-row statements return an empty result. Empty or duplicate labels and multiple tabular result sets are rejected.
 
 Ordinary SQL errors leave the helper and connection available. Connection failures and malformed protocol terminate that retained generation. Active cancellation terminates the JVM and work queued on it; later work launches a fresh helper and reconnects. Neovim shutdown explicitly closes retained children.
 
-For JDBC profiles, `:OrbitDoctor mssql` resolves Java, checks the configured password source and JAR readability, and runs the [source helper](../cmd/orbit-mssql/OrbitMssql.java) in doctor mode. This verifies Java 11+ source-file execution and exact jTDS 1.3.1 class loading without opening a database connection. The omitted-transport `sqlcmd` diagnostics remain unchanged.
+For JDBC profiles, `:OrbitDoctor sqlserver` resolves Java, checks the configured password source and JAR readability, and runs the [source helper](../cmd/orbit-sqlserver/OrbitSqlServer.java) in doctor mode. This verifies Java 11+ source-file execution and exact jTDS 1.3.1 class loading without opening a database connection. The omitted-transport `sqlcmd` diagnostics remain unchanged.
 
 jTDS 1.3.1 is old, so compatibility with other Java runtimes, SQL Server versions, domain environments, and TLS configurations cannot be inferred. The tested Java 25, SQL Server `16.0.4252.3`, domain-password, NTLM, and unsafe-trust combination passed; successful trusted-chain and hostname behavior remain unverified.
 
@@ -52,14 +52,14 @@ The tradeoff is substantial: `sqlcmd` emits human-oriented compatibility text, n
 
 ```json
 {
-  "name": "warehouse-mssql",
-  "kind": "mssql",
+  "name": "warehouse-sqlserver",
+  "kind": "sqlserver",
   "options": {
     "host": "sql.example.com",
     "port": 1433,
     "database": "warehouse",
     "user": "orbit",
-    "password_env": "MSSQL_PASSWORD",
+    "password_env": "SQLSERVER_PASSWORD",
     "trust_server_certificate": false,
     "schema_patterns": ["dbo", "reporting*"]
   }
@@ -112,7 +112,7 @@ Mutation confirmation is conservative for T-SQL. Only a single `SELECT` without 
 
 ## sqlcmd Output Fidelity
 
-MSSQL output parsing is strict best-effort and is not lossless.
+SQL Server output parsing is strict best-effort and is not lossless.
 
 - A unit-separator byte in a value can collide with the selected field separator. Some collisions produce a detectable width error; others may be indistinguishable from valid fields.
 - A newline in a value can collide with record framing. Wrapping or embedded line breaks may be undetectable when they happen to resemble valid rows.
@@ -126,7 +126,7 @@ MSSQL output parsing is strict best-effort and is not lossless.
 - All cell data arrives as text and SQL types are not preserved.
 - Statements capable of reproducing Orbit's internal marker rows can break in-band framing; the marker protocol is not a security boundary for adversarial SQL.
 
-The Result grid must not be described as a byte-for-byte export or typed representation. MSSQL grids remain read-only.
+The Result grid must not be described as a byte-for-byte export or typed representation. SQL Server grids remain read-only.
 
 ## Shared Schema And Editor Behavior
 
@@ -134,7 +134,7 @@ Schema acquisition reads user tables, views, and columns from SQL Server catalog
 
 Orbit bracket-quotes every database, schema, and object segment and escapes `]` as `]]`. String profiles retain names such as `[sales].[order details]`; array profiles use `[database].[sales].[order details]`. The same naming rules drive copied qualified names and completion. Completion offers databases, schemas, tables, views, columns, and aliases from cached objects. It does not run a transport while the user types.
 
-Object actions provide a bracket-qualified `SELECT TOP (N)` sample statement and a columns view. Primary keys, foreign keys, indexes, definitions, and editable MSSQL grids are outside the implemented scope.
+Object actions provide a bracket-qualified `SELECT TOP (N)` sample statement and a columns view. Primary keys, foreign keys, indexes, definitions, and editable SQL Server grids are outside the implemented scope.
 
 ## Historical Alternatives
 
@@ -158,7 +158,7 @@ ODBC is viable for environments already standardized on it, but Linux and macOS 
 
 FreeTDS is available in Arch repositories and through Homebrew ([Arch package](https://archlinux.org/packages/extra/x86_64/freetds/), [Homebrew formula](https://formulae.brew.sh/formula/freetds)). It supports modern TDS versions and several authentication mechanisms ([FreeTDS configuration](https://www.freetds.org/userguide/freetdsconf.html)).
 
-Its command-line tools are not a strong machine protocol. FreeTDS describes `tsql` as a diagnostic tool rather than a complete `isql` replacement ([FreeTDS utilities](https://www.freetds.org/userguide/usefreetds.html)). It remains an expert-operated alternative, not Orbit's MSSQL transport.
+Its command-line tools are not a strong machine protocol. FreeTDS describes `tsql` as a diagnostic tool rather than a complete `isql` replacement ([FreeTDS utilities](https://www.freetds.org/userguide/usefreetds.html)). It remains an expert-operated alternative, not Orbit's SQL Server transport.
 
 ### Native Lua ODBC Or Direct TDS
 

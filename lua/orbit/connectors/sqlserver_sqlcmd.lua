@@ -1,4 +1,4 @@
--- MSSQL transport backed by Microsoft's Go sqlcmd.
+-- SQL Server transport backed by Microsoft's Go sqlcmd.
 local M = {}
 
 local tokenizer = require("orbit.sql.tokenizer")
@@ -26,7 +26,7 @@ end
 
 function M.validate_options(profile_name, options)
 	if options.transport ~= nil and options.transport ~= "sqlcmd" then
-		return nil, string.format("profile %q has unsupported MSSQL transport %q", profile_name, tostring(options.transport))
+		return nil, string.format("profile %q has unsupported SQL Server transport %q", profile_name, tostring(options.transport))
 	end
 	local allowed = {
 		confirm_mutations = true,
@@ -43,7 +43,7 @@ function M.validate_options(profile_name, options)
 	}
 	for name in pairs(options) do
 		if not allowed[name] then
-			return nil, string.format("profile %q has unsupported MSSQL option %q", profile_name, name)
+			return nil, string.format("profile %q has unsupported SQL Server option %q", profile_name, name)
 		end
 	end
 	if options.executable ~= nil and (type(options.executable) ~= "string" or options.executable == "") then
@@ -107,11 +107,11 @@ local function password(options)
 	if options.password_env then
 		resolved = vim.env[options.password_env]
 		if resolved == nil or resolved == "" then
-			return nil, string.format("environment variable %q does not contain an MSSQL password", options.password_env)
+			return nil, string.format("environment variable %q does not contain an SQL Server password", options.password_env)
 		end
 	end
 	if resolved == nil or resolved == "" then
-		return nil, "MSSQL password is required through options.password or options.password_env"
+		return nil, "SQL Server password is required through options.password or options.password_env"
 	end
 	return resolved
 end
@@ -151,7 +151,7 @@ end
 local function sqlcmd_control(statement)
 	local bare_commands = { ED = true, EXIT = true, QUIT = true, RESET = true }
 	local statement_lines = vim.split(statement, "\n", { plain = true })
-	local eligible = tokenizer.mssql_command_rows(statement_lines)
+	local eligible = tokenizer.sqlserver_command_rows(statement_lines)
 	for row, line in ipairs(statement_lines) do
 		local command = line:match("^%s*(.-)%s*$")
 		local upper = command:upper()
@@ -180,7 +180,7 @@ function M.session_request(statement, marker)
 	-- Framing sends marker result sets before and after user SQL. Session removes
 	-- both complete records so adjacent retained requests cannot consume each other.
 	local control = sqlcmd_control(statement)
-	if control then return nil, "MSSQL sqlcmd control command " .. string.format("%q", control) .. " is not supported" end
+	if control then return nil, "SQL Server sqlcmd control command " .. string.format("%q", control) .. " is not supported" end
 	return table.concat({
 		"SET NOCOUNT ON;", "SELECT " .. literal(marker .. ":BEGIN") .. " AS [__orbit_frame];", "GO", statement, "GO",
 		"SET NOCOUNT ON;", "SELECT " .. literal(marker .. ":END") .. " AS [__orbit_frame];", "GO", "",
@@ -233,9 +233,9 @@ end
 -- sqlcmd output is human-formatted and therefore intentionally strict here:
 -- reject every detectable ambiguity rather than return an incorrect Result row.
 function M.parse(output)
-	if type(output) ~= "string" then return nil, "MSSQL output is required" end
+	if type(output) ~= "string" then return nil, "SQL Server output is required" end
 	output = output:gsub("\r\n", "\n")
-	if output:find("\r", 1, true) then return nil, "MSSQL output contains an unexpected carriage return" end
+	if output:find("\r", 1, true) then return nil, "SQL Server output contains an unexpected carriage return" end
 	local blocks, block = {}, {}
 	for line in (output .. "\n"):gmatch("(.-)\n") do
 		if line == "" then
@@ -247,20 +247,20 @@ function M.parse(output)
 	if #blocks == 0 then return {} end
 	local result, columns
 	for block_index, current in ipairs(blocks) do
-		if message_line(current[1]) then return nil, "MSSQL output contains a server message:\n" .. table.concat(current, "\n") end
-		if #current < 2 then return nil, string.format("MSSQL output block %d is a message or malformed result: %s", block_index, current[1]) end
+		if message_line(current[1]) then return nil, "SQL Server output contains a server message:\n" .. table.concat(current, "\n") end
+		if #current < 2 then return nil, string.format("SQL Server output block %d is a message or malformed result: %s", block_index, current[1]) end
 		local headings, underlines = split_fields(current[1]), split_fields(current[2])
-		if #underlines ~= #headings then return nil, string.format("MSSQL result %d underline has %d fields for %d headings", block_index, #underlines, #headings) end
+		if #underlines ~= #headings then return nil, string.format("SQL Server result %d underline has %d fields for %d headings", block_index, #underlines, #headings) end
 		for index, underline in ipairs(underlines) do
-			if vim.trim(underline) == "" or not vim.trim(underline):match("^%-+$") then return nil, string.format("MSSQL result %d has a malformed underline for column %d", block_index, index) end
+			if vim.trim(underline) == "" or not vim.trim(underline):match("^%-+$") then return nil, string.format("SQL Server result %d has a malformed underline for column %d", block_index, index) end
 		end
-		if columns then return nil, "MSSQL output contains multiple tabular results" end
+		if columns then return nil, "SQL Server output contains multiple tabular results" end
 		columns, result = {}, {}
 		local seen = {}
 		for index, heading in ipairs(headings) do
 			heading = vim.trim(heading)
-			if heading == "" then return nil, string.format("MSSQL result %d column %d heading must not be empty", block_index, index) end
-			if seen[heading] then return nil, "MSSQL result has duplicate heading " .. string.format("%q", heading) end
+			if heading == "" then return nil, string.format("SQL Server result %d column %d heading must not be empty", block_index, index) end
+			if seen[heading] then return nil, "SQL Server result has duplicate heading " .. string.format("%q", heading) end
 			seen[heading], columns[index] = true, heading
 		end
 		for row_index = 3, #current do
@@ -268,11 +268,11 @@ function M.parse(output)
 				local possible_underlines, all_underlines = split_fields(current[row_index + 1]), true
 				all_underlines = #possible_underlines == #columns
 				for _, underline in ipairs(possible_underlines) do all_underlines = all_underlines and vim.trim(underline) ~= "" and vim.trim(underline):match("^%-+$") ~= nil end
-				if all_underlines then return nil, "MSSQL output contains multiple tabular results" end
+				if all_underlines then return nil, "SQL Server output contains multiple tabular results" end
 			end
-			if message_line(current[row_index]) then return nil, string.format("MSSQL output contains a server message at result %d row %d:\n%s", block_index, row_index - 2, table.concat(vim.list_slice(current, row_index), "\n")) end
+			if message_line(current[row_index]) then return nil, string.format("SQL Server output contains a server message at result %d row %d:\n%s", block_index, row_index - 2, table.concat(vim.list_slice(current, row_index), "\n")) end
 			local values = split_fields(current[row_index])
-			if #values ~= #columns then return nil, string.format("MSSQL result %d row %d has %d fields for %d headings", block_index, row_index - 2, #values, #columns) end
+			if #values ~= #columns then return nil, string.format("SQL Server result %d row %d has %d fields for %d headings", block_index, row_index - 2, #values, #columns) end
 			local row = {}
 			for index, value in ipairs(values) do row[columns[index]] = vim.trim(value) end
 			result[#result + 1] = row

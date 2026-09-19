@@ -65,7 +65,7 @@ return {
     assert(err:match("select the statement explicitly"))
   end,
 
-	["statements.target applies MSSQL lexical splitting and rejects GO"] = function()
+	["statements.target applies SQL Server lexical splitting and rejects GO"] = function()
 		local target = assert(statements.target({
 			lines = { "SELECT '[semi;]' AS [semi;column]; -- trailing ;" },
 			dialect = "mssql",

@@ -1,4 +1,4 @@
--- Structured MSSQL transport backed by an Orbit-owned Java helper and jTDS.
+-- Structured SQL Server transport backed by an Orbit-owned Java helper and jTDS.
 local M = {}
 
 local protocol = "ORBIT/1"
@@ -69,7 +69,7 @@ function M.validate_options(profile_name, options)
 	}
 	for name in pairs(options) do
 		if not allowed[name] then
-			return nil, string.format("profile %q has unsupported MSSQL JDBC option %q", profile_name, name)
+			return nil, string.format("profile %q has unsupported SQL Server JDBC option %q", profile_name, name)
 		end
 	end
 	if options.transport ~= "jdbc" then
@@ -142,7 +142,7 @@ function M.validate_options(profile_name, options)
 	local auth_allowed = { type = true, domain = true, user = true, password = true, password_env = true }
 	for name in pairs(authentication) do
 		if not auth_allowed[name] then
-			return nil, string.format("profile %q has unsupported MSSQL JDBC authentication option %q", profile_name, name)
+			return nil, string.format("profile %q has unsupported SQL Server JDBC authentication option %q", profile_name, name)
 		end
 	end
 	if authentication.type ~= "sql_password" and authentication.type ~= "domain_password" then
@@ -183,7 +183,7 @@ local function password(options)
 		resolved = vim.env[authentication.password_env]
 		if resolved == nil or resolved == "" then
 			return nil, string.format(
-				"environment variable %q does not contain an MSSQL JDBC password",
+				"environment variable %q does not contain an SQL Server JDBC password",
 				authentication.password_env
 			)
 		end
@@ -194,7 +194,7 @@ end
 -- Resolve the source helper from runtimepath, with a source-checkout fallback
 -- for headless tests that load modules directly through package.path.
 function M.helper_path()
-	local matches = vim.api.nvim_get_runtime_file("cmd/orbit-mssql/OrbitMssql.java", false)
+	local matches = vim.api.nvim_get_runtime_file("cmd/orbit-sqlserver/OrbitSqlServer.java", false)
 	if matches[1] then
 		return matches[1]
 	end
@@ -203,7 +203,7 @@ function M.helper_path()
 	local source = debug.getinfo(1, "S").source
 	if source:sub(1, 1) == "@" then
 		local root = vim.fs.dirname(vim.fs.dirname(vim.fs.dirname(vim.fs.dirname(source:sub(2)))))
-		return vim.fs.joinpath(root, "cmd", "orbit-mssql", "OrbitMssql.java")
+		return vim.fs.joinpath(root, "cmd", "orbit-sqlserver", "OrbitSqlServer.java")
 	end
 	return nil
 end
@@ -216,7 +216,7 @@ function M.session_command(options)
 	end
 	local helper = M.helper_path()
 	if not helper then
-		return nil, "cannot locate the Orbit MSSQL Java helper"
+		return nil, "cannot locate the Orbit SQL Server Java helper"
 	end
 	return {
 		options.java_executable or "java",
@@ -312,37 +312,37 @@ end
 local function decode_envelope(payload)
 	local ok, envelope = pcall(vim.json.decode, payload)
 	if not ok or type(envelope) ~= "table" or vim.islist(envelope) or type(envelope.ok) ~= "boolean" then
-		return nil, "MSSQL JDBC helper returned malformed JSON"
+		return nil, "SQL Server JDBC helper returned malformed JSON"
 	end
 	if not envelope.ok then
 		if type(envelope.fatal) ~= "boolean" or not non_empty_string(envelope.error) then
-			return nil, "MSSQL JDBC helper returned a malformed error response"
+			return nil, "SQL Server JDBC helper returned a malformed error response"
 		end
 		return envelope
 	end
 	if envelope.fatal ~= nil or type(envelope.columns) ~= "table" or not vim.islist(envelope.columns) then
-		return nil, "MSSQL JDBC helper returned malformed result columns"
+		return nil, "SQL Server JDBC helper returned malformed result columns"
 	end
 	if type(envelope.rows) ~= "table" or not vim.islist(envelope.rows) then
-		return nil, "MSSQL JDBC helper returned malformed result rows"
+		return nil, "SQL Server JDBC helper returned malformed result rows"
 	end
 	local seen = {}
 	for index, column in ipairs(envelope.columns) do
 		if not non_empty_string(column) then
-			return nil, string.format("MSSQL JDBC result column %d label must not be empty", index)
+			return nil, string.format("SQL Server JDBC result column %d label must not be empty", index)
 		end
 		if seen[column] then
-			return nil, "MSSQL JDBC result has duplicate label " .. string.format("%q", column)
+			return nil, "SQL Server JDBC result has duplicate label " .. string.format("%q", column)
 		end
 		seen[column] = true
 	end
 	for row_index, values in ipairs(envelope.rows) do
 		if type(values) ~= "table" or not vim.islist(values) or #values ~= #envelope.columns then
-			return nil, string.format("MSSQL JDBC result row %d has an invalid width", row_index)
+			return nil, string.format("SQL Server JDBC result row %d has an invalid width", row_index)
 		end
 		for index, value in ipairs(values) do
 			if type(value) ~= "string" and value ~= vim.NIL then
-				return nil, string.format("MSSQL JDBC result row %d column %d is not text or NULL", row_index, index)
+				return nil, string.format("SQL Server JDBC result row %d column %d is not text or NULL", row_index, index)
 			end
 		end
 	end
@@ -356,20 +356,20 @@ function M.session_output(output, marker)
 	local newline = output:find("\n", 1, true)
 	if not newline then
 		if #output > 256 or (prefix:sub(1, #output) ~= output and output:sub(1, #prefix) ~= prefix) then
-			return nil, nil, "MSSQL JDBC helper returned a malformed frame header"
+			return nil, nil, "SQL Server JDBC helper returned a malformed frame header"
 		end
 		return nil
 	end
 	if newline > 256 or output:sub(1, #prefix) ~= prefix then
-		return nil, nil, "MSSQL JDBC helper returned a malformed frame header"
+		return nil, nil, "SQL Server JDBC helper returned a malformed frame header"
 	end
 	local length_text = output:sub(#prefix + 1, newline - 1)
 	if not length_text:match("^%d+$") then
-		return nil, nil, "MSSQL JDBC helper returned a malformed frame length"
+		return nil, nil, "SQL Server JDBC helper returned a malformed frame length"
 	end
 	local length = tonumber(length_text)
 	if not length or length > maximum_response_bytes then
-		return nil, nil, "MSSQL JDBC helper response is too large"
+		return nil, nil, "SQL Server JDBC helper response is too large"
 	end
 	local consumed = newline + length
 	if #output < consumed then
@@ -381,7 +381,7 @@ function M.session_output(output, marker)
 		return nil, nil, decode_err
 	end
 	if envelope.fatal == true then
-		return nil, nil, type(envelope.error) == "string" and envelope.error or "MSSQL JDBC connection failed"
+		return nil, nil, type(envelope.error) == "string" and envelope.error or "SQL Server JDBC connection failed"
 	end
 	return payload, consumed
 end
@@ -393,7 +393,7 @@ function M.parse(output)
 		return nil, err
 	end
 	if not envelope.ok then
-		return nil, type(envelope.error) == "string" and envelope.error or "MSSQL JDBC statement failed"
+		return nil, type(envelope.error) == "string" and envelope.error or "SQL Server JDBC statement failed"
 	end
 	local rows = {}
 	for row_index, values in ipairs(envelope.rows) do

@@ -55,8 +55,8 @@ return {
 		assert(ok, err)
 	end,
 
-	["MSSQL mutation confirmation follows CTE verbs and SELECT INTO semantics"] = function()
-		local confirm = require("orbit.connectors.mssql").requires_confirmation
+	["SQL Server mutation confirmation follows CTE verbs and SELECT INTO semantics"] = function()
+		local confirm = require("orbit.connectors.sqlserver").requires_confirmation
 		local read_only = {
 			"SELECT * FROM [sales].[orders]",
 			"WITH recent AS (SELECT * FROM orders) SELECT * FROM recent",

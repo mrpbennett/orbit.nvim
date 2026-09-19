@@ -34,12 +34,12 @@ local function assert_queued_refresh(load, ordinary_rows, refreshed_rows, assert
 end
 
 return {
-	["MSSQL schema acquisition keeps schema identity for tables and columns"] = function()
-		local profile = { name = "mssql-schema", kind = "mssql", options = { host = "sql.example", database = "warehouse", user = "orbit" } }
+	["SQL Server schema acquisition keeps schema identity for tables and columns"] = function()
+		local profile = { name = "mssql-schema", kind = "sqlserver", options = { host = "sql.example", database = "warehouse", user = "orbit" } }
 		local original_run = runner.run
 		local statements = {}
 		runner.run = function(received, statement, callback, connector)
-			assert(received == profile and connector == require("orbit.connectors.mssql"))
+			assert(received == profile and connector == require("orbit.connectors.sqlserver"))
 			statements[#statements + 1] = statement
 			if #statements == 1 then
 				callback({ { schema = "sales", name = "orders", type = "table" } })

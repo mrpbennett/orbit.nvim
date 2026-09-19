@@ -6,13 +6,13 @@ local M = {
 }
 
 local metadata = require("orbit.connectors.metadata")
-local jdbc = require("orbit.connectors.mssql_jdbc")
-local sqlcmd = require("orbit.connectors.mssql_sqlcmd")
+local jdbc = require("orbit.connectors.sqlserver_jdbc")
+local sqlcmd = require("orbit.connectors.sqlserver_sqlcmd")
 local schema_pattern = require("orbit.connectors.utils.schema_pattern")
 local tokenizer = require("orbit.sql.tokenizer")
 
 -- Select once at the Connector seam so transport lifecycle details do not leak
--- into shared MSSQL behavior.
+-- into shared SQL Server behavior.
 local function transport(options)
 	return jdbc.selected(options or {}) and jdbc or sqlcmd
 end
@@ -58,8 +58,8 @@ function M.session_exit_error(stdout, stderr, options)
 end
 
 function M.session_request(statement, marker, options)
-	if tokenizer.has_mssql_batch_separator(vim.split(statement, "\n", { plain = true })) then
-		return nil, "MSSQL statements containing a GO batch separator are not supported"
+	if tokenizer.has_sqlserver_batch_separator(vim.split(statement, "\n", { plain = true })) then
+		return nil, "SQL Server statements containing a GO batch separator are not supported"
 	end
 	return transport(options).session_request(statement, marker, options)
 end

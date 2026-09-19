@@ -1,5 +1,38 @@
 # Orbit.nvim v0.1 Plan
 
+## SQL Server Terminology Migration 2026-09-19
+
+- [x] Replace the breaking public profile and Doctor kind `mssql` with `sqlserver`.
+- [x] Use `SQL Server` in current user-facing messages and documentation while retaining only the T-SQL dialect identifier.
+- [x] Record the breaking change in `CHANGELOG.md` and update affected regression coverage.
+- [x] Run focused and complete verification, inspect the diff, and review the migration.
+
+### Settled Design
+
+- `kind: "sqlserver"` is the only accepted public connection-profile kind; `kind: "mssql"` is intentionally rejected.
+- `:OrbitDoctor sqlserver` replaces `:OrbitDoctor mssql`.
+- The T-SQL lexer retains the low-level `mssql` dialect identifier and the jTDS URL retains its `sqlserver` protocol identifier. All implementation filenames, imports, helper paths, and helper classes use `sqlserver`.
+
+### Follow-up: Internal Namespace Migration
+
+- [x] Rename SQL Server connector, helper, test, documentation, and ADR files from `mssql` to `sqlserver`.
+- [x] Update imports, runtime paths, test harnesses, documentation links, and Java class names.
+- [x] Run complete verification and review the internal namespace migration.
+
+### Follow-up Review
+
+- Connector modules now live at `lua/orbit/connectors/sqlserver*.lua`; the Java helper and test use `OrbitSqlServer`, and their paths use `orbit-sqlserver`.
+- The local SQL Server support issue-tracker directory, live test, research document, and ADR filenames now use `sqlserver`; all runtime imports and documentation links target those paths.
+- `mssql` remains only as the T-SQL lexer dialect literal. Its helper APIs are now `sqlserver_*`.
+- `bash tests/java_spec.sh` and `git diff --check` pass. `bash tests/verify.sh` retains the same three pre-existing failures: JDBC profile validation, JDBC request framing, and the Trino large-schema performance budget.
+
+### Review
+
+- `kind: "sqlserver"` is now the sole supported SQL Server profile kind; the `mssql` profile kind is covered as an intentional rejection.
+- Current user-facing diagnostics, documentation, Doctor output, and Java helper messages use SQL Server terminology. `CHANGELOG.md` documents the breaking profile and Doctor command migration.
+- `bash tests/java_spec.sh` and `git diff --check` pass. `bash tests/verify.sh` passes all migration coverage and retains three pre-existing failures: JDBC profile validation, JDBC request framing, and the Trino large-schema performance budget.
+- Independent standards and specification reviews returned `CLEAN`. No commit or GitHub write was made.
+
 ## Architecture Review 2026-09-18
 
 - [x] Inspect the recent Redis Connector and MSSQL transport hot spots, following adjacent seams only where understanding requires it.
@@ -296,7 +329,7 @@
 - [x] Inspect Orbit's connector, retained-session, result, profile-security, schema-acquisition, and test boundaries.
 - [x] Compare first-party SQL Server transports with ODBC and FreeTDS alternatives on Arch Linux, macOS, and Windows.
 - [x] Define a minimal connector architecture, connection-profile shape, authentication/TLS policy, packaging matrix, and verification plan.
-- [x] Record the findings in `docs/mssql-connector-research.md` and verify the documentation diff.
+- [x] Record the findings in `docs/sqlserver-connector-research.md` and verify the documentation diff.
 
 ### Review
 

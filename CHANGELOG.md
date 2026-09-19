@@ -2,6 +2,12 @@
 
 All notable changes to Orbit.nvim are documented in this file.
 
+## Unreleased
+
+### Breaking Changes
+
+- Renamed the Microsoft SQL Server connection-profile kind from `mssql` to `sqlserver`. Update every SQL Server profile and replace `:OrbitDoctor mssql` with `:OrbitDoctor sqlserver`; the former values are no longer accepted.
+
 ## v0.3.0 - 2026-09-16
 
 ### Added

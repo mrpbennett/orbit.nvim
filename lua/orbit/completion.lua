@@ -263,7 +263,7 @@ end
 -- (e.g. schema not loaded yet, or the name doesn't exist).
 local function resolve_table_row(profile, entry)
 	local preferred_catalog
-	if profile.kind == "mssql" and type(profile.options.database) == "table" then
+	if profile.kind == "sqlserver" and type(profile.options.database) == "table" then
 		preferred_catalog = profile.options.database[1]
 	end
 	for _, row in ipairs(cache.tables(profile)) do

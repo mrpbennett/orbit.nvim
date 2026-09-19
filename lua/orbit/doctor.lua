@@ -2,7 +2,7 @@
 local M = {}
 
 local connector_defaults = {
-	mssql = { executable = "sqlcmd", version_args = { "--version" } },
+	sqlserver = { executable = "sqlcmd", version_args = { "--version" } },
 	mysql = { executable = "mysql", version_args = { "--version" } },
 	postgres = { executable = "psql", version_args = { "--version" } },
 	redis = { executable = "redis-cli", version_args = { "--version" } },
@@ -11,7 +11,7 @@ local connector_defaults = {
 	vertica = { executable = "vsql", version_args = { "--version" } },
 }
 
-local kinds = { "mssql", "mysql", "postgres", "redis", "sqlite", "trino", "vertica" }
+local kinds = { "sqlserver", "mysql", "postgres", "redis", "sqlite", "trino", "vertica" }
 
 local function default_dependencies()
 	return {
@@ -46,15 +46,15 @@ local function first_line(value)
 end
 
 local function jdbc_profile(profile)
-	return profile and profile.kind == "mssql" and profile.options.transport == "jdbc"
+	return profile and profile.kind == "sqlserver" and profile.options.transport == "jdbc"
 end
 
 local function version_text(kind, output, profile)
 	if jdbc_profile(profile) then
 		local text = first_line(output)
-		return text:match("^Orbit MSSQL helper: (Java %d+; jTDS 1%.3%.1 loaded)$")
+		return text:match("^Orbit SQL Server helper: (Java %d+; jTDS 1%.3%.1 loaded)$")
 	end
-	if kind == "mssql" then
+	if kind == "sqlserver" then
 		return output:match("[Vv]ersion:%s*([^\r\n]+)")
 	end
 	return first_line(output)
@@ -151,7 +151,7 @@ function M.run(kind, config, callback, overrides)
 		local entry = { string.format("%s %s: %s (%s)", resolved ~= "" and "[OK]" or "[FAIL]", label, resolved ~= "" and resolved or executable, source) }
 		results[index] = entry
 
-		if check.kind == "mssql" and profile then
+		if check.kind == "sqlserver" and profile then
 			local credentials = jdbc_profile(profile) and profile.options.authentication or profile.options
 			if credentials and credentials.password_env then
 				local value = deps.getenv(credentials.password_env)
@@ -199,7 +199,7 @@ function M.run(kind, config, callback, overrides)
 				vim.list_extend(command, {
 					"--class-path",
 					profile.options.driver_path,
-					require("orbit.connectors.mssql_jdbc").helper_path(),
+					require("orbit.connectors.sqlserver_jdbc").helper_path(),
 					"--doctor",
 				})
 			else
@@ -209,7 +209,7 @@ function M.run(kind, config, callback, overrides)
 			if jdbc_profile(profile) then
 				run_options = {
 					clear_env = true,
-					env = require("orbit.connectors.mssql_jdbc").sanitize_environment(profile.options, deps.environ()),
+					env = require("orbit.connectors.sqlserver_jdbc").sanitize_environment(profile.options, deps.environ()),
 				}
 			elseif check.kind == "redis" then
 				run_options = {
@@ -220,13 +220,13 @@ function M.run(kind, config, callback, overrides)
 			deps.run(command, function(result)
 				local version = redact(version_text(check.kind, result.stdout or "", profile) or "", profile, deps)
 				if result.code == 0 and version ~= "" then
-					local suffix = check.kind == "mssql" and " (compatibility unverified)" or ""
+					local suffix = check.kind == "sqlserver" and " (compatibility unverified)" or ""
 					local check_name = jdbc_profile(profile) and "helper" or "version"
 					entry[#entry + 1] = string.format("[OK] %s %s: %s%s", label, check_name, version, suffix)
 				else
 					local stderr = redact(first_line(result.stderr), profile, deps)
 					local fallback = jdbc_profile(profile) and "cannot load the Orbit helper and jTDS driver"
-						or check.kind == "mssql" and "cannot identify Microsoft Go sqlcmd"
+						or check.kind == "sqlserver" and "cannot identify Microsoft Go sqlcmd"
 						or "version command failed"
 					entry[#entry + 1] = "[FAIL] " .. label .. (jdbc_profile(profile) and " helper: " or " version: ") .. (stderr ~= "" and stderr or fallback)
 				end
