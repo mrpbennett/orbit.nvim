@@ -3,8 +3,8 @@ local session = require("orbit.session")
 local adapters = require("orbit.adapters")
 
 return {
-  ["MSSQL builds the exact Go sqlcmd argv and a sanitized child environment"] = function()
-    local mssql = require("orbit.connectors.mssql")
+  ["SQL Server builds the exact Go sqlcmd argv and a sanitized child environment"] = function()
+    local mssql = require("orbit.connectors.sqlserver")
     local separator = string.char(31)
     local options = {
       host = "sql.example",
@@ -39,9 +39,9 @@ return {
     assert(not vim.inspect(assert(mssql.session_command(options))):find("resolved-secret", 1, true))
   end,
 
-  ["MSSQL resolves password_env without inheriting its source variable"] = function()
-    local mssql = require("orbit.connectors.mssql")
-    local name = "ORBIT_MSSQL_RESOLVED_PASSWORD"
+  ["SQL Server resolves password_env without inheriting its source variable"] = function()
+    local mssql = require("orbit.connectors.sqlserver")
+    local name = "ORBIT_SQLSERVER_RESOLVED_PASSWORD"
     local original = vim.env[name]
     vim.env[name] = "environment-secret"
     local ok, test_err = xpcall(function()
@@ -62,8 +62,8 @@ return {
     vim.env[name] = original
     assert(ok, test_err)
   end,
-  ["MSSQL JDBC launches Java without credentials and frames domain requests"] = function()
-    local mssql = require("orbit.connectors.mssql")
+  ["SQL Server JDBC launches Java without credentials and frames domain requests"] = function()
+    local mssql = require("orbit.connectors.sqlserver")
     local name = "ORBIT_JTDS_PASSWORD"
     local original = vim.env[name]
     vim.env[name] = "domain-secret"
@@ -84,7 +84,7 @@ return {
     local ok, test_err = xpcall(function()
       local command = assert(mssql.session_command(options))
       assert(command[1] == "/opt/java/bin/java" and command[2] == "--class-path")
-      assert(command[3] == "/opt/jtds-1.3.1.jar" and command[4]:match("OrbitMssql%.java$"))
+      assert(command[3] == "/opt/jtds-1.3.1.jar" and command[4]:match("OrbitSqlServer%.java$"))
       assert(not vim.inspect(command):find("domain-secret", 1, true))
 
       local environment = assert(mssql.environment(options, {
@@ -108,8 +108,51 @@ return {
     vim.env[name] = original
     assert(ok, test_err)
   end,
-  ["MSSQL JDBC framing preserves structured values and classifies fatal responses"] = function()
-    local mssql = require("orbit.connectors.mssql")
+  ["SQL Server diagnostics select the profile transport through the Connector seam"] = function()
+    local sqlserver = require("orbit.connectors.sqlserver")
+    local sqlcmd_command
+    sqlserver.diagnose({ password_env = "SQLSERVER_PASSWORD" }, {
+      executable = function(command) return command == "sqlcmd" end,
+      exepath = function() return "/custom/sqlcmd" end,
+      filereadable = function() return false end,
+      getenv = function(name) return name == "SQLSERVER_PASSWORD" and "secret" or nil end,
+      environ = function() return { PATH = "/bin", LD_PRELOAD = "/tmp/unsafe.so", SQLCMDINI = "/tmp/unsafe" } end,
+      run = function(command, callback, options)
+        sqlcmd_command = command
+        assert(options.clear_env and vim.deep_equal(options.env, { PATH = "/bin" }))
+        callback({ code = 0, stdout = "sqlcmd\nVersion: 1.8.0\n", stderr = "" })
+      end,
+    }, function(facts)
+      assert(vim.deep_equal(sqlcmd_command, { "/custom/sqlcmd", "--version" }))
+      assert(facts.executable.found and facts.executable.value == "/custom/sqlcmd")
+      assert(facts.credential.environment == "SQLSERVER_PASSWORD" and facts.credential.present)
+      assert(facts.result.name == "version" and facts.result.value == "1.8.0")
+    end)
+
+    local jdbc_command, jdbc_options
+    sqlserver.diagnose({
+      transport = "jdbc",
+      driver_path = "/drivers/jtds.jar",
+      authentication = { password_env = "SQLSERVER_PASSWORD" },
+    }, {
+      executable = function(command) return command == "java" end,
+      exepath = function() return "/custom/java" end,
+      filereadable = function(path) return path == "/drivers/jtds.jar" end,
+      getenv = function(name) return name == "SQLSERVER_PASSWORD" and "secret" or nil end,
+      environ = function() return { PATH = "/bin", SQLSERVER_PASSWORD = "secret", JAVA_TOOL_OPTIONS = "unsafe" } end,
+      run = function(command, callback, options)
+        jdbc_command, jdbc_options = command, options
+        callback({ code = 0, stdout = "Orbit SQL Server helper: Java 25; jTDS 1.3.1 loaded\n", stderr = "" })
+      end,
+    }, function(facts)
+      assert(jdbc_command[1] == "/custom/java" and jdbc_command[2] == "--class-path")
+      assert(jdbc_command[3] == "/drivers/jtds.jar" and jdbc_command[4]:match("OrbitSqlServer%.java$") and jdbc_command[5] == "--doctor")
+      assert(jdbc_options.clear_env and vim.deep_equal(jdbc_options.env, { PATH = "/bin" }))
+      assert(facts.prerequisites[1].found and facts.result.name == "helper")
+    end)
+  end,
+  ["SQL Server JDBC framing preserves structured values and classifies fatal responses"] = function()
+    local mssql = require("orbit.connectors.sqlserver")
     local options = { transport = "jdbc" }
     local marker = "__orbit_test_2"
     local payload = [=[{"ok":true,"columns":["value","missing"],"rows":[["line\nvalue",null],["NULL",""]]}]=]
@@ -145,7 +188,14 @@ return {
     )
     assert(malformed_payload_err:match("not text or NULL"), malformed_payload_err)
   end,
-  ["MSSQL JDBC keeps one process after an ordinary statement error"] = function()
+  ["SQL Server keeps GO rejection and exit diagnostics across transport dispatch"] = function()
+    local mssql = require("orbit.connectors.sqlserver")
+    local jdbc = { transport = "jdbc" }
+    local framed, err = mssql.session_request("SELECT 1\nGO", "marker", jdbc)
+    assert(framed == nil and err:match("GO batch separator"), err)
+    assert(mssql.session_exit_error("ignored stdout", " JDBC failed ", jdbc) == "JDBC failed")
+  end,
+  ["SQL Server JDBC keeps one process after an ordinary statement error"] = function()
     local original_system = vim.system
     local process
     local process_count = 0
@@ -160,7 +210,7 @@ return {
     end
     local profile = {
       name = "jdbc-error-recovery",
-      kind = "mssql",
+		kind = "sqlserver",
       options = {
         transport = "jdbc",
         driver = "jtds",
@@ -192,7 +242,7 @@ return {
     vim.system = original_system
     assert(ok, test_err)
   end,
-  ["Session replaces the inherited environment for MSSQL sqlcmd"] = function()
+  ["Session replaces the inherited environment for SQL Server sqlcmd"] = function()
     local original_system = vim.system
     local captured, clear_env
     vim.system = function(_, options)
@@ -202,7 +252,7 @@ return {
     end
     local profile = {
       name = "mssql-sanitized-environment",
-      kind = "mssql",
+		kind = "sqlserver",
       options = { host = "sql.example", database = "warehouse", user = "orbit", password = "secret" },
     }
     local ok, test_err = xpcall(function()
@@ -218,33 +268,33 @@ return {
     assert(ok, test_err)
   end,
 
-  ["MSSQL checks password sources before spawning sqlcmd"] = function()
+  ["SQL Server checks password sources before spawning sqlcmd"] = function()
     local original_system = vim.system
-    local original_password = vim.env.ORBIT_MSSQL_MISSING
+    local original_password = vim.env.ORBIT_SQLSERVER_MISSING
     local spawned, received = false, nil
-    vim.env.ORBIT_MSSQL_MISSING = nil
+    vim.env.ORBIT_SQLSERVER_MISSING = nil
     vim.system = function()
       spawned = true
     end
     local profile = {
       name = "mssql-missing-password",
-      kind = "mssql",
-      options = { host = "sql.example", database = "warehouse", user = "orbit", password_env = "ORBIT_MSSQL_MISSING" },
+		kind = "sqlserver",
+      options = { host = "sql.example", database = "warehouse", user = "orbit", password_env = "ORBIT_SQLSERVER_MISSING" },
     }
     local ok, test_err = xpcall(function()
       runner.run(profile, "SELECT 1", function(_, err) received = err end)
       assert(vim.wait(100, function() return received ~= nil end))
-      assert(received:match("does not contain an MSSQL password"), received)
+		assert(received:match("does not contain an SQL Server password"), received)
       assert(not spawned)
     end, debug.traceback)
     session.close(profile.name)
     vim.system = original_system
-    vim.env.ORBIT_MSSQL_MISSING = original_password
+    vim.env.ORBIT_SQLSERVER_MISSING = original_password
     assert(ok, test_err)
   end,
 
-  ["MSSQL frames three batches and consumes the complete end marker record"] = function()
-    local mssql = require("orbit.connectors.mssql")
+  ["SQL Server frames three batches and consumes the complete end marker record"] = function()
+    local mssql = require("orbit.connectors.sqlserver")
     local marker = "orbit-marker"
     assert(mssql.session_request("SELECT 7 AS value", marker) == table.concat({
       "SET NOCOUNT ON;",
@@ -277,8 +327,8 @@ return {
     assert(consumed == expected_consumed)
   end,
 
-  ["MSSQL rejects GO and sqlcmd control commands"] = function()
-    local mssql = require("orbit.connectors.mssql")
+  ["SQL Server rejects GO and sqlcmd control commands"] = function()
+    local mssql = require("orbit.connectors.sqlserver")
     for _, statement in ipairs({
       "SELECT 1\nGO",
       "EXIT",
@@ -301,8 +351,8 @@ return {
     assert(mssql.session_request("LIST", "marker"))
     assert(mssql.session_request("SELECT 'open\nGO\nclose'", "marker"))
   end,
-  ["MSSQL preserves stdout diagnostics when sqlcmd exits before its end marker"] = function()
-    local mssql = require("orbit.connectors.mssql")
+  ["SQL Server preserves stdout diagnostics when sqlcmd exits before its end marker"] = function()
+    local mssql = require("orbit.connectors.sqlserver")
     local stdout =
     "__orbit_frame\n---------------\nmarker:BEGIN\n\nMsg 102, Level 15, State 1\nIncorrect syntax near 'FROM'.\n"
     local detail = mssql.session_exit_error(stdout, "")
@@ -312,8 +362,8 @@ return {
     assert(mssql.session_exit_error("partial result row", "") == nil)
   end,
 
-  ["MSSQL parses one padded separator result and exposes NULL ambiguity"] = function()
-    local mssql = require("orbit.connectors.mssql")
+  ["SQL Server parses one padded separator result and exposes NULL ambiguity"] = function()
+    local mssql = require("orbit.connectors.sqlserver")
     local separator = string.char(31)
     local rows, err, metadata = mssql.parse(table.concat({
       " value " .. separator .. " missing ",
@@ -329,8 +379,8 @@ return {
     assert(vim.deep_equal(metadata, { columns = { "value", "missing" } }))
   end,
 
-  ["MSSQL rejects detectable parser corruption, messages, and multiple results"] = function()
-    local mssql = require("orbit.connectors.mssql")
+  ["SQL Server rejects detectable parser corruption, messages, and multiple results"] = function()
+    local mssql = require("orbit.connectors.sqlserver")
     local separator = string.char(31)
     local cases = {
       { "" .. separator .. "b\n-" .. separator .. "-\n1" .. separator .. "2\n",  "heading must not be empty" },

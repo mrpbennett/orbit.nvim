@@ -1,7 +1,30 @@
 local statements = require("orbit.statements")
 
 return {
-  ["statements.target prefers an explicit selection"] = function()
+	["statements.target selects exactly one Redis command line"] = function()
+		local target = assert(statements.target({
+			lines = { "KEYS *", "", [[GET "capture:one"]] },
+			kind = "redis",
+			row = 3,
+		}))
+		assert(target == [[GET "capture:one"]])
+
+		local selected = assert(statements.target({
+			lines = { "KEYS *", "GET capture:one" },
+			kind = "redis",
+			selection = { start_row = 2, end_row = 2 },
+		}))
+		assert(selected == "GET capture:one")
+
+		local rejected, err = statements.target({
+			lines = { "KEYS *", "GET capture:one" },
+			kind = "redis",
+			selection = { start_row = 1, end_row = 2 },
+		})
+		assert(rejected == nil and err:match("one line"), tostring(err))
+	end,
+
+	["statements.target prefers an explicit selection"] = function()
     local target = assert(statements.target({
       lines = { "SELECT 1;", "SELECT 2;" },
       selection = { start_row = 2, end_row = 2 },
@@ -42,7 +65,7 @@ return {
     assert(err:match("select the statement explicitly"))
   end,
 
-	["statements.target applies MSSQL lexical splitting and rejects GO"] = function()
+	["statements.target applies SQL Server lexical splitting and rejects GO"] = function()
 		local target = assert(statements.target({
 			lines = { "SELECT '[semi;]' AS [semi;column]; -- trailing ;" },
 			dialect = "mssql",

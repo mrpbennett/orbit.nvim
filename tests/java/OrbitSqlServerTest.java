@@ -9,23 +9,23 @@ import java.util.ArrayList;
 import java.util.List;
 
 /** Black-box protocol tests for the Java source helper. */
-public final class OrbitMssqlTest {
+public final class OrbitSqlServerTest {
     private final String helper;
     private final String driverJar;
 
-    private OrbitMssqlTest(String helper, String driverJar) {
+    private OrbitSqlServerTest(String helper, String driverJar) {
         this.helper = helper;
         this.driverJar = driverJar;
     }
 
     public static void main(String[] args) throws Exception {
         if (args.length != 2) throw new IllegalArgumentException("helper source and driver JAR are required");
-        OrbitMssqlTest test = new OrbitMssqlTest(args[0], args[1]);
+        OrbitSqlServerTest test = new OrbitSqlServerTest(args[0], args[1]);
         test.retainsConnectionAfterRecoverableErrors();
         test.mapsTrustAndSqlAuthentication();
         test.terminatesAfterConnectionErrors();
         test.rejectsMalformedProtocol();
-        System.out.println("PASS OrbitMssql Java helper");
+        System.out.println("PASS Orbit SQL Server Java helper");
     }
 
     private void retainsConnectionAfterRecoverableErrors() throws Exception {

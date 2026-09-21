@@ -488,6 +488,52 @@ return {
     assert(ok, err)
   end,
 
+	["workspace binds and explicitly refreshes Redis completion metadata"] = function()
+		local original_tabpage = vim.api.nvim_get_current_tabpage()
+		local original_run = runner.run
+		local path = vim.fn.tempname()
+		assert(profiles.write(path, {
+			version = 1,
+			profiles = { { name = "workspace-redis", kind = "redis", options = { host = "localhost" } } },
+		}))
+		local statements = {}
+		runner.run = function(_, statement, callback)
+			statements[#statements + 1] = statement
+			if statement == "COMMAND" then
+				callback({}, nil, { redis_reply = { { "get", -2, { "readonly" }, 1, 1, 1 } } })
+			else
+				callback({}, nil, { redis_reply = { "0", { "capture:one" } } })
+			end
+			return { kill = function() end }
+		end
+		local state
+		local ok, err = xpcall(function()
+			state = workspace.open({ profile_path = path })
+			vim.api.nvim_set_current_win(state.sidebar_window)
+			vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "workspace-redis")), 0 })
+			vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<CR>", true, false, true), "mx", false)
+			local query_buffer = vim.api.nvim_win_get_buf(state.query_window)
+			assert(vim.bo[query_buffer].filetype == "redis")
+			vim.api.nvim_feedkeys("l", "mx", false)
+			assert(vim.wait(100, function() return require("orbit.redis_cache").status(state.selected).loaded end))
+			assert(line_number(state.sidebar, "Redis keys:"))
+			assert(not line_number(state.sidebar, "tables or views"))
+			vim.api.nvim_feedkeys("r", "mx", false)
+			assert(vim.wait(100, function() return #statements >= 4 end))
+			local scans, commands = 0, 0
+			for _, statement in ipairs(statements) do
+				if statement:match("^SCAN ") then scans = scans + 1 end
+				if statement == "COMMAND" then commands = commands + 1 end
+				assert(not statement:lower():match("select.+sqlite_master"))
+			end
+			assert(scans == 2 and commands == 2, vim.inspect(statements))
+		end, debug.traceback)
+		runner.run = original_run
+		if state and vim.api.nvim_tabpage_is_valid(state.tabpage) then workspace.close(state.tabpage) end
+		if vim.api.nvim_tabpage_is_valid(original_tabpage) then vim.api.nvim_set_current_tabpage(original_tabpage) end
+		assert(ok, err)
+	end,
+
   ["workspace double click activates the clicked sidebar profile"] = function()
     local original = vim.api.nvim_get_current_tabpage()
     local original_run = runner.run
@@ -1234,7 +1280,7 @@ return {
       assert(work_line < personal_line)
       local offline_line = assert(line_number(state.sidebar, "Offline SQL"))
       assert(personal_line < nested_root_line and nested_root_line < offline_line)
-      assert(not line_number(state.sidebar, "No saved SQL files"))
+			assert(not line_number(state.sidebar, "No saved query files"))
       assert(not line_number(state.sidebar, "nested"))
       assert(not line_number(state.sidebar, "second.sql"))
       assert(not line_number(state.sidebar, "first.sql"))
@@ -1255,7 +1301,7 @@ return {
       assert(line_count(state.sidebar, "first.sql") == 1)
       vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "Offline SQL")), 0 })
       vim.api.nvim_feedkeys("l", "mx", false)
-      assert(line_number(state.sidebar, "No saved SQL files"))
+			assert(line_number(state.sidebar, "No saved query files"))
       assert(not line_number(state.sidebar, "linked.sql"))
       assert(not line_number(state.sidebar, "linked-directory"))
 

@@ -5,6 +5,7 @@
 - Use a command-line progress counter for periodic feedback; notification replacement is provider-specific and can stack toasts.
 - Confirm established user-facing defaults before changing them; do not infer a keybinding scheme from a reported missing mapping.
 - When a rebrand request is ambiguous, confirm whether public-only or full-namespace scope is intended before changing names.
+- When a user corrects a partial namespace migration, extend the rename to filenames, imports, helper classes, and documentation paths rather than preserving internal legacy names by default.
 - Verify unfamiliar Nerd Font glyph names against the glyph map before changing a user-facing icon.
 - For UI-parity work, model the hierarchy shown in the reference rather than reducing it to top-level items; a SQL structure view includes internal query elements, not only statements.
 - For navigable trees, settle initial expansion and repeated-clause behavior explicitly; SQL set-operation branches are distinct outline nodes while deeper parenthesized subqueries are not peers.

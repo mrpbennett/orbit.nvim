@@ -1,5 +1,143 @@
 # Orbit.nvim v0.1 Plan
 
+## Main Merge Changelog 2026-09-21
+
+- [x] Review commits and current worktree changes against `main` for user-visible and breaking behavior.
+- [x] Consolidate merge-relevant breaking changes and recent additions under `CHANGELOG.md` `Unreleased`.
+- [x] Verify changelog scope and Markdown whitespace, then inspect the final diff.
+
+### Scope
+
+- Cover the `mssql` to `sqlserver` breaking rename, Redis Connector support, and SQL Server diagnostic transport deepening.
+
+### Review
+
+- `CHANGELOG.md` now records all branch-only user-visible changes under `Unreleased`; Redis entries were moved from the already-tagged `v0.3.0` section.
+- `git diff --check` passes. No implementation or test files were changed.
+- Do not alter unrelated in-progress implementation or test changes.
+
+## SQL Server Diagnostic Deepening 2026-09-21
+
+- [x] Keep SQL Server transport selection at the Connector seam for both execution and diagnostics.
+- [x] Move transport-specific diagnostic implementation behind that seam while Doctor retains report formatting and redaction.
+- [x] Add Connector-seam diagnostic coverage for sqlcmd and JDBC transports.
+- [x] Run Lua, Java-helper, and whitespace verification.
+
+### Review
+
+- `nvim --headless -u NONE -l tests/run.lua` passes the diagnostic coverage and retains three pre-existing failures: JDBC profile validation, JDBC request framing, and the Trino large-schema performance budget.
+- `bash tests/java_spec.sh` and `git diff --check` pass.
+- Final standards and design reviews returned `CLEAN` after resolving environment isolation, no-profile behavior, redaction ownership, and transport-specific failure ownership.
+
+## SQL Server Terminology Migration 2026-09-19
+
+- [x] Replace the breaking public profile and Doctor kind `mssql` with `sqlserver`.
+- [x] Use `SQL Server` in current user-facing messages and documentation while retaining only the T-SQL dialect identifier.
+- [x] Record the breaking change in `CHANGELOG.md` and update affected regression coverage.
+- [x] Run focused and complete verification, inspect the diff, and review the migration.
+
+### Settled Design
+
+- `kind: "sqlserver"` is the only accepted public connection-profile kind; `kind: "mssql"` is intentionally rejected.
+- `:OrbitDoctor sqlserver` replaces `:OrbitDoctor mssql`.
+- The T-SQL lexer retains the low-level `mssql` dialect identifier and the jTDS URL retains its `sqlserver` protocol identifier. All implementation filenames, imports, helper paths, and helper classes use `sqlserver`.
+
+### Follow-up: Internal Namespace Migration
+
+- [x] Rename SQL Server connector, helper, test, documentation, and ADR files from `mssql` to `sqlserver`.
+- [x] Update imports, runtime paths, test harnesses, documentation links, and Java class names.
+- [x] Run complete verification and review the internal namespace migration.
+
+### Follow-up Review
+
+- Connector modules now live at `lua/orbit/connectors/sqlserver*.lua`; the Java helper and test use `OrbitSqlServer`, and their paths use `orbit-sqlserver`.
+- The local SQL Server support issue-tracker directory, live test, research document, and ADR filenames now use `sqlserver`; all runtime imports and documentation links target those paths.
+- `mssql` remains only as the T-SQL lexer dialect literal. Its helper APIs are now `sqlserver_*`.
+- `bash tests/java_spec.sh` and `git diff --check` pass. `bash tests/verify.sh` retains the same three pre-existing failures: JDBC profile validation, JDBC request framing, and the Trino large-schema performance budget.
+
+### Review
+
+- `kind: "sqlserver"` is now the sole supported SQL Server profile kind; the `mssql` profile kind is covered as an intentional rejection.
+- Current user-facing diagnostics, documentation, Doctor output, and Java helper messages use SQL Server terminology. `CHANGELOG.md` documents the breaking profile and Doctor command migration.
+- `bash tests/java_spec.sh` and `git diff --check` pass. `bash tests/verify.sh` passes all migration coverage and retains three pre-existing failures: JDBC profile validation, JDBC request framing, and the Trino large-schema performance budget.
+- Independent standards and specification reviews returned `CLEAN`. No commit or GitHub write was made.
+
+## Architecture Review 2026-09-18
+
+- [x] Inspect the recent Redis Connector and MSSQL transport hot spots, following adjacent seams only where understanding requires it.
+- [x] Apply the deletion test and validate candidates against the domain model, ADRs, tests, and completed architecture work.
+- [x] Produce, validate, and open a fresh temporary HTML report with visual before/after comparisons and a top recommendation.
+
+### Scope
+
+- Prioritize Redis connection-profile execution, key acquisition, completion, and Workspace projection because they dominate the newest change.
+- Assess the MSSQL Connector's two transport implementations only where the real transport seam exposes repeated caller knowledge.
+- Preserve ADR-0004 and do not re-suggest completed Workspace lifetime, retained Statement framing, Schema acquisition, Schema object identity, Saved query, Completion scope, or Table metadata work.
+
+### Review
+
+- Report: `/tmp/architecture-review-20260918-145023.html`.
+- Top recommendation: make the MSSQL transport seam explicit because the sqlcmd implementation and JDBC implementation are real adapters but their lifecycle knowledge is split through the shared MSSQL module.
+- Additional candidates: keep Redis reply decoding separate from Result grid projection, then consider concentrating Redis COMMAND and SCAN refresh fan-in in `redis_cache`.
+- ADR-0004 is preserved; no candidate reopens a settled decision.
+- Verification: `xmllint --html --noout /tmp/architecture-review-20260918-145023.html` passed.
+
+## MSSQL Transport Seam Deepening 2026-09-18
+
+- [x] Inspect the current MSSQL Connector transport lifecycle and its tests.
+- [x] Extract the internal sqlcmd transport adapter and centralize transport selection.
+- [x] Add transport-interface regression coverage for shared Connector dispatch.
+- [x] Run focused and complete verification, then review the change.
+
+### Settled Design
+
+- The transport seam is private to the MSSQL Connector; no other Orbit module selects a transport adapter.
+- The Connector selects sqlcmd or JDBC once from the connection profile, then delegates transport lifecycle behavior through that seam.
+- The Connector retains shared MSSQL qualification, Schema acquisition, Completion, object actions, and mutation classification.
+- sqlcmd and JDBC adapters retain their own profile validation, process lifecycle, credential delivery, framing, parsing, cancellation behavior, and exit diagnostics.
+- Tests cross the transport interface through the Connector while Session retains its shared framing coverage.
+
+### Review
+
+- `lua/orbit/connectors/mssql_sqlcmd.lua` now owns the sqlcmd adapter's validation, command/environment construction, control-command rejection, retained framing, exit diagnostics, and strict Result parsing.
+- `lua/orbit/connectors/mssql.lua` now selects a transport once and retains only shared MSSQL behavior; JDBC now declares the same exit-diagnostic operation as sqlcmd.
+- Regression coverage verifies shared Connector `GO` rejection and transport-specific exit diagnostics; the test runner loads the extracted sqlcmd module.
+- Verification: `git diff --check` passes. `bash tests/verify.sh` reaches and passes the seam coverage plus Java helper coverage, then retains three established unrelated failures: JDBC profile-validation expectation, JDBC request-frame-length expectation, and the Trino large-schema performance budget.
+- Independent review found and resolved an unused sqlcmd selection export and insufficient comments around sqlcmd framing and strict parsing. No commit or GitHub write was made.
+
+## Redis Connector And Completion Plan 2026-09-17
+
+- [x] Publish primary-source Redis CLI research and the settled MVP behavior.
+- [x] Add Redis connection-profile validation, secure `redis-cli` invocation, one-shot statement execution, and textual Result grid normalization.
+- [x] Add asynchronous, cancellable, bounded Redis key acquisition through cursor-based `SCAN`, partitioned by connection-profile identity and logical database.
+- [x] Add Redis command and key-argument analysis, cached command/key completion through Blink, and exact Redis CLI quoting on insertion.
+- [x] Integrate Redis query-buffer behavior, key-index prewarming and refresh, Doctor diagnostics, and user documentation without changing existing Connector defaults.
+- [x] Add deterministic connector, parsing, acquisition, completion, runner, profile, Doctor, and Workspace coverage.
+- [x] Run focused and complete verification, inspect the diff, and independently review standards and specification compliance.
+
+### Accepted Direction
+
+- Match DataGrip's model: Redis keys are asynchronously introspected database objects, not arbitrary cells harvested from prior statement results.
+- Populate completion from a bounded in-memory Redis key index using cursor-based `SCAN`; never invoke `KEYS` automatically.
+- Prewarm the index when a Redis profile is bound, refresh only on explicit request thereafter, and expose truncation when the configured cap is reached.
+- Scope the MVP to one standalone Redis endpoint and one profile-selected logical database, defaulting to database `0`; defer Cluster and cross-database browsing.
+- Execute statements through one-shot `redis-cli` processes; `SELECT`, `MULTI`, `WATCH`, and other connection-local state do not persist between executions.
+- Offer Redis key candidates only in key-argument positions. Keep command completion and key discovery separate, and use the existing Blink frontend only.
+- Use structured profile fields, environment-backed passwords, and explicit TLS certificate settings rather than credential-bearing URIs or arbitrary CLI arguments.
+- Render pragmatic textual results, including a single `value` column for `KEYS`; document that exact RESP and arbitrary binary fidelity are outside the MVP.
+
+### Review
+
+- Added a one-shot Redis Connector with strict structured profiles, sanitized `REDISCLI_AUTH`, TLS options, Redis CLI-compatible argument parsing, RESP3 JSON projection, readonly mutation classification, Doctor checks, and cancellation cleanup.
+- Added a profile-identity-scoped Redis key index that walks `SCAN` to cursor zero, deduplicates keys, enforces `key_limit`, reports truncation, coalesces refreshes, and keeps completion cache-only while typing.
+- Added server-authoritative Redis command completion and key completion only in metadata-identified key positions, including Redis CLI-safe insertion for whitespace, quotes, control bytes, and backslashes.
+- Redis-bound buffers use current-line execution and the `redis` filetype, close SQL Structure panels, support `.redis` saved queries, and refresh command/key metadata through the Workspace profile action without rendering a relational schema tree.
+- Research and onboarding are documented in `docs/redis-connector-research.md` and `README.md`, including a local Docker profile and the explicit `KEYS`/`SCAN`, Cluster, binary-fidelity, and retained-state limits.
+- Live verification passed with `redis-cli 8.10.1` against the official `redis:8-alpine` container for `SET`, RESP3 JSON `COMMAND`, cursor-based `SCAN`, readonly metadata, and key indexing. Authentication and TLS remain deterministic-only.
+- Focused Redis and affected integration tests pass; `bash tests/java_spec.sh` and `git diff --check` pass. The complete Lua suite reaches all Redis tests successfully and remains blocked only by the same pre-existing MSSQL JDBC profile/framing failures and large Trino schema performance budget recorded before this work.
+- Independent standards and specification reviews drove fixes for CLI quoting parity, variadic key positions, callback reentrancy, metadata cancellation, credential inheritance, malformed command metadata, authoritative fallback behavior, Redis-only Workspace status, and Structure cleanup. Final actionable findings were resolved.
+- No commit, push, pull request, or other GitHub write was made.
+
 ## Workspace Lifetime Deepening 2026-09-16
 
 - [x] Add interface-level regressions for Orbit-driven and native Workspace closure, late Statement outcomes, and surviving query-buffer state.
@@ -220,7 +358,7 @@
 - [x] Inspect Orbit's connector, retained-session, result, profile-security, schema-acquisition, and test boundaries.
 - [x] Compare first-party SQL Server transports with ODBC and FreeTDS alternatives on Arch Linux, macOS, and Windows.
 - [x] Define a minimal connector architecture, connection-profile shape, authentication/TLS policy, packaging matrix, and verification plan.
-- [x] Record the findings in `docs/mssql-connector-research.md` and verify the documentation diff.
+- [x] Record the findings in `docs/sqlserver-connector-research.md` and verify the documentation diff.
 
 ### Review
 

@@ -40,7 +40,7 @@ function M.discover(directory, root_path)
 						root_path = root_path,
 					})
 				end
-			elseif kind == "file" and name:lower():sub(-4) == ".sql" then
+			elseif kind == "file" and (name:lower():sub(-4) == ".sql" or name:lower():sub(-6) == ".redis") then
 				local stat = vim.uv.fs_lstat(entry_path)
 				if stat and stat.type == "file" then
 					table.insert(entries, {
@@ -125,11 +125,15 @@ function M.directories(locations)
 	return directories
 end
 
-function M.filename(filename)
+function M.filename(filename, default_extension)
 	if filename:match("^%s*$") or filename == "." or filename == ".." or filename:find("[/\\%c]") then
 		return nil
 	end
-	return filename:lower():sub(-4) == ".sql" and filename or filename .. ".sql"
+	local lower = filename:lower()
+	if lower:sub(-4) == ".sql" or lower:sub(-6) == ".redis" then
+		return filename
+	end
+	return filename .. "." .. (default_extension or "sql")
 end
 
 function M.directory_available(directory)

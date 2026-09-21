@@ -130,10 +130,23 @@ function M.target(request)
 		if explicit:match("^%s*$") then
 			return nil, "selection is empty"
 		end
-		if request.dialect == "mssql" and tokenizer.has_mssql_batch_separator(vim.split(explicit, "\n", { plain = true })) then
-			return nil, "MSSQL GO batch separators are not supported"
+		if request.kind == "redis" and explicit:find("[\r\n]") then
+			return nil, "Redis execution requires a selection on exactly one line"
+		end
+		if request.dialect == "mssql" and tokenizer.has_sqlserver_batch_separator(vim.split(explicit, "\n", { plain = true })) then
+			return nil, "SQL Server GO batch separators are not supported"
 		end
 		return explicit
+	end
+	if request.kind == "redis" then
+		if type(request.row) ~= "number" or request.row % 1 ~= 0 or not request.lines[request.row] then
+			return nil, "Redis execution requires a cursor line"
+		end
+		local line = request.lines[request.row]
+		if line:match("^%s*$") then
+			return nil, "Redis statement line is empty"
+		end
+		return line
 	end
 
 	-- No usable selection was given, so fall back to treating the entire
@@ -175,8 +188,8 @@ function M.target(request)
 	if semicolons > 1 or (semicolons == 1 and not trailing_terminator) then
 		return nil, "statement is ambiguous; select the statement explicitly"
 	end
-	if request.dialect == "mssql" and tokenizer.has_mssql_batch_separator(request.lines) then
-		return nil, "MSSQL GO batch separators are not supported"
+	if request.dialect == "mssql" and tokenizer.has_sqlserver_batch_separator(request.lines) then
+		return nil, "SQL Server GO batch separators are not supported"
 	end
 
 	return contents

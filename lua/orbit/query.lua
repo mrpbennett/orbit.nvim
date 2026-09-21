@@ -48,6 +48,28 @@ local running = {}
 -- results on top of the new ones.
 local result_generation = {}
 
+local function set_buffer_kind(buffer, profile)
+	local filetype = profile.kind == "redis" and "redis" or "sql"
+	if vim.bo[buffer].filetype ~= filetype then
+		-- FileType may have already installed SQL-only mappings on this query
+		-- buffer. Let Orbit's autocmd rebuild mappings for the new backend.
+		vim.b[buffer].orbit_keymaps = nil
+		if filetype == "redis" then
+			require("orbit.structure").close_for_buffer(buffer)
+			local structure = require("orbit").config.keymaps and require("orbit").config.keymaps.structure
+			if type(structure) == "string" then
+				for _, mapping in ipairs(vim.api.nvim_buf_get_keymap(buffer, "n")) do
+					if mapping.rhs == "<Cmd>OrbitStructure<CR>" and mapping.desc == "Orbit structure" then
+						pcall(vim.keymap.del, "n", mapping.lhs, { buffer = buffer })
+						break
+					end
+				end
+			end
+		end
+		vim.bo[buffer].filetype = filetype
+	end
+end
+
 local function set_buffer_dialect(buffer, profile)
 	local connector = adapters.connector(profile)
 	local dialect = connector and connector.sql_dialect or nil
@@ -181,6 +203,7 @@ function M.profile_for_buffer(buffer, config)
 		return nil, string.format("connection profile %q does not exist", name)
 	end
 	set_buffer_dialect(buffer, profile)
+	set_buffer_kind(buffer, profile)
 	return profile
 end
 
@@ -228,6 +251,7 @@ end
 function M.bind_profile(buffer, profile)
 	vim.b[buffer].orbit_profile = profile.name
 	set_buffer_dialect(buffer, profile)
+	set_buffer_kind(buffer, profile)
 	if require("orbit").config.completion then
 		require("orbit.completion").prewarm(profile)
 	end
@@ -310,6 +334,9 @@ function M.execute(buffer, config, selection, context)
 		lines = vim.api.nvim_buf_get_lines(buffer, 0, -1, false),
 		selection = selection,
 		dialect = connector.sql_dialect,
+		kind = profile.kind,
+		row = vim.api.nvim_win_get_cursor(context.source_window and vim.api.nvim_win_is_valid(context.source_window)
+			and context.source_window or vim.api.nvim_get_current_win())[1],
 	})
 	if not statement then
 		vim.notify(statement_err, vim.log.levels.ERROR)
@@ -323,7 +350,7 @@ function M.execute(buffer, config, selection, context)
 	-- prompt with the given buttons; choice 1 is "&Execute", anything else
 	-- (including cancelling with <Esc>, which returns 0) aborts the run.
 	local confirm = connector.requires_confirmation or requires_confirmation
-	if config.confirm_mutations and profile.options.confirm_mutations ~= false and confirm(statement) then
+	if config.confirm_mutations and profile.options.confirm_mutations ~= false and confirm(statement, profile) then
 		local choice = vim.fn.confirm("Execute mutating statement?", "&Execute\n&Cancel", 2)
 		if choice ~= 1 then
 			return
@@ -588,6 +615,7 @@ function M.disconnect(buffer)
 		return
 	end
 	runner.close(profile_name)
+	require("orbit.redis_cache").cancel(profile_name)
 	vim.notify("Orbit disconnected: " .. profile_name)
 end
 

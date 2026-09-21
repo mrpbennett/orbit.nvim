@@ -60,27 +60,33 @@ return {
     assert(loaded == nil and err:match("options.database"))
   end,
 
-  ["MSSQL profiles validate the exact SQL authentication and TLS options"] = function()
+  ["SQL Server profiles validate the exact SQL authentication and TLS options"] = function()
     local base = { host = "sql.example.test", database = "warehouse", user = "orbit" }
     local valid = write_profiles({
       version = 1,
       profiles = { {
         name = "warehouse-mssql",
-        kind = "mssql",
+        kind = "sqlserver",
         options = vim.tbl_extend("force", base, {
           port = 1433,
-          password_env = "ORBIT_MSSQL_PASSWORD",
+          password_env = "ORBIT_SQLSERVER_PASSWORD",
           trust_server_certificate = false,
           schema_patterns = { "sales", "report*" },
           executable = "sqlcmd-dev",
         }),
       } },
     })
-    assert(assert(profiles.load(valid)).profiles[1].kind == "mssql")
+    assert(assert(profiles.load(valid)).profiles[1].kind == "sqlserver")
+    local legacy = write_profiles({
+      version = 1,
+      profiles = { { name = "legacy-mssql", kind = "mssql", options = base } },
+    })
+    local legacy_loaded, legacy_err = profiles.load(legacy)
+    assert(legacy_loaded == nil and legacy_err:match('unsupported kind "mssql"'), tostring(legacy_err))
     local multiple = vim.tbl_extend("force", base, { database = { "warehouse", "reporting" } })
     local multiple_valid = write_profiles({
       version = 1,
-      profiles = { { name = "multiple-mssql", kind = "mssql", options = multiple } },
+      profiles = { { name = "multiple-mssql", kind = "sqlserver", options = multiple } },
     })
     assert(vim.deep_equal(assert(profiles.load(multiple_valid)).profiles[1].options.database, {
       "warehouse",
@@ -93,10 +99,10 @@ return {
       { options = vim.tbl_extend("force", base, { port = 0 }),                                 error = "options.port" },
       { options = vim.tbl_extend("force", base, { trust_server_certificate = "yes" }),         error = "trust_server_certificate" },
       { options = vim.tbl_extend("force", base, { password = "one", password_env = "TWO" }),   error = "mutually exclusive" },
-      { options = vim.tbl_extend("force", base, { certificate = "/tmp/ca.pem" }),              error = "unsupported MSSQL option" },
-      { options = vim.tbl_extend("force", base, { hostname_in_certificate = "sql.internal" }), error = "unsupported MSSQL option" },
-      { options = vim.tbl_extend("force", base, { encrypt = "optional" }),                     error = "unsupported MSSQL option" },
-      { options = vim.tbl_extend("force", base, { arguments = { "--unsafe" } }),               error = "unsupported MSSQL option" },
+      { options = vim.tbl_extend("force", base, { certificate = "/tmp/ca.pem" }),              error = "unsupported SQL Server option" },
+      { options = vim.tbl_extend("force", base, { hostname_in_certificate = "sql.internal" }), error = "unsupported SQL Server option" },
+      { options = vim.tbl_extend("force", base, { encrypt = "optional" }),                     error = "unsupported SQL Server option" },
+      { options = vim.tbl_extend("force", base, { arguments = { "--unsafe" } }),               error = "unsupported SQL Server option" },
       { options = vim.tbl_extend("force", base, { executable = "" }),                          error = "options.executable" },
       { options = vim.tbl_extend("force", base, { confirm_mutations = "no" }),                 error = "confirm_mutations" },
       { options = vim.tbl_extend("force", base, { schema_patterns = {} }),                     error = "non%-empty array" },
@@ -106,12 +112,12 @@ return {
       { options = vim.tbl_extend("force", base, { database = { "warehouse", "WAREHOUSE" } }),  error = "duplicates" },
     }
     for _, case in ipairs(cases) do
-      local path = write_profiles({ version = 1, profiles = { { name = "bad-mssql", kind = "mssql", options = case.options } } })
+      local path = write_profiles({ version = 1, profiles = { { name = "bad-mssql", kind = "sqlserver", options = case.options } } })
       local loaded, err = profiles.load(path)
       assert(loaded == nil and err:match(case.error), tostring(err))
     end
   end,
-  ["MSSQL JDBC profiles validate jTDS domain and SQL password settings"] = function()
+  ["SQL Server JDBC profiles validate jTDS domain and SQL password settings"] = function()
     local domain = {
       transport = "jdbc",
       driver = "jtds",
@@ -122,13 +128,13 @@ return {
         type = "domain_password",
         domain = "EXAMPLE",
         user = "orbit",
-        password_env = "ORBIT_MSSQL_PASSWORD",
+        password_env = "ORBIT_SQLSERVER_PASSWORD",
       },
       trust_server_certificate = false,
     }
     local valid = write_profiles({
       version = 1,
-      profiles = { { name = "domain-jdbc", kind = "mssql", options = domain } },
+      profiles = { { name = "domain-jdbc", kind = "sqlserver", options = domain } },
     })
     assert(assert(profiles.load(valid)).profiles[1].options.database == nil)
 
@@ -139,7 +145,7 @@ return {
     sql_password.authentication = { type = "sql_password", user = "orbit", password = "secret" }
     local sql_valid = write_profiles({
       version = 1,
-      profiles = { { name = "sql-jdbc", kind = "mssql", options = sql_password } },
+      profiles = { { name = "sql-jdbc", kind = "sqlserver", options = sql_password } },
     })
     assert(assert(profiles.load(sql_valid)).profiles[1].options.port == 54059)
 
@@ -149,7 +155,7 @@ return {
     multiple.database = { "Database", "Databaserpt" }
     local multiple_valid = write_profiles({
       version = 1,
-      profiles = { { name = "multiple-jdbc", kind = "mssql", options = multiple } },
+      profiles = { { name = "multiple-jdbc", kind = "sqlserver", options = multiple } },
     })
     assert(vim.deep_equal(assert(profiles.load(multiple_valid)).profiles[1].options.database, {
       "Database",
@@ -164,7 +170,7 @@ return {
       return options
     end
     local cases = {
-      { changed({ "transport" }, "odbc"),                        "unsupported MSSQL transport" },
+      { changed({ "transport" }, "odbc"),                        "unsupported SQL Server transport" },
       { changed({ "driver" }, "microsoft"),                      "options.driver" },
       { changed({ "driver_path" }, ""),                          "options.driver_path" },
       { changed({ "driver_path" }, "$HOME/jtds-1.3.1.jar"),      "driver_path must be an absolute path" },
@@ -178,14 +184,14 @@ return {
       { changed({ "authentication", "domain" }, nil),            "authentication.domain" },
       { changed({ "authentication", "password" }, "second"),     "exactly one" },
       { changed({ "authentication", "password_env" }, nil),      "exactly one" },
-      { changed({ "jdbc_url" }, "jdbc:jtds:sqlserver://unsafe"), "unsupported MSSQL JDBC option" },
-      { changed({ "properties" }, { ssl = "off" }),              "unsupported MSSQL JDBC option" },
+      { changed({ "jdbc_url" }, "jdbc:jtds:sqlserver://unsafe"), "unsupported SQL Server JDBC option" },
+      { changed({ "properties" }, { ssl = "off" }),              "unsupported SQL Server JDBC option" },
     }
     local sql_domain = vim.deepcopy(sql_password)
     sql_domain.authentication.domain = "EXAMPLE"
     cases[#cases + 1] = { sql_domain, "domain requires domain_password" }
     for _, case in ipairs(cases) do
-      local path = write_profiles({ version = 1, profiles = { { name = "bad-jdbc", kind = "mssql", options = case[1] } } })
+      local path = write_profiles({ version = 1, profiles = { { name = "bad-jdbc", kind = "sqlserver", options = case[1] } } })
       local loaded, err = profiles.load(path)
       assert(loaded == nil and err:match(case[2]), tostring(err))
     end
@@ -197,7 +203,8 @@ return {
     assert(adapters.connector({ kind = "trino" }) == connector("trino"))
     assert(adapters.connector({ kind = "vertica" }) == connector("vertica"))
     assert(adapters.connector({ kind = "mysql" }) == connector("mysql"))
-    assert(adapters.connector({ kind = "mssql" }) == connector("mssql"))
+    assert(adapters.connector({ kind = "sqlserver" }) == connector("sqlserver"))
+		assert(adapters.connector({ kind = "redis" }) == connector("redis"))
     local unknown, err = adapters.connector({ kind = "unknown" })
     assert(unknown == nil)
     assert(err == "unsupported profile kind: unknown")
@@ -426,7 +433,7 @@ return {
     local sqlite = connector("sqlite")
     local postgres = connector("postgres")
     local trino = connector("trino")
-    local mssql = connector("mssql")
+    local mssql = connector("sqlserver")
 
     assert(sqlite.qualified_name({}, { name = 'a"b' }) == '"a""b"')
     assert(sqlite.completion_word({}, { name = "sessions" }, "") == "sessions")
@@ -445,8 +452,8 @@ return {
     assert(mssql.completion_word({}, { schema = "dbo", name = "users" }, "dbo.") == "[dbo].[users]")
   end,
 
-  ["MSSQL connector builds user-object schema SQL and read-only actions"] = function()
-    local mssql = connector("mssql")
+  ["SQL Server connector builds user-object schema SQL and read-only actions"] = function()
+    local mssql = connector("sqlserver")
     local options = { host = "sql.example", database = "warehouse", user = "orbit", schema_patterns = { "sales", "report*" } }
     local tables = assert(mssql.schema_statement(options, { type = "tables" }))
     assert(tables:find("FROM sys.tables", 1, true) and tables:find("FROM sys.views", 1, true))
@@ -460,8 +467,8 @@ return {
     assert(actions[2].id == "columns" and mssql.editable_table == nil and mssql.mutation_statement == nil)
     assert(mssql.metadata_categories(options, { type = "table" })[1].id == "columns")
   end,
-  ["MSSQL database arrays acquire and address schema objects by catalog"] = function()
-    local mssql = connector("mssql")
+  ["SQL Server database arrays acquire and address schema objects by catalog"] = function()
+    local mssql = connector("sqlserver")
     local options = {
       host = "sql.example",
       database = { "Context]Ad", "Databaserpt" },

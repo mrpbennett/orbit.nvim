@@ -136,7 +136,7 @@ local function validate_profile(profile)
   end
 	-- Only registered database kinds are supported; anything else (typo,
 	-- unsupported future kind, missing field entirely) is rejected up front.
-	if profile.kind ~= "trino" and profile.kind ~= "sqlite" and profile.kind ~= "postgres" and profile.kind ~= "vertica" and profile.kind ~= "mysql" and profile.kind ~= "mssql" then
+	if profile.kind ~= "trino" and profile.kind ~= "sqlite" and profile.kind ~= "postgres" and profile.kind ~= "vertica" and profile.kind ~= "mysql" and profile.kind ~= "sqlserver" and profile.kind ~= "redis" then
     return nil, string.format("profile %q has unsupported kind %q", profile.name, tostring(profile.kind))
   end
   if type(profile.options) ~= "table" then
@@ -152,12 +152,13 @@ local function validate_profile(profile)
 	local required = profile.kind == "trino" and { "server", "user", "catalog" }
 		or profile.kind == "postgres" and { "database" }
 		or profile.kind == "mysql" and { "database" }
-		-- MSSQL requirements depend on the selected transport and are validated
+		-- SQL Server requirements depend on the selected transport and are validated
 		-- inside its Connector rather than flattened into this generic gate.
-		or profile.kind == "mssql" and profile.options.transport == "jdbc" and {}
-		or profile.kind == "mssql" and (profile.options.transport == nil or profile.options.transport == "sqlcmd") and { "host", "user" }
-		or profile.kind == "mssql" and {}
+		or profile.kind == "sqlserver" and profile.options.transport == "jdbc" and {}
+		or profile.kind == "sqlserver" and (profile.options.transport == nil or profile.options.transport == "sqlcmd") and { "host", "user" }
+		or profile.kind == "sqlserver" and {}
 		or profile.kind == "vertica" and { "host", "user", "database" }
+		or profile.kind == "redis" and { "host" }
 		or { "path" }
   for _, field in ipairs(required) do
     valid, err = require_string(profile.options[field], "options." .. field, profile.name)

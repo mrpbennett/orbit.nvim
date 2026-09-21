@@ -1,4 +1,4 @@
-# User-installed sqlcmd for MSSQL
+# User-installed sqlcmd for SQL Server
 
 Status: superseded by ADR-0004
 

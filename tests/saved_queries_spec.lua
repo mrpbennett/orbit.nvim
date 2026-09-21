@@ -11,15 +11,17 @@ return {
     assert(vim.fn.mkdir(nested, "p") == 1)
     vim.fn.writefile({ "SELECT 1;" }, root .. "/alpha.sql")
     vim.fn.writefile({ "SELECT 2;" }, nested .. "/nested.SQL")
+		vim.fn.writefile({ "GET capture:one" }, root .. "/cache.redis")
     vim.fn.writefile({ "ignored" }, root .. "/notes.txt")
     assert(vim.uv.fs_symlink(root .. "/alpha.sql", root .. "/linked.sql"))
 
     local entries = saved_queries.discover(root)
 
-    assert(#entries == 2)
+		assert(#entries == 3)
     assert(entries[1].kind == "saved_directory" and entries[1].name == "Zulu")
     assert(entries[1].children[1].name == "nested.SQL")
-    assert(entries[2].kind == "saved_query" and entries[2].name == "alpha.sql")
+		assert(entries[2].kind == "saved_query" and entries[2].name == "alpha.sql")
+		assert(entries[3].kind == "saved_query" and entries[3].name == "cache.redis")
   end,
 
   ["saved queries enumerate directories in configured order without symlink descendants"] = function()
@@ -49,6 +51,8 @@ return {
   ["saved queries validate filenames without accepting paths"] = function()
     assert(saved_queries.filename("report") == "report.sql")
     assert(saved_queries.filename("REPORT.SQL") == "REPORT.SQL")
+		assert(saved_queries.filename("cache", "redis") == "cache.redis")
+		assert(saved_queries.filename("cache.REDIS", "redis") == "cache.REDIS")
     for _, invalid in ipairs({ "", "  ", ".", "..", "../report", "folder\\report", "bad\nname" }) do
       assert(saved_queries.filename(invalid) == nil, vim.inspect(invalid))
     end

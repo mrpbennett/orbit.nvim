@@ -87,7 +87,7 @@ end
 -- identifiers ("" escaping); see connectors/{postgres,sqlite,trino}.lua.
 function M.tokenize(lines, dialect)
 	local mysql = dialect == "mysql"
-	local mssql = dialect == "mssql"
+	local sqlserver = dialect == "mssql"
 	-- Joining all lines with "\n" lets the scanner walk one flat string with
 	-- a single index `i`, instead of juggling a separate index per line. The
 	-- injected "\n" characters are treated specially in `advance()` below so
@@ -333,7 +333,7 @@ function M.tokenize(lines, dialect)
 				advance()
 			end
 			emit("comment", start_row, start_col, "")
-		elseif mssql and c == "[" then
+		elseif sqlserver and c == "[" then
 			local start_row, start_col, text = scan_bracket_identifier()
 			emit("quoted_identifier", start_row, start_col, text)
 		elseif mysql and c == "`" then
@@ -349,7 +349,7 @@ function M.tokenize(lines, dialect)
 			-- identifiers, just with a different delimiter character.
 			local start_row, start_col, text = scan_delimited("'", mysql)
 			emit("string", start_row, start_col, text)
-		elseif not mysql and not mssql and c == "$" and dollar_delimiter() then
+		elseif not mysql and not sqlserver and c == "$" and dollar_delimiter() then
 			local start_row, start_col, text = scan_dollar_quoted(dollar_delimiter())
 			emit("string", start_row, start_col, text)
 		elseif is_digit(c) then
@@ -514,7 +514,7 @@ end
 -- SQL Server's GO command is a client-side batch separator, not T-SQL. Orbit
 -- accepts the word as ordinary SQL but rejects it when it occupies a line by
 -- itself (with an optional count/semicolon), outside strings and comments.
-function M.mssql_command_rows(lines)
+function M.sqlserver_command_rows(lines)
 	local eligible = {}
 	for row = 1, #lines do
 		eligible[row] = true
@@ -530,9 +530,9 @@ function M.mssql_command_rows(lines)
 	return eligible
 end
 
-function M.has_mssql_batch_separator(lines)
+function M.has_sqlserver_batch_separator(lines)
 	-- Go sqlcmd tracks multiline SQL strings/comments before matching commands.
-	local eligible = M.mssql_command_rows(lines)
+	local eligible = M.sqlserver_command_rows(lines)
 	for row, line in ipairs(lines) do
 		local command = line:match("^%s*(.-)%s*$")
 		if eligible[row] and (command:upper() == "GO" or command:upper():match("^GO +")) then

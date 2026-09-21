@@ -1,6 +1,6 @@
 # Orbit.nvim
 
-Orbit.nvim is a personal Neovim database query workspace for MSSQL, MySQL, PostgreSQL, SQLite, Trino, and Vertica. It provides statement execution, schema browsing, and formatted results through backend-specific Connectors.
+Orbit.nvim is a personal Neovim database query workspace for SQL Server, MySQL, PostgreSQL, Redis, SQLite, Trino, and Vertica. It provides statement execution, metadata-backed completion, schema browsing where applicable, and formatted results through backend-specific Connectors.
 
 ## Language
 
@@ -12,12 +12,12 @@ _Avoid_: connection, config, data source
 The backend-specific component selected by a connection profile's `kind`. It implements the capabilities supported by that backend using the profile's backend-specific options.
 _Avoid_: adapter, driver
 
-**MSSQL transport**:
-The execution mechanism used by the MSSQL Connector to communicate with SQL Server. A connection profile selects a transport when more than one is available.
+**SQL Server transport**:
+The execution mechanism used by the SQL Server Connector to communicate with SQL Server. A connection profile selects a transport when more than one is available.
 _Avoid_: Connector, driver
 
 **JDBC driver**:
-A Java library used by a JDBC-based MSSQL transport to communicate with SQL Server, such as jTDS. It is not an Orbit Connector or a standalone executable.
+A Java library used by a JDBC-based SQL Server transport to communicate with SQL Server, such as jTDS. It is not an Orbit Connector or a standalone executable.
 _Avoid_: Connector, transport
 
 **Profile file**:
@@ -38,7 +38,7 @@ A table or view exposed by a connection profile, identified by its catalog, sche
 A recognized kind of metadata for a schema object: columns, primary keys, foreign keys, or indexes. A connector exposes only the categories it supports for that object.
 
 **Qualified name**:
-The canonical SQL-pasteable identifier for a schema object. It is Connector-specific: MSSQL uses bracket-quoted schema and object names, prefixed by a bracket-quoted database for multi-database profiles; SQLite uses a quoted object name; PostgreSQL uses quoted schema and object names; MySQL uses backtick-quoted database and object names; and Trino uses quoted catalog, schema, and object names.
+The canonical SQL-pasteable identifier for a schema object. It is Connector-specific: SQL Server uses bracket-quoted schema and object names, prefixed by a bracket-quoted database for multi-database profiles; SQLite uses a quoted object name; PostgreSQL uses quoted schema and object names; MySQL uses backtick-quoted database and object names; and Trino uses quoted catalog, schema, and object names.
 _Avoid_: table name, object path
 
 **Completion qualifier**:
@@ -76,11 +76,11 @@ A Neovim buffer containing statements and optionally associated with a specific 
 _Avoid_: SQL file, editor buffer
 
 **Saved query**:
-A reusable `.sql` file contained within a saved query location. Orbit can open it as a query buffer and organize it within the configured saved query locations.
+A reusable `.sql` or `.redis` file contained within a saved query location. Orbit can open it as a query buffer and organize it within the configured saved query locations.
 _Avoid_: query file, saved file
 
 **Saved query location**:
-A named directory containing reusable `.sql` files that can be opened as query buffers.
+A named directory containing reusable `.sql` and `.redis` files that can be opened as query buffers.
 _Avoid_: save directory, save location
 
 **Workspace**:
@@ -110,3 +110,15 @@ _Avoid_: alias (bare), table nickname
 **Derived table**:
 A subquery given a table alias in a `FROM`/`JOIN` clause. Orbit recognizes the alias as valid but does not infer its columns.
 _Avoid_: subquery table, inline view
+
+**Redis logical database**:
+The numbered key namespace selected by a Redis connection profile. A Redis key belongs to exactly one logical database within that profile.
+_Avoid_: Redis schema, Redis catalog
+
+**Redis key index**:
+A connection-profile- and logical-database-scoped collection of Redis keys available to completion. It may be stale or incomplete relative to the live keyspace.
+_Avoid_: result completion, key cache
+
+**Redis key candidate**:
+A key from the Redis key index offered for a key argument in a Redis statement.
+_Avoid_: result value, generic value completion
