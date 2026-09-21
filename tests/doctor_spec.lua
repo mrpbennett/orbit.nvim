@@ -138,7 +138,7 @@ return {
 						authentication = { password = "secret" },
 					} } } }
 				end,
-				run = function(_, callback) callback({ code = 1, stdout = "", stderr = "driver class missing" }) end,
+				run = function(_, callback) callback({ code = 1, stdout = "", stderr = "driver class missing secret" }) end,
 				uname = function() return { sysname = "Linux", machine = "x86_64" } end,
 			}
 			doctor.run("sqlserver", { profile_path = "/profiles.json" }, function(value) report = value end,
@@ -147,7 +147,9 @@ return {
 		end
 		assert_match(report_for({ executable = function() return false end }), "Java executable not found")
 		assert_match(report_for({ filereadable = function() return false end }), "jTDS JAR not readable")
-		assert_match(report_for({}), "helper: driver class missing")
+		local helper_failure = report_for({})
+		assert_match(helper_failure, "helper: driver class missing %[REDACTED%]")
+		assert(not helper_failure:match("secret"))
 		assert_match(report_for({
 			run = function(_, callback) callback({ code = 1, stdout = "", stderr = "Orbit SQL Server helper requires Java 11 or newer" }) end,
 		}), "requires Java 11 or newer")
@@ -166,6 +168,22 @@ return {
 		})
 		assert_match(report, "credential: password or password_env is required")
 		assert_match(report, "cannot identify Microsoft Go sqlcmd")
+	end,
+	["doctor uses sqlcmd diagnostics without an SQL Server profile"] = function()
+		local report
+		doctor.run("sqlserver", { profile_path = "/profiles.json" }, function(value) report = value end, {
+			executable = function(command) return command == "sqlcmd" end,
+			exepath = function() return "/usr/bin/sqlcmd" end,
+			load_profiles = function() return { profiles = {} } end,
+			run = function(command, callback)
+				assert(vim.deep_equal(command, { "/usr/bin/sqlcmd", "--version" }))
+				callback({ code = 0, stdout = "Version: 1.8.0\n", stderr = "" })
+			end,
+			uname = function() return { sysname = "Linux", machine = "x86_64" } end,
+		})
+		assert_match(report, "%[OK%] sqlserver: /usr/bin/sqlcmd %(PATH%)")
+		assert(not report:match("credential:"))
+		assert_match(report, "version: 1%.8%.0")
 	end,
 
 	["doctor diagnoses every Connector and registers command completion"] = function()

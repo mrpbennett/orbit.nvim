@@ -266,6 +266,58 @@ function M.environment(options, inherited)
 	return M.sanitize_environment(options, inherited)
 end
 
+-- Diagnose the JDBC transport without opening a database connection. The
+-- runtime is supplied by Doctor so tests can replace process and filesystem
+-- access at the same seam used in production.
+function M.diagnose(options, runtime, callback)
+	local override = options.java_executable
+	local executable = override or "java"
+	local resolved = runtime.executable(executable) and runtime.exepath(executable) or ""
+	if resolved == "" and runtime.executable(executable) then
+		resolved = executable
+	end
+	local authentication = options.authentication or {}
+	local credential
+	if authentication.password_env then
+		local value = runtime.getenv(authentication.password_env)
+		credential = { environment = authentication.password_env, present = value ~= nil and value ~= "" }
+	elseif type(authentication.password) == "string" and authentication.password ~= "" then
+		credential = { configured = true }
+	else
+		credential = { missing = true }
+	end
+	local driver_path = options.driver_path or ""
+	local driver_found = runtime.filereadable(driver_path)
+	local facts = {
+		credential = credential,
+		executable = { found = resolved ~= "", source = override and "override" or "PATH", value = resolved ~= "" and resolved or executable },
+		prerequisites = { { found = driver_found, label = "jTDS JAR", value = driver_path } },
+	}
+	local findings = {}
+	if resolved == "" then
+		findings[#findings + 1] = { error = "Java executable not found", name = "helper" }
+	end
+	if not driver_found then
+		findings[#findings + 1] = { error = "jTDS JAR not readable", name = "helper" }
+	end
+	if #findings > 0 then
+		facts.findings = findings
+		return callback(facts)
+	end
+	local helper = M.helper_path()
+	if not helper then
+		facts.result = { error = "cannot locate the Orbit SQL Server Java helper", name = "helper" }
+		return callback(facts)
+	end
+	runtime.run({ resolved, "--class-path", driver_path, helper, "--doctor" }, function(result)
+		local version = vim.trim(((result.stdout or ""):match("[^\r\n]*") or "")):match("^Orbit SQL Server helper: (Java %d+; jTDS 1%.3%.1 loaded)$")
+		local stderr = vim.trim(((result.stderr or ""):match("[^\r\n]*") or ""))
+		facts.result = result.code == 0 and version and { name = "helper", value = version }
+			or { error = stderr ~= "" and stderr or "cannot load the Orbit helper and jTDS driver", name = "helper" }
+		callback(facts)
+	end, { clear_env = true, env = M.sanitize_environment(options, runtime.environ()) })
+end
+
 function M.session_exit_error(_, stderr)
 	return stderr and vim.trim(stderr) ~= "" and vim.trim(stderr) or nil
 end

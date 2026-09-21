@@ -1,5 +1,34 @@
 # Orbit.nvim v0.1 Plan
 
+## Main Merge Changelog 2026-09-21
+
+- [x] Review commits and current worktree changes against `main` for user-visible and breaking behavior.
+- [x] Consolidate merge-relevant breaking changes and recent additions under `CHANGELOG.md` `Unreleased`.
+- [x] Verify changelog scope and Markdown whitespace, then inspect the final diff.
+
+### Scope
+
+- Cover the `mssql` to `sqlserver` breaking rename, Redis Connector support, and SQL Server diagnostic transport deepening.
+
+### Review
+
+- `CHANGELOG.md` now records all branch-only user-visible changes under `Unreleased`; Redis entries were moved from the already-tagged `v0.3.0` section.
+- `git diff --check` passes. No implementation or test files were changed.
+- Do not alter unrelated in-progress implementation or test changes.
+
+## SQL Server Diagnostic Deepening 2026-09-21
+
+- [x] Keep SQL Server transport selection at the Connector seam for both execution and diagnostics.
+- [x] Move transport-specific diagnostic implementation behind that seam while Doctor retains report formatting and redaction.
+- [x] Add Connector-seam diagnostic coverage for sqlcmd and JDBC transports.
+- [x] Run Lua, Java-helper, and whitespace verification.
+
+### Review
+
+- `nvim --headless -u NONE -l tests/run.lua` passes the diagnostic coverage and retains three pre-existing failures: JDBC profile validation, JDBC request framing, and the Trino large-schema performance budget.
+- `bash tests/java_spec.sh` and `git diff --check` pass.
+- Final standards and design reviews returned `CLEAN` after resolving environment isolation, no-profile behavior, redaction ownership, and transport-specific failure ownership.
+
 ## SQL Server Terminology Migration 2026-09-19
 
 - [x] Replace the breaking public profile and Doctor kind `mssql` with `sqlserver`.

@@ -108,6 +108,49 @@ return {
     vim.env[name] = original
     assert(ok, test_err)
   end,
+  ["SQL Server diagnostics select the profile transport through the Connector seam"] = function()
+    local sqlserver = require("orbit.connectors.sqlserver")
+    local sqlcmd_command
+    sqlserver.diagnose({ password_env = "SQLSERVER_PASSWORD" }, {
+      executable = function(command) return command == "sqlcmd" end,
+      exepath = function() return "/custom/sqlcmd" end,
+      filereadable = function() return false end,
+      getenv = function(name) return name == "SQLSERVER_PASSWORD" and "secret" or nil end,
+      environ = function() return { PATH = "/bin", LD_PRELOAD = "/tmp/unsafe.so", SQLCMDINI = "/tmp/unsafe" } end,
+      run = function(command, callback, options)
+        sqlcmd_command = command
+        assert(options.clear_env and vim.deep_equal(options.env, { PATH = "/bin" }))
+        callback({ code = 0, stdout = "sqlcmd\nVersion: 1.8.0\n", stderr = "" })
+      end,
+    }, function(facts)
+      assert(vim.deep_equal(sqlcmd_command, { "/custom/sqlcmd", "--version" }))
+      assert(facts.executable.found and facts.executable.value == "/custom/sqlcmd")
+      assert(facts.credential.environment == "SQLSERVER_PASSWORD" and facts.credential.present)
+      assert(facts.result.name == "version" and facts.result.value == "1.8.0")
+    end)
+
+    local jdbc_command, jdbc_options
+    sqlserver.diagnose({
+      transport = "jdbc",
+      driver_path = "/drivers/jtds.jar",
+      authentication = { password_env = "SQLSERVER_PASSWORD" },
+    }, {
+      executable = function(command) return command == "java" end,
+      exepath = function() return "/custom/java" end,
+      filereadable = function(path) return path == "/drivers/jtds.jar" end,
+      getenv = function(name) return name == "SQLSERVER_PASSWORD" and "secret" or nil end,
+      environ = function() return { PATH = "/bin", SQLSERVER_PASSWORD = "secret", JAVA_TOOL_OPTIONS = "unsafe" } end,
+      run = function(command, callback, options)
+        jdbc_command, jdbc_options = command, options
+        callback({ code = 0, stdout = "Orbit SQL Server helper: Java 25; jTDS 1.3.1 loaded\n", stderr = "" })
+      end,
+    }, function(facts)
+      assert(jdbc_command[1] == "/custom/java" and jdbc_command[2] == "--class-path")
+      assert(jdbc_command[3] == "/drivers/jtds.jar" and jdbc_command[4]:match("OrbitSqlServer%.java$") and jdbc_command[5] == "--doctor")
+      assert(jdbc_options.clear_env and vim.deep_equal(jdbc_options.env, { PATH = "/bin" }))
+      assert(facts.prerequisites[1].found and facts.result.name == "helper")
+    end)
+  end,
   ["SQL Server JDBC framing preserves structured values and classifies fatal responses"] = function()
     local mssql = require("orbit.connectors.sqlserver")
     local options = { transport = "jdbc" }

@@ -131,10 +131,9 @@ function M.session_command(options)
 	return command
 end
 
--- Return a complete child environment with every inherited SQLCMD setting removed.
-function M.environment(options, inherited)
-	local resolved, err = password(options)
-	if not resolved then return nil, err end
+-- Remove ambient SQLCMD settings before any child process starts. Diagnostic
+-- commands do not need a password, while retained sessions add it separately.
+local function sanitized_environment(options, inherited)
 	local environment = {}
 	for name, value in pairs(inherited or vim.fn.environ()) do
 		local normalized = tostring(name):upper()
@@ -142,8 +141,87 @@ function M.environment(options, inherited)
 			environment[name] = value
 		end
 	end
+	return environment
+end
+
+-- Diagnostics do not need the user's complete process environment. Keep only
+-- basic OS and locale settings so sqlcmd cannot inherit process-injection
+-- variables while checking its version.
+local function diagnostic_environment(options, inherited)
+	local allowed = {
+		COMSPEC = true,
+		HOME = true,
+		LANG = true,
+		LC_ALL = true,
+		LOGNAME = true,
+		PATH = true,
+		PATHEXT = true,
+		SYSTEMROOT = true,
+		TEMP = true,
+		TMP = true,
+		TMPDIR = true,
+		TZ = true,
+		USER = true,
+		WINDIR = true,
+	}
+	local environment = {}
+	for name, value in pairs(sanitized_environment(options, inherited)) do
+		local normalized = tostring(name):upper()
+		if allowed[normalized] or normalized:match("^LC_") then
+			environment[name] = value
+		end
+	end
+	return environment
+end
+
+-- Return a complete child environment with every inherited SQLCMD setting removed.
+function M.environment(options, inherited)
+	local resolved, err = password(options)
+	if not resolved then return nil, err end
+	local environment = sanitized_environment(options, inherited)
 	environment.SQLCMDPASSWORD = resolved
 	return environment
+end
+
+-- Diagnose the sqlcmd transport without opening a database connection. The
+-- caller supplies runtime operations so Doctor and its tests cross the same
+-- transport seam without this module reaching into Neovim process state.
+function M.diagnose(options, runtime, callback)
+	local has_profile = options ~= nil
+	options = options or {}
+	local override = options.executable
+	local executable = override or "sqlcmd"
+	local resolved = runtime.executable(executable) and runtime.exepath(executable) or ""
+	if resolved == "" and runtime.executable(executable) then
+		resolved = executable
+	end
+	local credential
+	if not has_profile then
+		credential = nil
+	elseif options.password_env then
+		local value = runtime.getenv(options.password_env)
+		credential = { environment = options.password_env, present = value ~= nil and value ~= "" }
+	elseif type(options.password) == "string" and options.password ~= "" then
+		credential = { configured = true }
+	else
+		credential = { missing = true }
+	end
+	local facts = {
+		credential = credential,
+		executable = { found = resolved ~= "", source = override and "override" or "PATH", value = resolved ~= "" and resolved or executable },
+	}
+	if resolved == "" then
+		facts.findings = { { error = "executable not found", name = "version" } }
+		callback(facts)
+		return
+	end
+	runtime.run({ resolved, "--version" }, function(result)
+		local version = (result.stdout or ""):match("[Vv]ersion:%s*([^\r\n]+)")
+		local stderr = vim.trim(((result.stderr or ""):match("[^\r\n]*") or ""))
+		facts.result = result.code == 0 and version and { name = "version", value = version }
+			or { error = stderr ~= "" and stderr or "cannot identify Microsoft Go sqlcmd", name = "version" }
+		callback(facts)
+	end, { clear_env = true, env = diagnostic_environment(options, runtime.environ()) })
 end
 
 -- sqlcmd interprets client commands only when they appear in executable SQL

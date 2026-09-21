@@ -8,12 +8,19 @@ All notable changes to Orbit.nvim are documented in this file.
 
 - Renamed the Microsoft SQL Server connection-profile kind from `mssql` to `sqlserver`. Update every SQL Server profile and replace `:OrbitDoctor mssql` with `:OrbitDoctor sqlserver`; the former values are no longer accepted.
 
+### Added
+
+- Added a Redis Connector backed by user-installed `redis-cli`, with structured endpoint and TLS settings, environment-backed authentication, logical-database selection, one-shot RESP3 JSON execution, textual Result grids, and `.redis` saved queries.
+- Added cached Redis command and key completion through Blink. Orbit builds a bounded, profile- and logical-database-scoped key index using cursor-based `SCAN`, never automatic `KEYS`, and offers keys only in command metadata-defined key positions.
+
+### Changed
+
+- `:OrbitDoctor sqlserver` now delegates transport-specific prerequisite checks to the SQL Server Connector while retaining its existing safe, redacted report format. The selected `sqlcmd` or JDBC transport determines which executable, credential, driver, and version checks run; diagnostics still never connect to SQL Server.
+
 ## v0.3.0 - 2026-09-16
 
 ### Added
 
-- Added a Redis Connector backed by user-installed `redis-cli`, with structured endpoint, logical-database, environment-backed authentication, TLS, one-shot RESP3 JSON execution, `.redis` saved queries, and textual Result grids.
-- Added cached Redis command and key completion through Blink. Orbit prewarms a bounded, profile-scoped key index with cursor-based `SCAN`, never automatic `KEYS`, and uses server command metadata for key positions and readonly mutation classification.
 - Added an MSSQL Connector backed by user-installed Microsoft Go `sqlcmd`, with SQL authentication through a sanitized `SQLCMDPASSWORD` environment, mandatory encryption, an explicit unsafe certificate-trust bypass, a retained interactive session, schema browsing, object actions, bracket-qualified completion, and read-only Result grids.
 - Added an opt-in MSSQL JDBC transport using an Orbit-owned Java source helper and the user-provided jTDS 1.3.1 JDBC driver. Profiles can use structured SQL-password or domain-password authentication, JVM-trusted certificate-chain validation by default, retained sessions, and structured results with distinct SQL `NULL` values while omitted-transport profiles retain the existing `sqlcmd` behavior.
 - Added local Connector diagnostics through `:OrbitDoctor [kind]`; `:OrbitDoctor mssql` checks the configured user-installed executable, its version output, profile validation, and `password_env` presence without connecting.

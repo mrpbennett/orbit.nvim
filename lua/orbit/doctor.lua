@@ -2,7 +2,6 @@
 local M = {}
 
 local connector_defaults = {
-	sqlserver = { executable = "sqlcmd", version_args = { "--version" } },
 	mysql = { executable = "mysql", version_args = { "--version" } },
 	postgres = { executable = "psql", version_args = { "--version" } },
 	redis = { executable = "redis-cli", version_args = { "--version" } },
@@ -45,26 +44,11 @@ local function first_line(value)
 	return vim.trim((value or ""):match("[^\r\n]*") or "")
 end
 
-local function jdbc_profile(profile)
-	return profile and profile.kind == "sqlserver" and profile.options.transport == "jdbc"
-end
-
-local function version_text(kind, output, profile)
-	if jdbc_profile(profile) then
-		local text = first_line(output)
-		return text:match("^Orbit SQL Server helper: (Java %d+; jTDS 1%.3%.1 loaded)$")
-	end
-	if kind == "sqlserver" then
-		return output:match("[Vv]ersion:%s*([^\r\n]+)")
-	end
-	return first_line(output)
-end
-
 local function redact(value, profile, deps)
 	if not profile then
 		return value
 	end
-	local credentials = jdbc_profile(profile) and profile.options.authentication or profile.options
+	local credentials = type(profile.options.authentication) == "table" and profile.options.authentication or profile.options
 	local secrets = { credentials and credentials.password }
 	if credentials and credentials.password_env then
 		secrets[#secrets + 1] = deps.getenv(credentials.password_env)
@@ -78,10 +62,6 @@ local function redact(value, profile, deps)
 end
 
 local function selected_executable(kind, profile, deps)
-	if jdbc_profile(profile) then
-		local override = profile.options.java_executable
-		return override or "java", override and "override" or "PATH"
-	end
 	local override = profile and profile.options and profile.options.executable
 	if kind == "mysql" and not override and profile and profile.options.client_family == "mariadb" then
 		return "mariadb", "PATH"
@@ -89,11 +69,56 @@ local function selected_executable(kind, profile, deps)
 	return override or connector_defaults[kind].executable, override and "override" or "PATH"
 end
 
+-- Doctor formats the safe facts returned by the SQL Server Connector. Transport
+-- selection, prerequisite checks, environment handling, and invocation stay
+-- behind the Connector seam.
+local function append_sqlserver_facts(entry, label, facts, profile, deps)
+	local executable = facts.executable
+	entry[#entry + 1] = string.format(
+		"%s %s: %s (%s)",
+		executable.found and "[OK]" or "[FAIL]",
+		label,
+		executable.value,
+		executable.source
+	)
+	if facts.credential and facts.credential.environment then
+		entry[#entry + 1] = string.format(
+			"%s %s environment %s",
+			facts.credential.present and "[OK]" or "[FAIL]",
+			label,
+			facts.credential.environment
+		)
+	elseif facts.credential and facts.credential.configured then
+		entry[#entry + 1] = "[OK] " .. label .. " credential: profile password configured"
+	elseif facts.credential then
+		entry[#entry + 1] = "[FAIL] " .. label .. " credential: password or password_env is required"
+	end
+	for _, prerequisite in ipairs(facts.prerequisites or {}) do
+		entry[#entry + 1] = string.format(
+			"%s %s %s: %s",
+			prerequisite.found and "[OK]" or "[FAIL]",
+			label,
+			prerequisite.label,
+			prerequisite.value
+		)
+	end
+	if facts.result then
+		if facts.result.value then
+			entry[#entry + 1] = string.format("[OK] %s %s: %s (compatibility unverified)", label, facts.result.name, redact(facts.result.value, profile, deps))
+		else
+			entry[#entry + 1] = "[FAIL] " .. label .. " " .. facts.result.name .. ": " .. redact(facts.result.error, profile, deps)
+		end
+	end
+	for _, finding in ipairs(facts.findings or {}) do
+		entry[#entry + 1] = "[FAIL] " .. label .. " " .. finding.name .. ": " .. redact(finding.error, profile, deps)
+	end
+end
+
 -- Diagnose without running SQL or opening a database connection. Only each
 -- executable's version mode is invoked; environment values are never printed.
 function M.run(kind, config, callback, overrides)
 	callback = callback or function() end
-	if kind and not connector_defaults[kind] then
+	if kind and not vim.tbl_contains(kinds, kind) then
 		callback(nil, "unsupported connector kind: " .. tostring(kind))
 		return
 	end
@@ -143,6 +168,15 @@ function M.run(kind, config, callback, overrides)
 	for index, check in ipairs(checks) do
 		local profile = check.profile or nil
 		local label = check.kind .. (profile and (" profile " .. string.format("%q", profile.name)) or "")
+		if check.kind == "sqlserver" then
+			require("orbit.connectors.sqlserver").diagnose(profile and profile.options or nil, deps, function(facts)
+				local entry = {}
+				append_sqlserver_facts(entry, label, facts, profile, deps)
+				results[index] = entry
+				pending = pending - 1
+				complete()
+			end)
+		else
 		local executable, source = selected_executable(check.kind, profile, deps)
 		local resolved = deps.executable(executable) and deps.exepath(executable) or ""
 		if resolved == "" and deps.executable(executable) then
@@ -151,17 +185,6 @@ function M.run(kind, config, callback, overrides)
 		local entry = { string.format("%s %s: %s (%s)", resolved ~= "" and "[OK]" or "[FAIL]", label, resolved ~= "" and resolved or executable, source) }
 		results[index] = entry
 
-		if check.kind == "sqlserver" and profile then
-			local credentials = jdbc_profile(profile) and profile.options.authentication or profile.options
-			if credentials and credentials.password_env then
-				local value = deps.getenv(credentials.password_env)
-				entry[#entry + 1] = string.format("%s %s environment %s", value ~= nil and value ~= "" and "[OK]" or "[FAIL]", label, credentials.password_env)
-			elseif credentials and type(credentials.password) == "string" and credentials.password ~= "" then
-				entry[#entry + 1] = "[OK] " .. label .. " credential: profile password configured"
-			else
-				entry[#entry + 1] = "[FAIL] " .. label .. " credential: password or password_env is required"
-			end
-		end
 		if check.kind == "redis" and profile and profile.options.password_env then
 			local value = deps.getenv(profile.options.password_env)
 			entry[#entry + 1] = string.format(
@@ -172,67 +195,32 @@ function M.run(kind, config, callback, overrides)
 			)
 		end
 
-		local dependency_missing = false
-		if jdbc_profile(profile) then
-			local readable = deps.filereadable(profile.options.driver_path)
-			entry[#entry + 1] = string.format(
-				"%s %s jTDS JAR: %s",
-				readable and "[OK]" or "[FAIL]",
-				label,
-				profile.options.driver_path
-			)
-			dependency_missing = not readable
-		end
-
-		if resolved == "" or dependency_missing then
-			if jdbc_profile(profile) then
-				if resolved == "" then entry[#entry + 1] = "[FAIL] " .. label .. " helper: Java executable not found" end
-				if dependency_missing then entry[#entry + 1] = "[FAIL] " .. label .. " helper: jTDS JAR not readable" end
-			else
-				entry[#entry + 1] = "[FAIL] " .. label .. " version: executable not found"
-			end
+		if resolved == "" then
+			entry[#entry + 1] = "[FAIL] " .. label .. " version: executable not found"
 			pending = pending - 1
 			complete()
 		else
 			local command = { resolved }
-			if jdbc_profile(profile) then
-				vim.list_extend(command, {
-					"--class-path",
-					profile.options.driver_path,
-					require("orbit.connectors.sqlserver_jdbc").helper_path(),
-					"--doctor",
-				})
-			else
-				vim.list_extend(command, connector_defaults[check.kind].version_args)
-			end
+			vim.list_extend(command, connector_defaults[check.kind].version_args)
 			local run_options
-			if jdbc_profile(profile) then
-				run_options = {
-					clear_env = true,
-					env = require("orbit.connectors.sqlserver_jdbc").sanitize_environment(profile.options, deps.environ()),
-				}
-			elseif check.kind == "redis" then
+			if check.kind == "redis" then
 				run_options = {
 					clear_env = true,
 					env = require("orbit.connectors.redis").sanitize_environment(profile and profile.options or {}, deps.environ()),
 				}
 			end
 			deps.run(command, function(result)
-				local version = redact(version_text(check.kind, result.stdout or "", profile) or "", profile, deps)
+				local version = redact(first_line(result.stdout or ""), profile, deps)
 				if result.code == 0 and version ~= "" then
-					local suffix = check.kind == "sqlserver" and " (compatibility unverified)" or ""
-					local check_name = jdbc_profile(profile) and "helper" or "version"
-					entry[#entry + 1] = string.format("[OK] %s %s: %s%s", label, check_name, version, suffix)
+					entry[#entry + 1] = string.format("[OK] %s version: %s", label, version)
 				else
 					local stderr = redact(first_line(result.stderr), profile, deps)
-					local fallback = jdbc_profile(profile) and "cannot load the Orbit helper and jTDS driver"
-						or check.kind == "sqlserver" and "cannot identify Microsoft Go sqlcmd"
-						or "version command failed"
-					entry[#entry + 1] = "[FAIL] " .. label .. (jdbc_profile(profile) and " helper: " or " version: ") .. (stderr ~= "" and stderr or fallback)
+					entry[#entry + 1] = "[FAIL] " .. label .. " version: " .. (stderr ~= "" and stderr or "version command failed")
 				end
 				pending = pending - 1
 				complete()
 			end, run_options)
+		end
 		end
 	end
 end

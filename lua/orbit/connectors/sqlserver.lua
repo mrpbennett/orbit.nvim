@@ -41,6 +41,12 @@ function M.validate_options(profile_name, options)
 	return transport(options).validate_options(profile_name, options)
 end
 
+-- Keep transport diagnostics at the Connector seam so Doctor observes the
+-- same profile-selected transport as statement execution.
+function M.diagnose(options, runtime, callback)
+	return transport(options).diagnose(options, runtime, callback)
+end
+
 function M.session_command(options)
 	return transport(options).session_command(options)
 end
