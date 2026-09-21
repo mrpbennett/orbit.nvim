@@ -720,6 +720,8 @@ require("orbit").setup({
 | `a`             | Select an action for the selected table, view, or saved query.                                              |
 | `y`             | Copy the qualified selected table or view name.                                                             |
 | `P`             | Preview the selected saved query without opening or binding it.                                             |
+| `<C-x>`         | Open the selected saved query in a horizontal split.                                                        |
+| `<C-v>`         | Open the selected saved query in a vertical split.                                                          |
 | `/`             | Focus the filter from the sidebar or a Workspace query buffer.                                              |
 | `r`             | Reload the profile file and refresh its schema or Redis key index, or rescan saved queries.                 |
 | `Z`             | Collapse the open profile metadata tree.                                                                    |

@@ -977,12 +977,17 @@ end
 -- characters Vimscript would otherwise interpret specially), selects a
 -- filetype from the extension, configures the buffer (completion, "/" mapping,
 -- workspace tag), and binds the currently selected profile to it.
-local function open_saved_query(state, node)
+local function open_saved_query(state, node, split)
 	if not state.selected then
 		vim.notify("Expand an Orbit profile before opening a saved query", vim.log.levels.WARN)
 		return
 	end
 	vim.api.nvim_set_current_win(ensure_query_window(state))
+	if split == "horizontal" then
+		vim.cmd("belowright new")
+	elseif split == "vertical" then
+		vim.cmd("rightbelow vnew")
+	end
 	vim.cmd.edit(vim.fn.fnameescape(node.path))
 	local buffer = vim.api.nvim_get_current_buf()
 	vim.bo[buffer].filetype = node.name:lower():sub(-6) == ".redis" and "redis" or "sql"
@@ -1208,7 +1213,7 @@ local function show_help(state)
 		"Orbit Workspace",
 		"",
 		"Sidebar: <CR> bind/open, h/l collapse/expand, Z collapse schema, n new query, r refresh",
-		"Table: s sample, a actions, y copy name. Saved query: a actions, P preview. / filter, q close",
+		"Table: s sample, a actions, y copy name. Saved query: a actions, P preview, <C-x>/<C-v> split. / filter, q close",
 		"Results: h/j/k/l cells, y copy, <CR> inspect, <C-d>/<C-u> page",
 		"Use your normal Neovim window mappings to move between panels.",
 	})
@@ -1234,8 +1239,9 @@ end
 -- Wire up all the buffer-local behavior for the sidebar buffer: the
 -- "live filter box" mechanism, and every normal-mode keymap that makes
 -- the tree interactive (h/l collapse/expand, <CR> activate, double
--- click, r refresh, n new query, Z collapse schema, s/a/y table actions,
--- P preview saved query, ? help, q close). Called exactly once per
+-- click, r refresh, n new query, Z collapse schema, s/a/y table actions, P
+-- preview saved query, <C-x>/<C-v> split-open saved query, ? help, q close).
+-- Called exactly once per
 -- workspace, from M.open.
 --   state: workspace state table; this function captures it in closures
 --     for all the nested helper functions and keymap callbacks below, so
@@ -1479,6 +1485,16 @@ local function configure_sidebar(state)
 	vim.keymap.set("n", "n", function()
 		new_query(state)
 	end, { buffer = state.sidebar, silent = true, nowait = true, desc = "New Orbit query" })
+	-- Match LazyVim's picker actions: open the selected Saved query in a new
+	-- horizontal or vertical query split while retaining the existing query pane.
+	for key, split in pairs({ ["<C-x>"] = "horizontal", ["<C-v>"] = "vertical" }) do
+		vim.keymap.set("n", key, function()
+			local node = current_node()
+			if node and node.kind == "saved_query" then
+				open_saved_query(state, node, split)
+			end
+		end, { buffer = state.sidebar, silent = true, nowait = true, desc = "Open Orbit saved query in " .. split .. " split" })
+	end
 	-- "Z" keymap: collapse whichever profile's schema tree is expanded,
 	-- regardless of where the cursor currently is (unlike "h", which only
 	-- collapses the node under the cursor).

@@ -1,5 +1,21 @@
 # Orbit.nvim v0.1 Plan
 
+## Workspace Saved-Query Split Mappings 2026-09-21
+
+- [x] Add Workspace mappings that open Saved queries in splits using `<C-x>` and `<C-v>`.
+- [x] Cover the mapping's SQL filetype and selected-profile binding behavior.
+- [x] Document the default mapping and run focused verification.
+
+### Scope
+
+- Preserve the sidebar's existing `n` mapping and all ordinary non-Workspace buffer behavior.
+- Use the existing Saved query identity and profile-binding flow rather than generic filesystem file pickers.
+
+### Review
+
+- `<C-x>` opens the selected Saved query below the existing query window; `<C-v>` opens it to the right. Both reuse the Saved-query profile-binding and Workspace-ownership path.
+- The new Workspace regression passes. `git diff --check` passes. The complete Lua suite retains only its three pre-existing failures: JDBC profile validation, JDBC request framing, and the Trino large-schema performance budget.
+
 ## Main Merge Changelog 2026-09-21
 
 - [x] Review commits and current worktree changes against `main` for user-visible and breaking behavior.

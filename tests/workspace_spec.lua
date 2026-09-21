@@ -882,6 +882,52 @@ return {
     assert(ok, err)
   end,
 
+  ["workspace maps LazyVim Saved-query split actions"] = function()
+    local original_tabpage = vim.api.nvim_get_current_tabpage()
+    local profile_path = vim.fn.tempname()
+    local directory = vim.fn.tempname()
+    local query_path = directory .. "/report.sql"
+    assert(vim.uv.fs_mkdir(directory, 448))
+    vim.fn.writefile({ "SELECT 42;" }, query_path)
+    assert(profiles.write(profile_path, {
+      version = 1,
+      profiles = { { name = "local", kind = "sqlite", options = { path = ":memory:" } } },
+    }))
+    local state
+    local ok, err = xpcall(function()
+      state = workspace.open({
+        profile_path = profile_path,
+        saved_query_dirs = { { name = "Team queries", path = directory } },
+      })
+      vim.api.nvim_set_current_win(state.sidebar_window)
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "local")), 0 })
+      vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<CR>", true, false, true), "mx", false)
+
+      vim.api.nvim_set_current_win(state.sidebar_window)
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "Team queries")), 0 })
+      vim.api.nvim_feedkeys("l", "mx", false)
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "report.sql")), 0 })
+      vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-x>", true, false, true), "mx", false)
+      local horizontal_buffer = vim.api.nvim_get_current_buf()
+      assert(vim.api.nvim_buf_get_name(horizontal_buffer) == query_path)
+      assert(vim.bo[horizontal_buffer].filetype == "sql")
+      assert(vim.b[horizontal_buffer].orbit_profile == "local")
+
+      vim.api.nvim_set_current_win(state.sidebar_window)
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "report.sql")), 0 })
+      vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-v>", true, false, true), "mx", false)
+      local vertical_buffer = vim.api.nvim_get_current_buf()
+      assert(vim.api.nvim_buf_get_name(vertical_buffer) == query_path)
+      assert(vim.bo[vertical_buffer].filetype == "sql")
+      assert(vim.b[vertical_buffer].orbit_profile == "local")
+    end, debug.traceback)
+    if state and vim.api.nvim_tabpage_is_valid(state.tabpage) then
+      workspace.close(state.tabpage)
+    end
+    vim.api.nvim_set_current_tabpage(original_tabpage)
+    assert(ok, err)
+  end,
+
   ["workspace saves a query into a selected saved query directory"] = function()
     local original_tabpage = vim.api.nvim_get_current_tabpage()
     local original_select = vim.ui.select
