@@ -67,6 +67,26 @@ return {
     vim.api.nvim_win_close(opened.window, true)
   end,
 
+  ["results.open renders JSON documents in the reusable result window"] = function()
+    local first = results.open({ { id = 1 } }, { height = 3 })
+    local opened = results.open({}, {
+      document = {
+        syntax = "json",
+        lines = { "{", '  "key": [', '    "value"', "  ]", "}" },
+      },
+      height = 5,
+    })
+
+    assert(first.window == opened.window)
+    assert(vim.bo[opened.buffer].filetype == "orbit-results")
+    assert(vim.bo[opened.buffer].syntax == "json")
+    assert_equal(vim.api.nvim_buf_get_lines(opened.buffer, 0, -1, false), {
+      "{", '  "key": [', '    "value"', "  ]", "}",
+    })
+
+    vim.api.nvim_win_close(opened.window, true)
+  end,
+
   ["results.open does not leave a listed placeholder buffer"] = function()
     local listed_before = {}
     for _, info in ipairs(vim.fn.getbufinfo({ buflisted = 1 })) do

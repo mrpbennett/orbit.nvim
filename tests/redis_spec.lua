@@ -67,19 +67,83 @@ return {
 		assert(redis.quote_argument("user's") == [["user's"]])
 	end,
 
-	["Redis Connector projects JSON replies into textual Result rows"] = function()
+	["Redis Connector preserves decoded replies and emits pretty JSON documents"] = function()
 		local keys, key_err, metadata = redis.parse('[["ignored"],"capture:one"]')
 		assert(key_err == nil)
 		assert(vim.deep_equal(keys, { { value = '["ignored"]' }, { value = "capture:one" } }))
 		assert(vim.deep_equal(metadata.columns, { "value" }))
 		assert(vim.deep_equal(metadata.redis_reply, { { "ignored" }, "capture:one" }))
+		assert(vim.deep_equal(metadata.document, {
+			syntax = "json",
+			lines = {
+				"[",
+				'  [',
+				'    "ignored"',
+				'  ],',
+				'  "capture:one"',
+				"]",
+			},
+		}))
 
-		local scalar, scalar_err = redis.parse('"hello"')
+		local scalar, scalar_err, scalar_metadata = redis.parse('"hello"')
 		assert(scalar_err == nil and scalar[1].value == "hello")
+		assert(vim.deep_equal(scalar_metadata.document.lines, { '"hello"' }))
+		local encoded_rows, encoded_err, encoded_metadata = redis.parse(
+			'"{\\"name\\":\\"Ada\\",\\"roles\\":[\\"admin\\"]}"'
+		)
+		assert(encoded_err == nil)
+		assert(encoded_rows[1].value == '{"name":"Ada","roles":["admin"]}')
+		assert(encoded_metadata.redis_reply == '{"name":"Ada","roles":["admin"]}')
+		assert(vim.deep_equal(encoded_metadata.document.lines, {
+			"{",
+			'  "name": "Ada",',
+			'  "roles": [',
+			'    "admin"',
+			"  ]",
+			"}",
+		}))
+		local encoded_array = select(3, redis.parse('"[{\\"id\\":1}]"'))
+		assert(vim.deep_equal(encoded_array.document.lines, {
+			"[",
+			"  {",
+			'    "id": 1',
+			"  }",
+			"]",
+		}))
+		local encoded_scalar = select(3, redis.parse('"true"'))
+		assert(vim.deep_equal(encoded_scalar.document.lines, { '"true"' }))
+		local malformed_inner = select(3, redis.parse('"{"'))
+		assert(malformed_inner.redis_reply == "{")
+		assert(vim.deep_equal(malformed_inner.document.lines, { '"{"' }))
+		local null_rows, null_err, null_metadata = redis.parse("null")
+		assert(null_err == nil and null_rows[1].value == vim.NIL)
+		assert(vim.deep_equal(null_metadata.document.lines, { "null" }))
 		local map, map_err, map_metadata = redis.parse('{"second":2,"first":1}')
 		assert(map_err == nil)
 		assert(vim.deep_equal(map, { { key = "first", value = 1 }, { key = "second", value = 2 } }))
 		assert(vim.deep_equal(map_metadata.columns, { "key", "value" }))
+		assert(vim.deep_equal(map_metadata.document.lines, {
+			"{",
+			'  "second": 2,',
+			'  "first": 1',
+			"}",
+		}))
+
+		local escaped = select(3, redis.parse('{"message":"a { brace } and \\"quote\\""}'))
+		assert(vim.deep_equal(escaped.document.lines, {
+			"{",
+			'  "message": "a { brace } and \\"quote\\""',
+			"}",
+		}))
+		local _, empty_err, empty_metadata = redis.parse('{"array":[],"object":{},"enabled":true}')
+		assert(empty_err == nil)
+		assert(vim.deep_equal(empty_metadata.document.lines, {
+			"{",
+			'  "array": [],',
+			'  "object": {},',
+			'  "enabled": true',
+			"}",
+		}))
 	end,
 
 	["Redis completion offers commands and indexed keys only in key positions"] = function()

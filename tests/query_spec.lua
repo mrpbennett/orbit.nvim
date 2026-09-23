@@ -79,7 +79,7 @@ return {
 			assert(confirm(statement), statement)
 		end
 	end,
-	["query propagates ordered Connector columns to rendering"] = function()
+	["query propagates Connector presentation metadata to rendering"] = function()
 		local original = {
 			connected = runner.connected,
 			finish = feedback.finish,
@@ -102,6 +102,7 @@ return {
 		local notifications = {}
 		local metadata = {
 			columns = { "zeta", "alpha" },
+			document = { syntax = "json", lines = { "{}" } },
 		}
 
 		runner.connected = function() return false end
@@ -126,6 +127,7 @@ return {
 			})
 			assert(rendered and #rendered.rows == 0)
 			assert(vim.deep_equal(rendered.options.columns, { "zeta", "alpha" }))
+			assert(rendered.options.document == metadata.document)
 			assert(vim.deep_equal(notifications, {}))
 			assert(completion:match("0 rows in 0s"), completion)
 		end, debug.traceback)

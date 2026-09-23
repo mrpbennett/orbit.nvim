@@ -1,8 +1,8 @@
 -- orbit/results.lua
 --
 -- This module owns the "results" scratch buffer/window: the split at the
--- bottom of a tabpage that shows the rows returned by a SQL query (or a
--- sampled table from the workspace sidebar), formatted as a plain-text grid.
+-- bottom of a tabpage that shows tabular rows as a plain-text grid or a
+-- Connector-provided read-only document such as a Redis JSON reply.
 --
 -- It does NOT know how to talk to a database, and it does NOT know how to
 -- format a table of rows into aligned text columns -- both of those jobs are
@@ -192,6 +192,8 @@ end
 --                        :e! to reload, undo, etc. If falsy, the results are
 --                        read-only (just for browsing/copying/inspecting).
 --     columns          - explicit list of column names/order to render.
+--     document         - optional read-only `{ lines, syntax }` content;
+--                        bypasses grid formatting and cell navigation.
 --     profile / profile_name / source_name / elapsed / read_only_reason -
 --                        used only for the descriptive header/footer text.
 --     confirm_mutations - if not explicitly false, prompts the user with a
@@ -222,6 +224,7 @@ end
 --     BufReadCmd.
 function M.open(rows, options)
   options = options or {}
+  local document = options.document
   -- Remember where the user currently is so we can jump back there once
   -- the results window has been populated (unless options.focus asks us to
   -- stay in the results window instead).
@@ -266,7 +269,7 @@ function M.open(rows, options)
   -- up (e.g. if the previous result was editable but this one is read-only,
   -- or the model instance changed) so stale closures don't linger.
   -- pcall guards against these simply not existing yet (first time through).
-  for _, lhs in ipairs({ "i", "o", "O", "dd", "d", "V", "<Esc>", "u", "gg", "G" }) do
+  for _, lhs in ipairs({ "<CR>", "y", "h", "j", "k", "l", "i", "o", "O", "dd", "d", "V", "<Esc>", "u", "gg", "G" }) do
     pcall(vim.keymap.del, "n", lhs, { buffer = buffer })
   end
   pcall(vim.api.nvim_clear_autocmds, { group = "OrbitResults" .. buffer, buffer = buffer })
@@ -274,7 +277,7 @@ function M.open(rows, options)
   -- tracks per-row state (unchanged/inserted/modified/deleted) and undo
   -- history. In read-only mode there's no model at all -- `model` stays nil
   -- and is used throughout this function as the read-only/editable switch.
-  local model = options.editable and editable_result.new(rows) or nil
+  local model = options.editable and not document and editable_result.new(rows) or nil
   -- These are populated by render() below and read by the keymap callbacks
   -- defined further down; they're declared here (as upvalues) so every
   -- closure in this function shares and sees the latest values.
@@ -325,6 +328,16 @@ function M.open(rows, options)
   -- temporarily lifted), sets the buffer's `modified` flag, clears and
   -- re-applies highlights, and optionally moves the window cursor.
   local function render(cursor)
+    if document then
+      grid = { columns = {}, rows = {}, raw_rows = {}, limited = false }
+      widths = {}
+      vim.bo[buffer].modifiable = true
+      vim.api.nvim_buf_set_lines(buffer, 0, -1, false, document.lines)
+      vim.bo[buffer].modifiable = false
+      vim.bo[buffer].modified = false
+      vim.api.nvim_buf_clear_namespace(buffer, -1, 0, -1)
+      return
+    end
     -- In editable mode we render from the model's *visible* rows (i.e.
     -- excluding rows marked "deleted", which are kept around only so undo
     -- can bring them back); in read-only mode we just use the original
@@ -424,7 +437,10 @@ function M.open(rows, options)
   -- "wipe" means: once this buffer is no longer displayed in any window,
   -- delete it outright rather than leaving it as a hidden buffer.
   vim.bo[buffer].bufhidden = "wipe"
+  -- Keep the ownership filetype stable because Workspace and Structure use it
+  -- to avoid treating the persistent result window as an editor window.
   vim.bo[buffer].filetype = "orbit-results"
+  vim.bo[buffer].syntax = document and document.syntax or ""
   vim.api.nvim_win_set_buf(window, buffer)
   -- Now that the buffer is actually showing in `window`, repaint and put
   -- the cursor on the first cell (row 1, column 1).
@@ -556,6 +572,17 @@ function M.open(rows, options)
   vim.keymap.set("n", "l", function()
     move_cell(window, grid, widths, 0, 1)
   end, { buffer = buffer, silent = true, nowait = true, desc = "Move Orbit cell right" })
+  if document then
+    -- A document has no cells, so retain normal text movement and copy the
+    -- complete JSON reply rather than a cursor-dependent grid value.
+    for _, lhs in ipairs({ "<CR>", "h", "j", "k", "l" }) do
+      vim.keymap.del("n", lhs, { buffer = buffer })
+    end
+    vim.keymap.set("n", "y", function()
+      vim.fn.setreg('"', table.concat(document.lines, "\n"))
+      vim.notify("Orbit result copied")
+    end, { buffer = buffer, silent = true, nowait = true, desc = "Copy Orbit result" })
+  end
   -- Everything below this point is only relevant when the results are
   -- editable (there's a `model` to mutate) -- read-only results have no
   -- add/delete/save/undo/reload affordances.

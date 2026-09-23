@@ -10,11 +10,12 @@ All notable changes to Orbit.nvim are documented in this file.
 
 ### Added
 
-- Added a Redis Connector backed by user-installed `redis-cli`, with structured endpoint and TLS settings, environment-backed authentication, logical-database selection, one-shot RESP3 JSON execution, textual Result grids, and `.redis` saved queries.
+- Added a Redis Connector backed by user-installed `redis-cli`, with structured endpoint and TLS settings, environment-backed authentication, logical-database selection, one-shot RESP3 JSON execution, pretty JSON result documents, and `.redis` saved queries.
 - Added cached Redis command and key completion through Blink. Orbit builds a bounded, profile- and logical-database-scoped key index using cursor-based `SCAN`, never automatic `KEYS`, and offers keys only in command metadata-defined key positions.
 
 ### Changed
 
+- Redis strings containing serialized JSON objects or arrays now render as pretty inner JSON while ordinary and scalar JSON strings remain strings.
 - `:OrbitDoctor sqlserver` now delegates transport-specific prerequisite checks to the SQL Server Connector while retaining its existing safe, redacted report format. The selected `sqlcmd` or JDBC transport determines which executable, credential, driver, and version checks run; diagnostics still never connect to SQL Server.
 
 ## v0.3.0 - 2026-09-16

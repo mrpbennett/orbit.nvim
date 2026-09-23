@@ -310,16 +310,96 @@ local function display_value(value)
 	return value
 end
 
--- redis-cli --json preserves the reply shape for metadata consumers. The
--- Result grid receives a predictable textual projection of that same reply.
+-- Format validated redis-cli JSON without decoding it a second time. Walking
+-- the source preserves array and object-key order while adding readable space.
+local function pretty_json(json)
+	local output = {}
+	local indent = 0
+	local in_string = false
+	local escaped = false
+	local empty = {}
+	local function append(value)
+		output[#output + 1] = value
+	end
+	local function newline()
+		append("\n" .. string.rep("  ", indent))
+	end
+	local function next_non_space(index)
+		for next_index = index + 1, #json do
+			local character = json:sub(next_index, next_index)
+			if not character:match("%s") then
+				return character
+			end
+		end
+	end
+
+	for index = 1, #json do
+		local character = json:sub(index, index)
+		if in_string then
+			append(character)
+			if escaped then
+				escaped = false
+			elseif character == "\\" then
+				escaped = true
+			elseif character == '"' then
+				in_string = false
+			end
+		elseif character == '"' then
+			in_string = true
+			append(character)
+		elseif character == "{" or character == "[" then
+			append(character)
+			local closing = character == "{" and "}" or "]"
+			empty[#empty + 1] = next_non_space(index) == closing and "empty" or "nonempty"
+			if empty[#empty] == "nonempty" then
+				indent = indent + 1
+				newline()
+			end
+		elseif character == "}" or character == "]" then
+			local container = table.remove(empty)
+			if container == "nonempty" then
+				indent = indent - 1
+				newline()
+			end
+			append(character)
+		elseif character == "," then
+			append(character)
+			newline()
+		elseif character == ":" then
+			append(": ")
+		elseif not character:match("%s") then
+			append(character)
+		end
+	end
+
+	return table.concat(output)
+end
+
+-- redis-cli --json preserves the decoded reply for metadata consumers while
+-- the result window receives the same native structure as a JSON document.
 function M.parse(output)
 	local trimmed = vim.trim(output or "")
 	if trimmed == "" then
-		return {}, nil, { columns = { "value" }, redis_reply = vim.NIL }
+		return {}, nil, {
+			columns = { "value" },
+			document = { syntax = "json", lines = { "null" } },
+			redis_reply = vim.NIL,
+		}
 	end
 	local ok, reply = pcall(vim.json.decode, trimmed)
 	if not ok then
 		return nil, "redis-cli output is not valid JSON"
+	end
+	local document_json = trimmed
+	if type(reply) == "string" then
+		local inner = vim.trim(reply)
+		local opening = inner:sub(1, 1)
+		if opening == "{" or opening == "[" then
+			local inner_ok, inner_value = pcall(vim.json.decode, inner)
+			if inner_ok and type(inner_value) == "table" then
+				document_json = inner
+			end
+		end
 	end
 	local rows = {}
 	local columns = { "value" }
@@ -337,7 +417,11 @@ function M.parse(output)
 			rows[#rows + 1] = { key = key, value = display_value(reply[key]) }
 		end
 	end
-	return rows, nil, { columns = columns, redis_reply = reply }
+	return rows, nil, {
+		columns = columns,
+		document = { syntax = "json", lines = vim.split(pretty_json(document_json), "\n", { plain = true }) },
+		redis_reply = reply,
+	}
 end
 
 function M.requires_confirmation(statement, profile)

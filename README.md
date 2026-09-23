@@ -9,7 +9,7 @@ It's also a project to help me learn Lua.</p></blockquote>
 
 ### Your database revolves around your editor, not the other way around.
 
-Orbit runs statements through backend-specific Connectors using user-installed database clients. It retains one connection per profile where the client supports it, keeps profiles per query buffer, browses schemas, completes cached objects and Redis keys, and renders normalized results in a navigable grid.
+Orbit runs statements through backend-specific Connectors using user-installed database clients. It retains one connection per profile where the client supports it, keeps profiles per query buffer, browses schemas, completes cached objects and Redis keys, and renders results in a reusable result window.
 
 ![preview](./assets/preview.png)
 
@@ -349,7 +349,7 @@ Set `tls = true` to enable TLS. Optional `cacert` and `cacertdir` are mutually e
 
 Binding the profile asynchronously runs `COMMAND` and cursor-based `SCAN MATCH <key_pattern> COUNT <scan_count>`. The Redis key index is in memory, scoped to the complete profile and logical database, deduplicated, and capped by `key_limit`. Press `r` on the profile in the Workspace to refresh it. Orbit never runs `KEYS` automatically; `KEYS` is blocking and intended only for deliberate use. If ACLs deny `COMMAND` or `SCAN`, statement execution remains available but precise key completion does not.
 
-Redis query buffers execute the current nonblank line; a visual selection must contain exactly one line. Each Statement launches one `redis-cli` process with RESP3 JSON output. Scalar and array replies render under `value`; map replies render under `key` and `value`; nested replies are JSON text. This projection is not binary-lossless. `.redis` saved queries are supported, while the SQL Structure panel is disabled for Redis buffers.
+Redis query buffers execute the current nonblank line; a visual selection must contain exactly one line. Each Statement launches one `redis-cli` process with RESP3 JSON output. Successful replies render as two-space-indented JSON that preserves native objects, arrays, scalars, booleans, and null instead of projecting them into columns. A Redis string containing a valid serialized JSON object or array renders as that inner structure; ordinary strings and JSON-encoded scalar strings remain strings. This representation is not binary-lossless. `.redis` saved queries are supported, while the SQL Structure panel is disabled for Redis buffers.
 
 </details>
 
@@ -883,7 +883,7 @@ The SQL Server Connector uses a stricter T-SQL classifier: only a single `SELECT
 
 The Redis Connector uses cached server `COMMAND` metadata. Commands marked `readonly` run without confirmation; mutating, unknown, and custom commands require confirmation. This remains a convenience guardrail rather than an ACL or security boundary.
 
-Result grids are reused per tabpage. They show up to `result_limit` rows and truncate displayed cell text to `max_cell_width` characters while retaining the raw value for copy and inspection.
+The result window is reused per tabpage. Tabular Result grids show up to `result_limit` rows and truncate displayed cell text to `max_cell_width` characters while retaining the raw value for copy and inspection. Redis result documents are not subject to row or cell-width truncation.
 
 MySQL XML results preserve SQL `NULL`, empty strings, tabs, line feeds, and ordinary Unicode text. Statements returning multiple row-producing result sets fail explicitly because the Result grid represents one set. Arbitrary binary/BLOB bytes are not guaranteed to round-trip through the CLI XML format. MariaDB servers are rejected rather than treated as compatible MySQL servers.
 

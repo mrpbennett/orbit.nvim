@@ -1,5 +1,40 @@
 # Orbit.nvim v0.1 Plan
 
+## Redis Pretty JSON Results 2026-09-23
+
+- [x] Add focused coverage for native-shape, two-space Redis JSON documents.
+- [x] Carry Redis presentation metadata through Statement execution without changing decoded reply consumers.
+- [x] Render Redis replies in the existing persistent result window without Result-grid projection.
+- [x] Update the domain glossary and user-facing Redis behavior documentation.
+- [x] Run focused and complete verification, inspect the diff, and record the review.
+
+### Settled Design
+
+- Every successful Redis Statement reply renders as JSON, including objects, arrays, strings, numbers, booleans, and null.
+- Redis reply structure is preserved instead of projecting arrays into rows or maps into key/value columns.
+- JSON uses two-space indentation in the existing persistent bottom result window.
+- Redis execution errors retain the existing diagnostics presentation.
+
+### Review
+
+- Redis replies retain their decoded metadata for completion and key-index consumers while carrying an ordered, two-space JSON document through the existing Connector metadata path.
+- The reusable result window renders JSON without grid headers, row limits, cell truncation, or cell-navigation mappings. It keeps the `orbit-results` ownership filetype and applies JSON syntax separately.
+- Focused Connector, metadata-propagation, and result-window regressions pass. The complete Lua suite passes all affected coverage and retains its three established unrelated failures: JDBC profile validation, JDBC request framing, and the Trino large-schema performance budget.
+- `bash tests/java_spec.sh` and `git diff --check` pass. `stylua` is unavailable. Independent re-review returned `CLEAN` after preserving the result-window ownership filetype.
+
+### Follow-up: JSON-Encoded Redis Strings
+
+- [x] Reproduce a Redis string containing a serialized JSON object at the Connector boundary.
+- [x] Render valid object and array strings as pretty JSON without changing the decoded Redis reply used by metadata consumers.
+- [x] Preserve ordinary strings and JSON-encoded scalar strings as JSON strings.
+- [x] Update documentation and rerun focused and repository verification.
+
+### Follow-up Review
+
+- The Connector decodes a Redis string once more only for result presentation and only accepts an inner object or array. Metadata and projected rows retain the original Redis string.
+- Regression coverage includes inner objects, arrays, ordinary strings, JSON scalar strings, malformed object-like strings, and unchanged decoded metadata.
+- The focused regression, Java helper suite, and `git diff --check` pass. The complete Lua suite passes the Redis coverage and retains the same three established unrelated failures.
+
 ## Workspace Saved-Query Split Mappings 2026-09-21
 
 - [x] Add Workspace mappings that open Saved queries in splits using `<C-x>` and `<C-v>`.

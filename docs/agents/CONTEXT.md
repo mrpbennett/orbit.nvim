@@ -47,9 +47,17 @@ The identifier prefix before a completion target, resolved by the connection pro
 **Completion namespace**:
 A catalog or schema offered as an intermediate completion target before a table or view. Selecting one continues completion at the next namespace level.
 
-**Result grid**:
-A configurable formatted window, shown at the bottom by default, that displays the rows and column headers produced by an executed statement.
+**Result window**:
+A configurable window, shown at the bottom by default, that displays the outcome of an executed statement as either a Result grid or Redis result document.
 _Avoid_: result buffer, table window
+
+**Result grid**:
+The tabular presentation within a result window that displays rows and column headers.
+_Avoid_: result table
+
+**Redis result document**:
+The read-only, two-space-indented JSON presentation of a successful Redis Statement reply within the result window. It preserves the reply's native JSON structure instead of projecting it into rows and columns; when a Redis string contains a serialized JSON object or array, the document presents that inner structure.
+_Avoid_: Redis Result grid, Redis table
 
 **Statement**:
 Text executed through a connection profile's Connector, including read, data-changing, and schema-changing operations.
@@ -84,7 +92,7 @@ A named directory containing reusable `.sql` and `.redis` files that can be open
 _Avoid_: save directory, save location
 
 **Workspace**:
-A dedicated Neovim tabpage containing Orbit's profile/schema browser, query buffers, and persistent result grid.
+A dedicated Neovim tabpage containing Orbit's profile/schema browser, query buffers, and persistent result window.
 _Avoid_: IDE, dashboard
 
 **Structure panel**:

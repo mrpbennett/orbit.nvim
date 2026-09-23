@@ -470,6 +470,7 @@ function M.execute(buffer, config, selection, context)
 		}
 		metadata = metadata or {}
 		result_options.columns = metadata.columns
+		result_options.document = metadata.document
 		-- vim.b[buffer].orbit_table is set elsewhere (e.g. by the workspace's
 		-- "browse table" flow) when this buffer's statement was generated to
 		-- browse a specific table/view rather than typed freely by the user.

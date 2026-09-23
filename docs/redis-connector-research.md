@@ -63,7 +63,7 @@ Sources:
 - Blink-only command and key completion; keys are offered only in metadata-identified key positions.
 - Completion-only key indexing; keys are not rendered as a Workspace tree.
 - `.redis` saved queries and Redis query-buffer filetype behavior; the SQL Structure panel remains unavailable.
-- Textual Result grid projection. Scalars and scalar arrays use a `value` column, maps use `key`/`value`, and nested values are JSON text.
+- Native-shape Redis result documents. Successful replies use two-space-indented JSON rather than a tabular projection; strings containing serialized JSON objects or arrays render as their inner structure.
 - Structured TCP, ACL, password-environment, logical-database, TLS, and scan-limit profile fields.
 
 Not MVP: Redis Cluster, Sentinel discovery, Unix sockets, pipelines, retained transactions, cross-database browsing, key type ranking, subcommand or Redis module-specific argument completion, arbitrary result harvesting, exact binary fidelity, or RESP push-stream handling.
@@ -73,12 +73,12 @@ Not MVP: Redis Cluster, Sentinel discovery, Unix sockets, pipelines, retained tr
 - A complete `SCAN` remains O(N) overall and consumes server/network resources. `key_pattern`, `scan_count`, and `key_limit` bound its practical impact but do not make discovery free.
 - A scan is not a transactionally consistent snapshot. Duplicates, expirations, deletion, and concurrent insertion are normal; completion can be stale.
 - Redis Cluster requires scanning every primary shard. `redis-cli -c` follows redirections but cannot make a keyless `SCAN` visit every shard, so Cluster is deliberately deferred.
-- RESP3 includes maps, sets, booleans, doubles, nulls, and push messages. JSON projection loses some protocol distinctions, and arbitrary bulk strings may not be valid text. Orbit's Redis Result grid is not a byte-for-byte export.
+- RESP3 includes maps, sets, booleans, doubles, nulls, and push messages. JSON representation loses some protocol distinctions, and arbitrary bulk strings may not be valid text. Orbit's Redis result document is not a byte-for-byte export.
 - `COMMAND` legacy key positions do not describe every movable or dynamic key specification. Unknown positions receive no key candidates rather than speculative ones.
 - Redis ACL identities used for completion should receive only the required application, `COMMAND`, and `SCAN` permissions and appropriate key patterns.
 
 ## Verification
 
-Deterministic tests cover profile validation, CLI argv and credential environment construction, Redis CLI quoting, JSON Result projection, command metadata, readonly mutation classification, cursor scanning, deduplication, truncation, completion context, query-buffer filetype, saved queries, Workspace refresh, Doctor registration, and one-shot Runner process options.
+Deterministic tests cover profile validation, CLI argv and credential environment construction, Redis CLI quoting, pretty JSON result documents, command metadata, readonly mutation classification, cursor scanning, deduplication, truncation, completion context, query-buffer filetype, saved queries, Workspace refresh, Doctor registration, and one-shot Runner process options.
 
 Live validation on Linux used `redis-cli 8.10.1` against the official `redis:8-alpine` container. `SET`, RESP3 JSON `COMMAND`, and cursor-based `SCAN` passed; Orbit loaded command metadata, classified `GET` as readonly and `SET` as mutating, and indexed the test key. Authentication and TLS were not exercised live.
