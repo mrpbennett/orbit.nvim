@@ -1,0 +1,507 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Orbit Promo</title>
+<style>
+:root{
+  --bg:#0a0c16; --fg:#c0caf5; --dim:#565f89; --dim2:#3b4261;
+  --blue:#7aa2f7; --purple:#bb9af7; --green:#9ece6a; --orange:#ff9e64;
+  --cyan:#7dcfff; --red:#f7768e; --yellow:#e0af68; --panel:#1a1b26; --panel2:#16161e;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:1920px;height:1080px;overflow:hidden;background:var(--bg)}
+body{font-family:'JetBrainsMono Nerd Font','JetBrains Mono',monospace;color:var(--fg);-webkit-font-smoothing:antialiased}
+#stage{position:absolute;inset:0;overflow:hidden;
+  background:radial-gradient(ellipse at 50% 45%,#161c38 0%,#0a0c16 55%,#05060b 100%)}
+.abs{position:absolute}
+.center{left:0;right:0;text-align:center}
+.scene{position:absolute;inset:0;opacity:0;will-change:transform,opacity}
+.big{font-weight:700;letter-spacing:-2px;white-space:nowrap}
+.glow-g{color:var(--green);text-shadow:0 0 40px rgba(158,206,106,.55)}
+#gui{position:relative;display:inline-block}
+#strike{position:absolute;left:-10px;top:50%;height:14px;margin-top:-7px;background:var(--red);border-radius:7px;box-shadow:0 0 24px rgba(247,118,142,.7)}
+
+/* logo */
+.planet{position:absolute;border-radius:50%;
+  background:radial-gradient(circle at 34% 30%,#dbe5ff 0%,#7aa2f7 32%,#4b4fb0 68%,#1b1c45 100%);
+  box-shadow:0 0 120px rgba(122,162,247,.55),inset -30px -40px 80px rgba(10,12,22,.55);
+  display:flex;align-items:center;justify-content:center;color:rgba(10,12,22,.78)}
+.badge{position:absolute;display:flex;align-items:center;gap:14px;padding:12px 26px;border-radius:999px;
+  background:rgba(26,27,38,.92);border:2px solid var(--dim2);font-size:34px;font-weight:700;white-space:nowrap;
+  transform-origin:center}
+.dot{width:18px;height:18px;border-radius:50%}
+.word{font-weight:700;letter-spacing:-4px;white-space:nowrap}
+
+/* editor */
+#cam{position:absolute;left:0;top:0;width:1920px;height:1080px;transform-origin:0 0}
+#win{position:absolute;left:160px;top:190px;width:1600px;height:830px;border-radius:18px;overflow:hidden;
+  background:var(--panel);border:2px solid #2a2e45;box-shadow:0 40px 120px rgba(0,0,0,.6),0 0 0 1px rgba(122,162,247,.08);
+  font-size:27px;line-height:42px}
+#tabs{position:absolute;left:0;right:0;top:0;height:46px;background:var(--panel2);display:flex;align-items:center;gap:6px;padding-left:12px;font-size:24px}
+.tab{padding:0 22px;height:46px;display:flex;align-items:center;color:var(--dim)}
+.tab.on{color:var(--fg);background:var(--panel);border-top:3px solid var(--blue)}
+#side{position:absolute;left:0;top:46px;width:470px;bottom:46px;border-right:2px solid #232639;padding:6px 0 0 22px;overflow:hidden;white-space:pre}
+#buf{position:absolute;left:472px;right:0;top:46px;bottom:46px;overflow:hidden;white-space:pre;padding-top:6px}
+.sl{height:42px;overflow:hidden;position:relative}
+.cl{background:#292e42}
+.gut{display:inline-block;width:70px;text-align:right;padding-right:22px;color:var(--dim2)}
+.gut.cur{color:var(--orange)}
+.cursor{display:inline-block;width:1ch;height:36px;vertical-align:-8px;background:var(--fg)}
+#status{position:absolute;left:0;right:0;bottom:0;height:46px;background:var(--panel2);display:flex;align-items:center;font-size:24px}
+#mode{height:46px;padding:0 20px;display:flex;align-items:center;font-weight:700;color:#15161e}
+.kw{color:var(--purple)} .fn{color:var(--blue)} .al{color:var(--cyan)} .id{color:var(--fg)}
+.cm{color:var(--dim);font-style:italic} .st{color:var(--green)} .pu{color:#89ddff}
+.tb{color:var(--blue)} .pr{color:var(--green)} .dm{color:var(--dim)} .ty{color:var(--yellow)} .or{color:var(--orange)}
+
+#pop{position:absolute;background:#1f2335;border:2px solid #3b4261;border-radius:10px;padding:6px 0;
+  box-shadow:0 20px 60px rgba(0,0,0,.5);font-size:26px;line-height:44px;min-width:470px;transform-origin:0 0}
+.pi{display:flex;gap:18px;padding:0 18px}
+.pi.sel{background:#2d3f76}
+.pi .k{color:var(--cyan);width:1.4ch}
+.pi .t{margin-left:auto;color:var(--dim);padding-left:30px}
+
+#res{position:absolute;left:0;right:0;bottom:46px;height:340px;background:#171824;border-top:2px solid var(--blue);
+  padding:8px 26px;white-space:pre;overflow:hidden;font-size:26px;line-height:40px}
+#modal{position:absolute;left:350px;top:260px;width:900px;background:#1f2335;border:3px solid var(--red);border-radius:16px;
+  padding:30px 40px;box-shadow:0 0 80px rgba(247,118,142,.35),0 30px 80px rgba(0,0,0,.6);transform-origin:center}
+.key{display:inline-block;padding:0 14px;border-radius:8px;border:2px solid var(--dim2);margin:0 6px}
+
+#caption{position:absolute;left:0;right:0;top:62px;text-align:center}
+#capbox{display:inline-flex;align-items:center;gap:22px;padding:14px 40px;border-radius:999px;font-size:56px;font-weight:700;
+  background:rgba(13,15,28,.88);border:3px solid;white-space:nowrap}
+
+.keycap{display:inline-flex;align-items:center;justify-content:center;min-width:170px;height:170px;padding:0 44px;border-radius:30px;
+  background:linear-gradient(#2b2f47,#1d2033);border:3px solid #4a5075;font-size:84px;font-weight:700;color:var(--fg);
+  box-shadow:0 14px 0 #10121e,0 30px 60px rgba(0,0,0,.6)}
+
+.pill{display:inline-block;padding:16px 34px;border-radius:16px;background:#141625;border:2px solid #2a2e45}
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="stars" width="1920" height="1080" class="abs" style="left:0;top:0"></canvas>
+  <svg id="rings" class="abs" width="1920" height="1080" style="left:0;top:0">
+    <g id="ringg" fill="none" stroke="rgba(122,162,247,0.07)" stroke-width="2">
+      <ellipse cx="960" cy="540" rx="900" ry="300"/>
+      <ellipse cx="960" cy="540" rx="1250" ry="420"/>
+      <ellipse cx="960" cy="540" rx="620" ry="210"/>
+    </g>
+  </svg>
+
+  <!-- S1: hook -->
+  <div id="s1" class="scene">
+    <div id="s1a" class="abs center big" style="top:250px;font-size:124px;color:#fff">Stop alt-tabbing</div>
+    <div id="s1b" class="abs center big" style="top:410px;font-size:124px;color:#fff">to a <span id="gui">database GUI<span id="strike"></span></span>.</div>
+    <div id="s1c" class="abs center big glow-g" style="top:600px;font-size:168px">Query from Neovim.</div>
+  </div>
+
+  <!-- S2: logo -->
+  <div id="s2" class="scene">
+    <svg class="abs" width="1920" height="1080" style="left:0;top:0">
+      <ellipse id="orbitpath" cx="960" cy="400" rx="620" ry="165" fill="none" stroke="rgba(122,162,247,0.28)" stroke-width="3" transform="rotate(-8 960 400)"/>
+    </svg>
+    <div id="planet" class="planet" style="left:810px;top:250px;width:300px;height:300px;font-size:130px;z-index:5">&#xf1c0;</div>
+    <div id="badges"></div>
+    <div id="s2w" class="abs center word" style="top:690px;font-size:150px;color:#fff">orbit<span class="glow-g">.nvim</span></div>
+    <div id="s2t" class="abs center" style="top:885px;font-size:46px;color:var(--fg)">a database IDE for Neovim</div>
+  </div>
+
+  <!-- S3-S6: editor -->
+  <div id="sEd" class="scene">
+    <div id="cam">
+      <div id="win">
+        <div id="tabs">
+          <div class="tab on">&#xf15c; revenue.sql <span class="or" style="margin-left:12px">&#x25cf;</span></div>
+          <div class="tab">&#xf135; Orbit Workspace</div>
+        </div>
+        <div id="side"></div>
+        <div id="buf"></div>
+        <div id="res"></div>
+        <div id="status">
+          <div id="mode">NORMAL</div>
+          <div style="padding:0 18px;color:var(--purple)">&#xe725; main</div>
+          <div style="padding:0 18px;color:var(--green)">&#xf1c0; prod-pg</div>
+          <div id="stright" style="margin-left:auto;padding:0 22px"></div>
+        </div>
+        <div id="modal"></div>
+      </div>
+    </div>
+    <div id="caption"><div id="capbox"></div></div>
+    <div id="keys" class="abs center" style="top:450px;opacity:0">
+      <span class="keycap" id="k1" style="font-size:52px">Space</span>
+      <span style="font-size:90px;color:var(--dim);margin:0 30px;vertical-align:40px">+</span>
+      <span class="keycap" id="k2">E</span>
+    </div>
+  </div>
+
+  <!-- S7: connectors -->
+  <div id="s7" class="scene">
+    <div id="s7l" class="abs center" style="top:300px;font-size:52px;color:var(--dim);letter-spacing:6px">WORKS WITH</div>
+    <div id="s7n" class="abs center big" style="top:430px;font-size:190px"></div>
+    <div id="s7dots" class="abs center" style="top:760px"></div>
+  </div>
+
+  <!-- S8: end card -->
+  <div id="s8" class="scene">
+    <svg class="abs" width="1920" height="1080" style="left:0;top:0">
+      <ellipse id="s8ring" cx="960" cy="235" rx="230" ry="62" fill="none" stroke="rgba(122,162,247,0.35)" stroke-width="3" transform="rotate(-8 960 235)"/>
+    </svg>
+    <div id="s8p" class="planet" style="left:885px;top:160px;width:150px;height:150px;font-size:66px">&#xf1c0;</div>
+    <div id="s8moons"></div>
+    <div id="s8w" class="abs center word" style="top:360px;font-size:140px;color:#fff">orbit<span class="glow-g">.nvim</span></div>
+    <div id="s8t" class="abs center" style="top:545px;font-size:46px">Your database revolves around <span style="color:var(--blue)">your editor</span>.</div>
+    <div id="s8c" class="abs center" style="top:665px;font-size:38px"><span class="pill"><span class="pu">{</span> <span class="st">"mrpbennett/orbit.nvim"</span><span class="pu">,</span> opts <span class="pu">=</span> <span class="pu">{}</span> <span class="pu">}</span></span></div>
+    <div id="s8g" class="abs center" style="top:840px;font-size:40px;color:var(--fg)">
+      <span>&#xf09b; github.com/mrpbennett/orbit.nvim</span>
+      <span id="star" style="display:inline-block;margin-left:40px;padding:10px 28px;border-radius:999px;background:var(--yellow);color:#15161e;font-weight:700">&#xf005; Star it</span>
+    </div>
+    <div id="s8f" class="abs center" style="top:950px;font-size:30px;color:var(--dim)">Neovim 0.10+ &#xb7; zero plugin deps &#xb7; blink.cmp completion &#xb7; async</div>
+  </div>
+</div>
+
+<script>
+// ---------- math helpers ----------
+const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
+const lerp = (a, b, p) => a + (b - a) * p;
+const prog = (t, a, b) => clamp((t - a) / (b - a));
+const eOut = p => 1 - Math.pow(1 - p, 3);
+const eIn = p => p * p * p;
+const eIO = p => p < .5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
+const eBack = p => { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(p - 1, 3) + c1 * Math.pow(p - 1, 2); };
+const $ = id => document.getElementById(id);
+const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+
+// Deterministic PRNG so every render of frame N looks identical.
+function mulberry32(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const rnd = mulberry32(7);
+const STARS = Array.from({ length: 170 }, () => ({ x: rnd() * 1920, y: rnd() * 1080, r: rnd() * 1.8 + .4, s: rnd() * 30 + 8, ph: rnd() * 6.28 }));
+
+// Scene envelope: pop in with a scale, zoom-through on exit.
+function scene(el, t, a, b, { inDur = .18, outDur = .15, fromScale = 1.08 } = {}) {
+  const pin = eOut(prog(t, a, a + inDur)), pout = eIn(prog(t, b - outDur, b));
+  const on = t >= a && t < b;
+  el.style.display = on ? 'block' : 'none';
+  if (!on) return false;
+  el.style.opacity = pin * (1 - pout);
+  el.style.transform = `scale(${lerp(fromScale, 1, pin) * lerp(1, 1.18, pout)})`;
+  return true;
+}
+// Element entrance: fade + rise + optional scale overshoot.
+function enter(el, t, a, dur = .25, { dy = 40, s0 = 1, back = false } = {}) {
+  const p = prog(t, a, a + dur), e = back ? eBack(p) : eOut(p);
+  el.style.opacity = clamp(p * 1.6);
+  el.style.transform = `translateY(${(1 - eOut(p)) * dy}px) scale(${lerp(s0, 1, e)})`;
+}
+
+// ---------- S2 badges ----------
+const DBS = [
+  ['PostgreSQL', '#6fa8ff'], ['MySQL', '#f29111'], ['SQLite', '#4fc3ff'], ['SQL Server', '#ff6b81'],
+  ['Redis', '#ff4438'], ['Trino', '#ff4dc4'], ['Vertica', '#9ece6a']];
+$('badges').innerHTML = DBS.map(([n, c]) => `<div class="badge" style="border-color:${c}55"><span class="dot" style="background:${c};box-shadow:0 0 14px ${c}"></span>${n}</div>`).join('');
+const badgeEls = [...$('badges').children];
+$('s7dots').innerHTML = DBS.map(([, c]) => `<span style="display:inline-block;width:26px;height:26px;border-radius:50%;margin:0 14px;background:${c}"></span>`).join('');
+const dotEls = [...$('s7dots').children];
+$('s8moons').innerHTML = ['#9ece6a', '#ff9e64', '#bb9af7'].map(c => `<div class="abs" style="width:26px;height:26px;border-radius:50%;background:${c};box-shadow:0 0 18px ${c}"></div>`).join('');
+const moonEls = [...$('s8moons').children];
+
+// ---------- editor content ----------
+// Sidebar tree rows. `reveal` rows start collapsed (height 0) and slide open during the schema beat.
+const SIDE = [
+  { h: '<span class="tb" style="font-weight:700">&#xf135; Orbit Workspace</span>' },
+  { h: '<span class="ty">Filter:</span> <span class="dm">-</span>' },
+  { h: '' },
+  { h: 'Profiles:' },
+  { h: '<span class="dm">&#x25be;</span> <span class="pr">&#xf1c0; prod-pg</span> <span class="dm">(postgres)</span>' },
+  { h: '  <span class="dm">&#x25be;</span> public' },
+  { h: '    <span class="dm">&#x25be;</span> tables <span class="or">39</span>' },
+  { h: '      <span class="dm">&#x25b8;</span> <span class="tb">&#xf0ce; customers</span>' },
+  { h: 'ORDERS' },
+  { h: '        <span class="dm">&#x25be;</span> columns <span class="or">4</span>', reveal: 0 },
+  { h: '          <span class="ty">&#x25aa;</span> id       <span class="ty">bigint</span>', reveal: 1 },
+  { h: '          <span class="ty">&#x25aa;</span> user_id  <span class="ty">bigint</span>', reveal: 2 },
+  { h: '          <span class="ty">&#x25aa;</span> total    <span class="ty">numeric</span>', reveal: 3 },
+  { h: '          <span class="ty">&#x25aa;</span> status   <span class="ty">text</span>', reveal: 4 },
+  { h: '        <span class="dm">&#x25b8;</span> foreign keys <span class="or">1</span>', reveal: 5 },
+  { h: '      <span class="dm">&#x25b8;</span> <span class="tb">&#xf0ce; products</span>' },
+  { h: '      <span class="dm">&#x25b8;</span> <span class="tb">&#xf0ce; users</span>' },
+  { h: '<span class="dm">&#x25b8;</span> <span class="pr">&#xf1c0; local</span> <span class="dm">(sqlite)</span>' },
+  { h: '<span class="dm">&#x25b8;</span> <span class="pr">&#xf1c0; cache</span> <span class="dm">(redis)</span>' },
+];
+SIDE.forEach(r => { r.el = document.createElement('div'); r.el.className = 'sl'; $('side').appendChild(r.el); });
+
+// Buffer lines are token lists; each segment types in at its own start time.
+const T = (s, c) => [s, c];
+const LINES = [
+  { segs: [{ at: -1, tk: [T('-- revenue by customer', 'cm')] }] },
+  { segs: [{ at: 3.65, tk: [T('select', 'kw'), T(' '), T('u', 'al'), T('.', 'pu'), T('email'), T(', ', 'pu'), T('sum', 'fn'), T('(', 'pu'), T('o', 'al'), T('.', 'pu'), T('total'), T(')', 'pu')] }] },
+  { segs: [{ at: 4.18, tk: [T('from', 'kw'), T(' users '), T('u', 'al')] }] },
+  { segs: [
+    { at: 4.42, tk: [T('join', 'kw'), T(' orders '), T('o', 'al'), T(' '), T('on', 'kw'), T(' '), T('o', 'al'), T('.', 'pu')] },
+    { at: 5.5, cps: 1e9, tk: [T('user_id')] },
+    { at: 5.55, tk: [T(' = ', 'pu'), T('u', 'al'), T('.', 'pu'), T('id')] }] },
+  { segs: [{ at: 5.72, tk: [T('group by', 'kw'), T(' '), T('u', 'al'), T('.', 'pu'), T('email'), T(';', 'pu')] }] },
+  { segs: [{ at: 9.9, tk: [] }] },
+  { segs: [{ at: 9.9, tk: [T('delete from', 'kw'), T(' orders'), T(';', 'pu')] }] },
+];
+const CPS = 60;
+// Renders the first `n` characters of a token list as highlighted HTML.
+function tokHTML(tk, n) {
+  let out = '';
+  for (const [s, c] of tk) {
+    if (n <= 0) break;
+    const part = s.slice(0, n); n -= part.length;
+    out += c ? `<span class="${c}">${esc(part)}</span>` : esc(part);
+  }
+  return out;
+}
+const segLen = s => s.tk.reduce((a, [x]) => a + x.length, 0);
+
+const RESROWS = [
+  ['ada@lovelace.dev', '48,210.00'], ['linus@kernel.org', '39,774.50'], ['grace@cobol.io', '31,002.25'],
+  ['bram@vim.org', '28,640.00'], ['ken@unix.sh', '17,395.75'], ['margaret@apollo.gov', '12,048.10']];
+const SPIN = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏';
+
+// Camera keyframes: [time, focusX, focusY, scale]. The focus point is moved to screen centre.
+const CAM = [[3.4, 960, 600, 1], [3.9, 1150, 500, 1.13], [6.0, 1150, 500, 1.13], [6.4, 960, 620, 1.04], [8.2, 960, 620, 1.04],
+  [8.55, 520, 530, 1.2], [9.75, 520, 530, 1.2], [10.1, 960, 610, 1.02], [11.2, 960, 610, 1.02]];
+const CAPS = [
+  [3.5, 5.95, '&#xf121;', 'Clause-aware completion', '#bb9af7'],
+  [6.05, 8.15, '&#xf0e7;', 'Async. Never blocks.', '#e0af68'],
+  [8.25, 9.75, '&#xf0e8;', 'Browse every schema', '#7dcfff'],
+  [9.85, 11.1, '&#xf132;', 'Guards prod. Even at 2am.', '#f7768e']];
+
+function renderEditor(t) {
+  // Camera move with eased interpolation between keyframes.
+  let k = CAM.findIndex((c, i) => i < CAM.length - 1 && t < CAM[i + 1][0]);
+  if (k < 0) k = CAM.length - 2;
+  const [t0, x0, y0, s0] = CAM[k], [t1, x1, y1, s1] = CAM[k + 1];
+  const p = eIO(prog(t, t0, t1));
+  const fx = lerp(x0, x1, p), fy = lerp(y0, y1, p), s = lerp(s0, s1, p);
+  const pin = eOut(prog(t, 3.4, 3.8));
+  $('cam').style.transform = `perspective(1800px) translate(${960 - fx * s}px, ${540 - fy * s}px) scale(${s}) rotateX(${(1 - pin) * 18}deg)`;
+
+  const insert = (t > 3.62 && t < 6.02) || (t > 9.88 && t < 10.3);
+  const mode = $('mode');
+  mode.textContent = insert ? 'INSERT' : 'NORMAL';
+  mode.style.background = insert ? 'var(--green)' : 'var(--blue)';
+
+  // Buffer: type each segment, place the cursor after the most recently typed char.
+  let curLine = 0, html = '';
+  const rows = LINES.map((ln, i) => {
+    let body = '', started = false;
+    for (const sg of ln.segs) {
+      if (t < sg.at) break;
+      started = true;
+      body += tokHTML(sg.tk, Math.floor((t - sg.at) * (sg.cps || CPS)) + 0);
+    }
+    if (started) curLine = i;
+    return started ? body : null;
+  });
+  for (let i = 0; i < 16; i++) {
+    const r = rows[i];
+    const cur = i === curLine;
+    const blink = insert || Math.floor(t * 2.5) % 2 === 0;
+    const cursor = cur && t > 3.4 ? `<span class="cursor" style="opacity:${blink ? .9 : 0}"></span>` : '';
+    if (r === undefined || (r === null && i >= LINES.length)) html += `<div class="sl"><span class="gut" style="color:#3b4261">~</span></div>`;
+    else html += `<div class="sl${cur ? ' cl' : ''}"><span class="gut${cur ? ' cur' : ''}">${i + 1}</span>${r || ''}${cursor}</div>`;
+  }
+  // Completion popup anchored under line 4 at the typed column.
+  const popOn = t > 4.8 && t < 5.5;
+  const sel = t < 5.12 ? 0 : 1;
+  const items = [['id', 'bigint'], ['user_id', 'bigint'], ['total', 'numeric'], ['status', 'text']];
+  const pp = eBack(prog(t, 4.8, 4.98));
+  html += `<div id="pop" style="left:calc(70px + 19ch);top:${6 + 42 * 4}px;display:${popOn ? 'block' : 'none'};transform:scale(${pp});opacity:${clamp(pp)}">` +
+    items.map(([n, ty], i) => `<div class="pi${i === sel ? ' sel' : ''}"><span class="k">&#xf0ce;</span><span>${n}</span><span class="t">${ty} · orbit</span></div>`).join('') + '</div>';
+  $('buf').innerHTML = html;
+
+  // Sidebar: cursorline walks down to `orders`, which expands to show columns.
+  let sideCur = 4;
+  if (t > 8.35) sideCur = 7;
+  if (t > 8.55) sideCur = 8;
+  if (t > 9.35) sideCur = 11;
+  const expanded = t > 8.8;
+  SIDE.forEach((r, i) => {
+    let h = r.h === 'ORDERS'
+      ? `      <span class="dm">${expanded ? '&#x25be;' : '&#x25b8;'}</span> <span class="tb">&#xf0ce; orders</span>`
+      : r.h;
+    r.el.innerHTML = h || ' ';
+    r.el.className = 'sl' + (i === sideCur && t > 8.2 ? ' cl' : '');
+    if (r.reveal !== undefined) {
+      const rp = eOut(prog(t, 8.82 + r.reveal * .07, 8.82 + r.reveal * .07 + .2));
+      r.el.style.height = 42 * rp + 'px';
+      r.el.style.opacity = rp;
+      r.el.style.transform = `translateX(${(1 - rp) * -30}px)`;
+    }
+  });
+
+  // Result window slides up after execution, closes before the schema beat.
+  const ro = eOut(prog(t, 6.62, 6.92)) * (1 - eIn(prog(t, 8.05, 8.3)));
+  const res = $('res');
+  res.style.display = ro > 0 ? 'block' : 'none';
+  res.style.transform = `translateY(${(1 - ro) * 360}px)`;
+  let rh = `<span class="tb" style="font-weight:700">Orbit Results: prod-pg / revenue.sql | 6 rows | 0.04s</span>\n`;
+  rh += `<span class="tb">| email               | revenue    |</span>\n<span class="dm">|---------------------|------------|</span>\n`;
+  RESROWS.forEach(([e, v], i) => {
+    const a = prog(t, 6.85 + i * .07, 6.95 + i * .07);
+    const hl = i === 0 && t > 7.5 ? 'background:#292e42;' : '';
+    rh += `<div style="opacity:${a};${hl}transform:translateX(${(1 - eOut(a)) * 40}px)"><span class="dm">|</span> ${e.padEnd(19)} <span class="dm">|</span> <span class="or">${v.padStart(10)}</span> <span class="dm">|</span></div>`;
+  });
+  res.innerHTML = rh;
+
+  // Statusline right side: spinner while running, then results / cancellation.
+  let right = '<span class="dm">utf-8  sql</span>';
+  if (t > 6.28 && t < 6.66) right = `<span class="ty">${SPIN[Math.floor(t * 14) % 10]} running…</span>`;
+  else if (t >= 6.66 && t < 9.8) right = '<span class="pr">&#xf00c; 6 rows · 0.04s</span>';
+  else if (t > 11.0) right = '<span class="or">&#xf05e; cancelled</span>';
+  $('stright').innerHTML = right;
+
+  // Mutation-confirmation modal: appears, "N" gets pressed, modal collapses.
+  const mo = eBack(prog(t, 10.38, 10.58)) * (1 - eIn(prog(t, 10.98, 11.1)));
+  const modal = $('modal');
+  modal.style.display = mo > 0.001 ? 'block' : 'none';
+  modal.style.transform = `scale(${mo})`;
+  modal.style.opacity = clamp(mo);
+  const pressed = t > 10.88;
+  modal.innerHTML = `<div style="color:var(--red);font-weight:700;font-size:36px;margin-bottom:18px">&#xf071;  Mutating statement</div>
+    <div style="font-size:30px;margin-bottom:26px"><span class="pr">prod-pg</span> <span class="dm">›</span> <span class="kw">delete from</span> orders;</div>
+    <div style="font-size:30px">Run it?  <span class="key">y</span><span class="dm">yes</span>   <span class="key" style="${pressed ? 'background:var(--red);color:#15161e;border-color:var(--red);transform:scale(.92)' : 'border-color:var(--red);color:var(--red)'};display:inline-block">N</span><span class="dm">no</span></div>`;
+  $('win').style.boxShadow = `0 40px 120px rgba(0,0,0,.6), 0 0 ${120 * mo}px rgba(247,118,142,${.35 * mo})`;
+
+  // Caption pill for the current beat.
+  const cap = CAPS.find(c => t >= c[0] && t < c[1]);
+  const box = $('capbox');
+  if (cap) {
+    const [a, b, icon, txt, col] = cap;
+    const ci = eBack(prog(t, a, a + .22)), co = eIn(prog(t, b - .12, b));
+    box.style.display = 'inline-flex';
+    box.style.borderColor = col;
+    box.style.boxShadow = `0 0 50px ${col}55`;
+    box.innerHTML = `<span style="color:${col};margin-right:14px">${icon}</span><span style="color:#fff">${txt}</span>`;
+    box.style.opacity = clamp(ci * 1.5) * (1 - co);
+    box.style.transform = `translateY(${(1 - ci) * -50}px) scale(${lerp(.7, 1, ci)})`;
+  } else box.style.display = 'none';
+
+  // <leader>E keycaps overlay with a physical "press".
+  const kv = eBack(prog(t, 6.04, 6.2)) * (1 - eIn(prog(t, 6.5, 6.62)));
+  $('keys').style.opacity = clamp(kv);
+  $('keys').style.transform = `scale(${lerp(.6, 1, kv)})`;
+  const press = prog(t, 6.22, 6.28) * (1 - prog(t, 6.36, 6.42));
+  for (const id of ['k1', 'k2']) {
+    const el = $(id);
+    el.style.transform = `translateY(${press * 12}px)`;
+    el.style.boxShadow = `0 ${14 - press * 12}px 0 #10121e, 0 30px 60px rgba(0,0,0,.6), 0 0 ${press * 60}px rgba(158,206,106,.8)`;
+    el.style.borderColor = press > .5 ? 'var(--green)' : '#4a5075';
+  }
+}
+
+// ---------- master render ----------
+function render(t) {
+  // Background starfield drifts left for a constant sense of motion.
+  const cx = $('stars').getContext('2d');
+  cx.clearRect(0, 0, 1920, 1080);
+  for (const s of STARS) {
+    const x = ((s.x - t * s.s) % 1920 + 1920) % 1920;
+    cx.globalAlpha = .25 + .55 * (0.5 + 0.5 * Math.sin(t * 3 + s.ph));
+    cx.fillStyle = '#c0caf5';
+    cx.beginPath(); cx.arc(x, s.y, s.r, 0, 6.283); cx.fill();
+  }
+  $('ringg').setAttribute('transform', `rotate(${-10 + t * 2} 960 540)`);
+
+  // S1 — hook
+  if (scene($('s1'), t, 0, 1.72, { inDur: .01 })) {
+    enter($('s1a'), t, .03, .22, { s0: 1.4, dy: 0, back: true });
+    enter($('s1b'), t, .32, .22, { s0: 1.4, dy: 0, back: true });
+    const sp = eOut(prog(t, .78, .98));
+    $('strike').style.width = `calc(${sp * 100}% + ${sp * 20}px)`;
+    $('gui').style.color = sp > .3 ? '#565f89' : '#fff';
+    enter($('s1c'), t, 1.02, .28, { s0: 1.7, dy: 0, back: true });
+  }
+
+  // S2 — logo with orbiting connector badges
+  if (scene($('s2'), t, 1.72, 3.42, { fromScale: .85, inDur: .2 })) {
+    const pp = eBack(prog(t, 1.72, 2.05));
+    $('planet').style.transform = `scale(${pp}) rotate(${(1 - pp) * -40}deg)`;
+    const tilt = -8 * Math.PI / 180;
+    badgeEls.forEach((el, i) => {
+      const th = i / 7 * Math.PI * 2 + t * 1.1;
+      const out = eOut(prog(t, 1.85 + i * .04, 2.25 + i * .04));
+      const x = 620 * Math.cos(th) * out, y = 165 * Math.sin(th) * out;
+      const rx = x * Math.cos(tilt) - y * Math.sin(tilt), ry = x * Math.sin(tilt) + y * Math.cos(tilt);
+      const depth = (Math.sin(th) + 1) / 2;
+      el.style.left = (960 + rx) + 'px'; el.style.top = (400 + ry) + 'px';
+      el.style.transform = `translate(-50%,-50%) scale(${(.72 + .38 * depth) * out})`;
+      el.style.zIndex = depth > .5 ? 10 : 1;
+      el.style.opacity = clamp(out * 2) * (.5 + .5 * depth);
+    });
+    const wp = eOut(prog(t, 2.0, 2.35));
+    $('s2w').style.opacity = wp;
+    $('s2w').style.letterSpacing = lerp(40, -4, wp) + 'px';
+    enter($('s2t'), t, 2.3, .25);
+  }
+
+  // S3–S6 — the editor beats
+  if (scene($('sEd'), t, 3.4, 11.2, { inDur: .25, fromScale: .92 })) renderEditor(t);
+
+  // S7 — rapid-fire connector names
+  if (scene($('s7'), t, 11.2, 12.82, { inDur: .1 })) {
+    enter($('s7l'), t, 11.2, .2);
+    const n = $('s7n');
+    const idx = Math.floor((t - 11.3) / .16);
+    if (t < 11.3) { n.innerHTML = ''; }
+    else if (idx < 7) {
+      const [name, col] = DBS[idx];
+      const lp = prog(t, 11.3 + idx * .16, 11.3 + idx * .16 + .09);
+      n.innerHTML = name;
+      n.style.color = col;
+      n.style.textShadow = `0 0 60px ${col}88`;
+      n.style.transform = `scale(${lerp(1.25, 1, eOut(lp))})`;
+      n.style.opacity = 1;
+    } else {
+      const lp = eBack(prog(t, 12.42, 12.6));
+      n.innerHTML = '7 databases. <span class="glow-g">1 editor.</span>';
+      n.style.color = '#fff'; n.style.textShadow = 'none';
+      n.style.fontSize = '128px';
+      n.style.transform = `scale(${lerp(.6, 1, lp)})`;
+    }
+    if (idx < 7) n.style.fontSize = '190px';
+    dotEls.forEach((d, i) => {
+      const lit = i <= idx;
+      d.style.opacity = lit ? 1 : .18;
+      d.style.transform = `scale(${lit ? 1 + .4 * (1 - prog(t, 11.3 + i * .16, 11.45 + i * .16)) : .8})`;
+      d.style.boxShadow = lit ? `0 0 20px ${DBS[i][1]}` : 'none';
+    });
+  }
+
+  // S8 — end card / call to action
+  if (scene($('s8'), t, 12.82, 15.01, { inDur: .2, fromScale: 1.1, outDur: .001 })) {
+    const pp = eBack(prog(t, 12.85, 13.15));
+    $('s8p').style.transform = `scale(${pp})`;
+    const tilt = -8 * Math.PI / 180;
+    moonEls.forEach((m, i) => {
+      const th = i * 2.09 + t * 1.6;
+      const x = 230 * Math.cos(th) * pp, y = 62 * Math.sin(th) * pp;
+      const rx = x * Math.cos(tilt) - y * Math.sin(tilt), ry = x * Math.sin(tilt) + y * Math.cos(tilt);
+      m.style.left = (960 + rx - 13) + 'px'; m.style.top = (235 + ry - 13) + 'px';
+      m.style.zIndex = Math.sin(th) > 0 ? 3 : 0;
+      m.style.opacity = pp;
+    });
+    $('s8p').style.zIndex = 2;
+    const wp = eOut(prog(t, 12.95, 13.3));
+    $('s8w').style.opacity = wp;
+    $('s8w').style.letterSpacing = lerp(40, -4, wp) + 'px';
+    enter($('s8t'), t, 13.2, .3);
+    enter($('s8c'), t, 13.4, .3, { back: true, s0: .8 });
+    enter($('s8g'), t, 13.6, .3);
+    enter($('s8f'), t, 13.8, .3, { dy: 20 });
+    const pulse = 1 + .06 * Math.max(0, Math.sin((t - 13.9) * 7)) * (t > 13.9 ? 1 : 0);
+    $('star').style.transform = `scale(${pulse})`;
+    $('star').style.boxShadow = `0 0 ${30 * (pulse - 1) / .06}px rgba(224,175,104,.8)`;
+  }
+}
+window.render = render;
+const qt = new URLSearchParams(location.search).get('t');
+document.fonts.ready.then(() => { render(qt ? parseFloat(qt) : 0); window.__ready = true; });
+</script>
+</body>
+</html>

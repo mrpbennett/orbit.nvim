@@ -1685,3 +1685,18 @@ Plan: `~/.claude/plans/sprightly-seeking-blanket.md`. Replaces the two single-li
 - Toggling works from inside or outside the Workspace. If it is Neovim's final tabpage, Orbit creates one ordinary replacement tab before closing it.
 - Profile selection still reuses an existing Workspace without closing it, and the sidebar `q` mapping retains direct close behavior.
 - Verification: `nvim --headless -u NONE -l tests/run.lua` and `git diff --check` pass. Independent Standards and Spec reviews are clean. `stylua` is not installed in this environment.
+
+## 15-Second Promo Video 2026-09-28
+
+- [x] Storyboard eight quick-hit beats (hook, logo, completion, async results, schema browser, mutation guard, connectors, CTA).
+- [x] Build a deterministic HTML/JS animation (`render(t)`) in the session scratchpad, styled after the Tokyonight preview screenshot.
+- [x] Capture frames with headless Chromium and encode a 1080p MP4 for social.
+- [x] Encode a README-friendly GIF (< 10 MB) and check sampled frames visually.
+- [x] Hand off README embed snippets; no commit without approval.
+
+### Review
+
+- `assets/orbit-ad.mp4`: 1920x1080, 60 fps, 15.0 s, H.264, about 5.7 MB, silent. Made for social posts.
+- `assets/orbit-ad.gif`: 880 px wide, 12 fps, about 7.4 MB, under GitHub's 10 MB image limit. Made for the README.
+- Source files are in `assets/promo-src/`. `index.html` exposes a deterministic `render(t)`, and `capture.mjs` drives Chromium through playwright-core and pipes the frames to ffmpeg.
+- Checked sampled frames from the MP4 and the GIF by eye: text is legible, nothing is clipped, and the caption spacing is fixed.

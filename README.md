@@ -9,6 +9,8 @@ It's also a project to help me learn Lua.</p></blockquote>
 
 ### Your database revolves around your editor, not the other way around.
 
+[![orbit.nvim in 15 seconds](./assets/orbit-ad.gif)](./assets/orbit-ad.mp4)
+
 Orbit runs statements through backend-specific Connectors using user-installed database clients. It retains one connection per profile where the client supports it, keeps profiles per query buffer, browses schemas, completes cached objects and Redis keys, and renders results in a reusable result window.
 
 ![preview](./assets/preview.png)
