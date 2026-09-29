@@ -8,7 +8,9 @@
   user has an explicit visual selection, use that; otherwise fall back to
   the whole buffer, but only if the buffer is unambiguously a single
   statement (this module deliberately does NOT do real SQL parsing -- see
-  the comment inside M.target for why).
+  the comment inside M.target for why). It also owns the default lexical
+  Mutating statement check (M.requires_confirmation). Both read statement
+  boundaries from orbit.sql.segment.
 
   This module is called by the query runner (lua/orbit/query.lua) which
   builds the `request` table (buffer lines + optional selection) from the
@@ -38,7 +40,9 @@
 
 -- Exports:
 --   M.target(request) -> sql_text, nil   OR   nil, error_message
+--   M.requires_confirmation(statement, dialect) -> boolean
 local M = {}
+local segment = require("orbit.sql.segment")
 local tokenizer = require("orbit.sql.tokenizer")
 
 -- Side effects: none (pure function).
@@ -156,36 +160,13 @@ function M.target(request)
 		return nil, "buffer is empty"
 	end
 
-	-- `contents:gsub(";", "")` returns two values: the string with all `;`
-	-- removed, and (as the second return value, captured here via
-	-- `select(2, ...)`) the *count* of substitutions made -- i.e. how many
-	-- semicolons the buffer contains.
-	local semicolons = select(2, contents:gsub(";", ""))
-	local trailing_terminator = contents:match(";%s*$") ~= nil
-	if request.dialect == "mssql" then
-		semicolons = 0
-		local last_code
-		for _, token in ipairs(tokenizer.tokenize(request.lines, request.dialect)) do
-			if token.type == "semicolon" then
-				semicolons = semicolons + 1
-			end
-			if token.type ~= "comment" then
-				last_code = token
-			end
-		end
-		trailing_terminator = last_code ~= nil and last_code.type == "semicolon"
-	end
-	-- This is intentionally a safety rule, not SQL parsing: ambiguous buffers require a selection.
-	-- Rationale for the two conditions below:
-	--   - More than one semicolon anywhere means the buffer very likely holds
-	--     multiple statements, and picking "the" statement to run would be a
-	--     guess -- so refuse and ask the user to select explicitly.
-	--   - Exactly one semicolon is only considered safe if it's the very last
-	--     non-whitespace character in the buffer (i.e. one statement,
-	--     properly terminated); one semicolon anywhere else in the middle of
-	--     the buffer suggests a second statement follows it, so it's treated
-	--     as ambiguous too.
-	if semicolons > 1 or (semicolons == 1 and not trailing_terminator) then
+	-- This is intentionally a safety rule: a buffer holding more than one
+	-- statement requires an explicit selection, because picking "the"
+	-- statement to run would be a guess. Boundaries come from orbit.sql.segment
+	-- (tokenizer-based), so a `;` inside a string literal or comment, or inside
+	-- a recognized procedural body, never counts as a second statement. A
+	-- single trailing terminator (or none at all) is one statement.
+	if #segment.statements(request.lines, request.dialect) > 1 then
 		return nil, "statement is ambiguous; select the statement explicitly"
 	end
 	if request.dialect == "mssql" and tokenizer.has_sqlserver_batch_separator(request.lines) then
@@ -193,6 +174,40 @@ function M.target(request)
 	end
 
 	return contents
+end
+
+-- First words of statements that only read data. Anything else (including
+-- WITH, whose outer operation could be a write) is treated as mutating.
+local read_only = {
+	describe = true,
+	explain = true,
+	select = true,
+	show = true,
+	use = true,
+	values = true,
+}
+
+-- The default Mutating statement check, used by Connectors that do not
+-- provide their own `requires_confirmation`.
+--
+-- This is deliberately conservative lexical analysis, not SQL parsing: the
+-- text must be exactly one statement (per orbit.sql.segment, so comments and
+-- quoted `;` are handled) whose first word is a known read-only keyword.
+-- Anything else -- several statements, only comments, an unknown first word --
+-- asks for confirmation, so ambiguity always falls on the safe side.
+--
+-- Parameters:
+--   statement (string) - the exact text about to be executed.
+--   dialect (string|nil) - the Connector's tokenizer mode (connector.sql_dialect).
+-- Returns: true if Orbit should confirm before running the statement.
+-- Side effects: none (pure function).
+function M.requires_confirmation(statement, dialect)
+	local found = segment.statements(statement, dialect)
+	if #found ~= 1 then
+		return true
+	end
+	local first = found[1].content[1]
+	return not (first.type == "identifier" and read_only[first.text:lower()])
 end
 
 return M

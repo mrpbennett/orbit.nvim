@@ -13,7 +13,8 @@
 --   * extracting the SQL text to run from the buffer, either the whole buffer
 --     or a visual selection (delegated to require("orbit.statements").target),
 --   * optionally asking for confirmation before running statements that look
---     like they mutate data (requires_confirmation),
+--     like they mutate data (the Connector's own requires_confirmation, else
+--     require("orbit.statements").requires_confirmation),
 --   * kicking off the actual database call via require("orbit.runner").run,
 --     which runs asynchronously and calls back with rows or an error,
 --   * tracking "is a query currently running in this buffer" state (the
@@ -79,69 +80,6 @@ local function set_buffer_dialect(buffer, profile)
 	vim.b[buffer].orbit_sql_dialect = dialect
 	-- Profile edits can change lexical rules without changing the SQL text.
 	require("orbit.structure").changed(buffer)
-end
-
--- Lowercased first keywords of SQL statements that are considered "mutating"
--- (i.e. they can change data or schema, as opposed to just reading it). Note
--- that requires_confirmation below actually implements this check the other
--- way around (it whitelists read-only keywords), so this table is currently
--- not referenced by that function; it is kept here as a reference list of
--- which keywords count as mutating.
-local mutating = {
-	alter = true,
-	create = true,
-	delete = true,
-	drop = true,
-	insert = true,
-	merge = true,
-	replace = true,
-	truncate = true,
-	update = true,
-}
-
--- Decides whether a SQL statement is risky enough to ask the user "are you
--- sure?" before running it.
---
--- Parameters:
---   statement (string): the raw SQL text about to be executed.
---
--- Returns:
---   boolean: true if Orbit should prompt for confirmation before running this
---   statement, false if it looks safely read-only.
---
--- How it decides: this is NOT a real SQL parser. It strips a single leading
--- line comment (`-- ...`) or block comment (`/* ... */`) if the statement
--- starts with one, then looks at the first word to see if it's one of a small
--- set of known read-only keywords (select, show, explain, etc). It also counts
--- semicolons to make sure the buffer/selection contains at most one statement
--- (a single trailing semicolon is allowed) -- if there's more than one
--- statement, we can't be sure every one of them is read-only, so this treats
--- it as requiring confirmation. Because this check is "deliberately
--- conservative", any statement it isn't sure about (empty/unrecognized
--- keyword, multiple statements, comment it doesn't fully strip, etc.) is
--- treated as mutating -- i.e. ambiguity always falls on the side of asking for
--- confirmation rather than silently running something destructive.
-local function requires_confirmation(statement)
-	-- This deliberately conservative lexical check is not a SQL parser: ambiguity is treated as mutable.
-	local without_comments = statement:gsub("^%s*%-%-[^\n]*\n", ""):gsub("^%s*/%*.-%*/", "")
-	local keyword = without_comments:lower():match("^%s*([%a]+)")
-	-- select(2, ...) discards the modified string from gsub and keeps only the
-	-- second return value, which is the number of semicolons that were removed
-	-- -- i.e. how many semicolons are in the statement.
-	local semicolons = select(2, without_comments:gsub(";", ""))
-	-- "One statement" means either no semicolons at all, or exactly one
-	-- semicolon and it's the very last non-whitespace character (a normal
-	-- trailing terminator), not a semicolon separating two statements.
-	local one_statement = semicolons == 0 or (semicolons == 1 and without_comments:match(";%s*$"))
-	local read_only = {
-		describe = true,
-		explain = true,
-		select = true,
-		show = true,
-		use = true,
-		values = true,
-	}
-	return not (one_statement and keyword and read_only[keyword])
 end
 
 -- Stops and releases the redraw timer associated with an in-flight query's
@@ -345,12 +283,17 @@ function M.execute(buffer, config, selection, context)
 
 	-- Confirmation is gated on three independent things all being true: the
 	-- global config allows it, this specific profile hasn't opted out via
-	-- options.confirm_mutations = false, and the lexical check above thinks
-	-- this statement looks mutating. vim.fn.confirm shows a native "modal"
+	-- options.confirm_mutations = false, and the Connector's (or the default)
+	-- lexical check thinks this statement looks mutating. vim.fn.confirm shows a native "modal"
 	-- prompt with the given buttons; choice 1 is "&Execute", anything else
 	-- (including cancelling with <Esc>, which returns 0) aborts the run.
-	local confirm = connector.requires_confirmation or requires_confirmation
-	if config.confirm_mutations and profile.options.confirm_mutations ~= false and confirm(statement, profile) then
+	local function mutating()
+		if connector.requires_confirmation then
+			return connector.requires_confirmation(statement, profile)
+		end
+		return statements.requires_confirmation(statement, connector.sql_dialect)
+	end
+	if config.confirm_mutations and profile.options.confirm_mutations ~= false and mutating() then
 		local choice = vim.fn.confirm("Execute mutating statement?", "&Execute\n&Cancel", 2)
 		if choice ~= 1 then
 			return

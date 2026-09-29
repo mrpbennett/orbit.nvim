@@ -9,6 +9,7 @@ local metadata = require("orbit.connectors.metadata")
 local jdbc = require("orbit.connectors.sqlserver_jdbc")
 local sqlcmd = require("orbit.connectors.sqlserver_sqlcmd")
 local schema_pattern = require("orbit.connectors.utils.schema_pattern")
+local segment = require("orbit.sql.segment")
 local tokenizer = require("orbit.sql.tokenizer")
 
 -- Select once at the Connector seam so transport lifecycle details do not leak
@@ -277,16 +278,9 @@ end
 
 function M.requires_confirmation(statement)
 	local tokens = tokenizer.tokenize(vim.split(statement, "\n", { plain = true }), "mssql")
-	local semicolons, last_code = 0, nil
-	for _, token in ipairs(tokens) do
-		if token.type ~= "comment" then
-			last_code = token
-		end
-		if token.type == "semicolon" then
-			semicolons = semicolons + 1
-		end
-	end
-	if semicolons > 1 or (semicolons == 1 and (not last_code or last_code.type ~= "semicolon")) then
+	-- More than one statement (per the shared orbit.sql.segment boundaries)
+	-- can't be vouched for as read-only as a whole, so always confirm.
+	if #segment.split(tokens) > 1 then
 		return true
 	end
 	local verb, verb_index = effective_verb(tokens)

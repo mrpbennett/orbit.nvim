@@ -1,5 +1,45 @@
 # Orbit.nvim v0.1 Plan
 
+## Workspace Sidebar Tree 2026-09-29
+
+- [x] 3a: Add pure `lua/orbit/sidebar_tree.lua`; move the sidebar body rendering (title, profiles, schema tree splice, Redis key status, saved-query tree, filter matching) out of `workspace.render`.
+- [x] 3b: Move expansion state rules (profile schema, saved-query folders, schema nodes) behind `sidebar_tree.is_expanded` / `expand` / `collapse` / `open_schema` / `close_schema`.
+- [x] 3c: Replace the per-kind expand branches with a node-kind expander table; dedupe the object-action lookup shared by `a` and `s`.
+- [x] Add `tests/sidebar_tree_spec.lua`; the full suite must keep only the 3 known unrelated failures; workspace_spec runs unchanged.
+
+### Settled Design
+
+- The Workspace state table stays the model (tests read `state.schema_profile` / `state.nodes`), so no field renames.
+- Loading (schema acquisition, metadata) stays in the Workspace; `sidebar_tree` owns only view state and rendering. Keeps the seam compatible with a later Schema acquisition deepening.
+- Single-kind keymaps (`y`, `P`, `<C-x>`, etc.) keep their direct checks; only the multi-kind expand branching becomes a table.
+
+### Review
+
+- `lua/orbit/sidebar_tree.lua` (pure) now builds the sidebar body and owns expansion rules: `lines`, `is_expanded`, `expand`, `collapse`, `open_schema`, `close_schema`, `saved_directory_key`. `workspace.render` only offsets and paints; `load_schema`, `collapse_schema_tree`, `reload_profiles`, and `expand_metadata` use the shared rules instead of resetting `state.tree` by hand.
+- `h`/`l`/double-click go through `sidebar_tree`; expansion that needs loading dispatches through a node-kind `expanders` table. The `a`/`s` object-action lookup is one `object_actions` helper.
+- `workspace.lua` 1942 → 1742 lines. Before/after against `HEAD`: sidebar lines, highlight ranges, and the line→node map are identical across initial render, folder expand, nested expand, and collapse.
+- New `tests/sidebar_tree_spec.lua` (6 tests, no tabpage). `workspace_spec` passes unchanged. The full suite retains only the three established unrelated failures; `bash tests/java_spec.sh` and `git diff --check` pass. `stylua` is unavailable.
+
+## Statement Segmentation 2026-09-29
+
+- [x] Add `sql/segment.lua` holding the tokenizer-based, compound-block-aware statement boundary loop lifted from `sql/structure.extract`.
+- [x] Make `sql/structure.extract` build its entries from `segment.split`.
+- [x] Make `statements.target` use segmentation for every dialect (fixes `;` inside literals/comments on non-mssql dialects).
+- [x] Move the default Mutating statement check into `statements.requires_confirmation`, tokenizer-based; delete the unused `mutating` table.
+- [x] Make the SQL Server confirmation check count statements through `segment.split`.
+- [x] Add regression coverage; run the full suite and compare against the 3 known unrelated failures.
+
+### Settled Design
+
+- Completion scope (`sql/scope.statement_at`) keeps its plain every-semicolon split, so completion inside procedural bodies stays scoped to the current body statement.
+- Whole-buffer execution of a single recognized compound statement (`CREATE FUNCTION ... BEGIN ...; END;`) now runs instead of reporting ambiguity.
+
+### Review
+
+- `lua/orbit/sql/segment.lua` now owns statement boundaries; `sql/structure.extract`, `statements.target`, `statements.requires_confirmation` (moved from a private `query.lua` function), and the SQL Server confirmation check all use it. The unused `mutating` keyword table in `query.lua` is deleted.
+- Before/after against `HEAD`: `SELECT 'a;b' AS x`, `SELECT 1; -- done;`, and a single `CREATE PROCEDURE ... BEGIN ...; END;` changed from "statement is ambiguous" to runnable; `SELECT 1; SELECT 2` remains ambiguous.
+- New regression coverage in `tests/statements_spec.lua` (literals, comments, quoted identifiers, backticks, dollar quotes, compound bodies, default confirmation). The full Lua suite passes except the same three established unrelated failures (JDBC profile validation, JDBC request framing, Trino large-schema budget). `bash tests/java_spec.sh` and `git diff --check` pass. `stylua` is unavailable.
+
 ## Redis Pretty JSON Results 2026-09-23
 
 - [x] Add focused coverage for native-shape, two-space Redis JSON documents.

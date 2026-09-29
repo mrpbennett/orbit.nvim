@@ -12,6 +12,12 @@ All notable changes to Orbit.nvim are documented in this file.
 
 - Added a Redis Connector backed by user-installed `redis-cli`, with structured endpoint and TLS settings, environment-backed authentication, logical-database selection, one-shot RESP3 JSON execution, pretty JSON result documents, and `.redis` saved queries.
 - Added cached Redis command and key completion through Blink. Orbit builds a bounded, profile- and logical-database-scoped key index using cursor-based `SCAN`, never automatic `KEYS`, and offers keys only in command metadata-defined key positions.
+- Added Workspace sidebar mappings `<C-x>` and `<C-v>` to open the selected saved query in a horizontal or vertical split while keeping the existing query pane.
+
+### Fixed
+
+- Running a whole query buffer no longer reports "statement is ambiguous" when a `;` appears inside a string literal, quoted identifier, comment, or dollar-quoted body on PostgreSQL, MySQL, SQLite, Trino, and Vertica profiles. Execution, the Structure panel, and the Mutating statement check now share one tokenizer-based statement boundary rule, so a single compound `CREATE FUNCTION`/`PROCEDURE`/`TRIGGER` body also runs without a selection.
+- The default mutation confirmation now ignores comments anywhere in the statement and semicolons inside literals, so a single read-only `SELECT` followed by a trailing comment no longer prompts. Multiple statements, comment-only text, and unrecognized first keywords still require confirmation.
 
 ### Changed
 

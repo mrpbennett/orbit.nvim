@@ -191,6 +191,12 @@ end
 -- past the last semicolon). Never refuses, unlike statements.lua's
 -- ambiguity rule, which is an execution-safety concern, not a parsing one.
 --
+-- This intentionally does NOT use orbit.sql.segment (the shared boundary
+-- rule for execution and the Structure panel). segment keeps a whole
+-- procedural body (CREATE FUNCTION ... BEGIN ...; ...; END) as one statement,
+-- but completion wants only the body statement around the cursor so alias and
+-- clause analysis stays local to what the user is typing.
+--
 -- Params:
 --   tokens      - the full token list for the buffer, from tokenizer.tokenize.
 --   cursor_row  - 1-indexed line number of the cursor (matches token.row).

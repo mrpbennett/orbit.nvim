@@ -12,7 +12,7 @@
 -- Malformed/incomplete WITH syntax falls back to a navigable statement root
 -- rather than exposing a partially trusted hierarchy or raising an error.
 -- ============================================================================
-local tokenizer = require("orbit.sql.tokenizer")
+local segment = require("orbit.sql.segment")
 
 local M = {}
 
@@ -31,15 +31,7 @@ local categories = {
 
 -- Remove comments and statement terminators when grammar decisions need only
 -- meaningful SQL tokens. Original tokens remain available for label building.
-local function significant(tokens)
-	local result = {}
-	for _, token in ipairs(tokens) do
-		if token.type ~= "comment" and token.type ~= "semicolon" then
-			table.insert(result, token)
-		end
-	end
-	return result
-end
+local significant = segment.significant
 
 -- Classify a statement for semantic metadata retained on statement roots.
 -- WITH statements are classified by the outer operation after the final CTE.
@@ -101,32 +93,6 @@ local function label(lines, tokens, first, last)
 	end
 	table.insert(parts, source:sub(cursor, end_offset - 1))
 	return table.concat(parts):gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
-end
-
--- Identify statement forms whose internal semicolons are not top-level
--- separators. This intentionally recognizes only forms Orbit can bound
--- conservatively: compound CREATE statements and BEGIN ATOMIC blocks.
-local function is_compound(tokens)
-	local words = {}
-	for _, token in ipairs(tokens) do
-		if token.type == "identifier" and token.depth == 0 then
-			table.insert(words, token.text:upper())
-		end
-	end
-	if words[1] == "BEGIN" and words[2] == "ATOMIC" then
-		return true
-	end
-	if words[1] ~= "CREATE" then
-		return false
-	end
-	local index = 2
-	if words[index] == "OR" and words[index + 1] == "REPLACE" then
-		index = index + 2
-	end
-	if words[index] == "TEMP" or words[index] == "TEMPORARY" then
-		index = index + 1
-	end
-	return words[index] == "TRIGGER" or words[index] == "FUNCTION" or words[index] == "PROCEDURE"
 end
 
 -- Test whether a cursor is inside a node's end-exclusive source range.
@@ -536,11 +502,10 @@ end
 
 -- Extract every top-level statement and its supported hierarchy.
 --
--- Ordinary depth-zero semicolons finish a statement. For recognized procedural
--- forms, BEGIN/CASE/IF/LOOP and END maintain a small block-depth counter so body
--- semicolons stay inside one coarse entry. `END IF` and `END LOOP` do not reopen
--- a block because `previous_word` records the preceding END. An explicit
--- DECLARE section may contain separators before its eventual BEGIN.
+-- Statement boundaries (including procedural bodies whose semicolons stay
+-- inside one statement) are decided by orbit.sql.segment, the same module
+-- execution uses, so the Structure panel and :OrbitExecute always agree on
+-- what "the statement" is.
 --
 -- Params: lines - query-buffer lines without newline terminators; dialect is
 -- the optional connector-selected tokenizer mode.
@@ -548,64 +513,12 @@ end
 -- Side effects: none.
 function M.extract(lines, dialect)
 	local entries = {}
-	local current = {}
-	local compound = false
-	local compound_body = false
-	local block_depth = 0
-	local previous_word
-
-	local function finish(separator)
-		local entry = make_entry(lines, current, separator, compound_body)
+	for _, statement in ipairs(segment.statements(lines, dialect)) do
+		local entry = make_entry(lines, statement.tokens, statement.separator, statement.compound)
 		if entry then
 			table.insert(entries, entry)
 		end
-		current = {}
-		compound = false
-		compound_body = false
-		block_depth = 0
-		previous_word = nil
 	end
-
-	local tokens = tokenizer.tokenize(lines, dialect)
-	-- Once DECLARE appears in a recognized compound declaration, semicolons are
-	-- declarations rather than statement boundaries until BEGIN starts the body.
-	local function has_declarations()
-		for _, token in ipairs(current) do
-			if token.type == "identifier" and token.depth == 0 and token.text:upper() == "DECLARE" then
-				return true
-			end
-		end
-		return false
-	end
-
-	for _, token in ipairs(tokens) do
-		table.insert(current, token)
-		if not compound and #current <= 12 then
-			local content = significant(current)
-			compound = is_compound(content)
-			if compound and content[1].text:upper() == "BEGIN" then
-				compound_body = true
-				block_depth = 1
-			end
-		end
-		if compound and token.type == "identifier" and token.depth == 0 then
-			local word = token.text:upper()
-			if word == "BEGIN" then
-				block_depth = block_depth + 1
-				compound_body = true
-			elseif compound_body and (word == "CASE" or ((word == "IF" or word == "LOOP") and previous_word ~= "END")) then
-				block_depth = block_depth + 1
-			elseif word == "END" and block_depth > 0 then
-				block_depth = block_depth - 1
-			end
-			previous_word = word
-		end
-		local awaiting_body = compound and not compound_body and has_declarations()
-		if token.type == "semicolon" and token.depth == 0 and not awaiting_body and (not compound_body or block_depth == 0) then
-			finish(token)
-		end
-	end
-	finish(nil)
 	return entries
 end
 

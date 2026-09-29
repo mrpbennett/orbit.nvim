@@ -8,9 +8,9 @@
     * orbit.profiles     -- loads/validates connection profiles from disk
     * orbit.adapters     -- gives you a "connector" for a profile's database
       kind (postgres/sqlite/trino/...), used to run schema-object actions
-    * orbit.schema_tree   -- pure data/rendering helpers for the "Profiles"
-      part of the tree (schemas -> tables/views -> columns/keys/indexes);
-      this module renders that tree but does not know how it is structured
+    * orbit.sidebar_tree  -- pure model + view-builder for the sidebar body
+      (title, profiles, saved queries) and the rules for which nodes are
+      expanded; it composes orbit.schema_tree for the Schema browser part
     * orbit.schema_cache  -- caches schema/metadata lookups so re-expanding
       a node doesn't always re-hit the database
     * orbit.runner        -- executes SQL and returns rows
@@ -20,15 +20,13 @@
   Responsibilities of THIS file specifically:
     1. Window/buffer management: creating and closing the workspace tabpage,
       sidebar buffer/window, and query buffer/window.
-    2. Tree rendering: turning plugin state (which profiles exist, which
-      profile's schema is expanded, which saved-query directories are
-      expanded, the current filter text, etc.) into plain text lines
-      drawn into the sidebar buffer, plus highlight groups and a mapping
-      from buffer line number -> the "node" (profile/table/query/etc.)
-      that line represents.
-    3. Expand/collapse state and navigation: keeping track of which nodes
-      are open, and letting the cursor position in the sidebar resolve
-      back to a node via that line-number map.
+    2. Sidebar drawing: writing the lines orbit.sidebar_tree builds under
+      the fixed "Filter:" header, painting its highlights, and keeping the
+      buffer line number -> node map that lets the cursor resolve back to
+      the node (profile/table/query/etc.) it sits on.
+    3. Loading on expansion: when a sidebar_tree expansion needs data
+      (a profile's schema, a table's metadata), starting that load and
+      re-rendering when it lands (see `expanders`).
     4. Keymaps/actions bound to the sidebar buffer: opening queries,
       binding a profile to a query buffer, running schema-object actions
       (sample data, table actions), copying qualified object names,
@@ -60,6 +58,7 @@
 --]]
 local profiles = require("orbit.profiles")
 local schema_tree = require("orbit.schema_tree")
+local sidebar_tree = require("orbit.sidebar_tree")
 local cache = require("orbit.schema_cache")
 local feedback = require("orbit.feedback")
 local results = require("orbit.results")
@@ -190,7 +189,7 @@ local object_name = schema_tree.object_name
 --   root_path: the top-level saved-query-location path this scan started
 --     from; passed through unchanged on recursive calls so every
 --     "saved_directory" node remembers which configured location it
---     belongs to (see saved_directory_key below, and the "r" refresh
+--     belongs to (see sidebar_tree.saved_directory_key, and the "r" refresh
 --     keymap in configure_sidebar which needs to find the right
 --     location entry to re-scan).
 -- Returns: an array of nodes, each either
@@ -200,39 +199,6 @@ local object_name = schema_tree.object_name
 -- (case-insensitive) within each group.
 -- Side effects: none (pure filesystem read); does not touch buffers.
 local discover_saved_queries = saved_queries.discover
-
--- Decide whether a saved-query node (a file or a directory) should be
--- shown given the current sidebar filter text.
---   node: a "saved_directory" or "saved_query" node as produced by
---     discover_saved_queries.
---   filter: the lowercase-insensitive substring the user typed into the
---     "Filter: " box ("" means "show everything").
--- Returns: true if the node's own name matches, OR (for directories) any
--- descendant file/directory matches -- this is what makes a parent
--- directory stay visible while filtered, as long as something inside it
--- still matches, even if the directory's own name doesn't.
-local function saved_query_matches(node, filter)
-	if filter == "" or node.name:lower():find(filter:lower(), 1, true) then
-		return true
-	end
-	for _, child in ipairs(node.children or {}) do
-		if saved_query_matches(child, filter) then
-			return true
-		end
-	end
-	return false
-end
-
--- Build a stable, unique key for a "saved_directory" node so its expanded
--- state can be tracked in state.expanded_saved_dirs across re-renders
--- (nodes are rebuilt fresh on every render(), so we can't just use the
--- node table itself as the key -- it wouldn't be the same object next
--- time). Combining root_path and path (with a NUL separator that can't
--- appear in a real path) keeps directories with the same relative path
--- under two different saved-query locations from colliding.
-local function saved_directory_key(node)
-	return node.root_path .. "\0" .. node.path
-end
 
 -- Return every existing directory a query may be saved into. Descendant
 -- symlinks are excluded, matching discovery and keeping writes within the
@@ -259,20 +225,18 @@ local function refresh_saved_query_paths(state, _)
 	saved_queries.refresh(state.saved_query_locations)
 end
 
--- The heart of the sidebar UI: rebuild the entire tree of text lines from
--- scratch (state.profiles + state.tree + state.saved_query_locations +
--- state.filter) and write it into the sidebar buffer.
+-- The heart of the sidebar UI: rebuild the sidebar from scratch and write it
+-- into the sidebar buffer. orbit.sidebar_tree builds the body (title,
+-- profiles, schema tree, saved queries) as pure data; this function only
+-- places it under the fixed header lines and paints the highlights.
 --
 -- This is called after almost every state change (profile expanded, node
 -- toggled, schema loaded, filter typed, etc.) rather than doing an
 -- incremental diff -- the tree is small enough that a full re-render each
 -- time is simpler and cheap.
 --
---   state: the workspace state table. Reads: state.profiles, state.tree,
---     state.schema_profile (which profile's schema is currently expanded),
---     state.filter, state.loading, state.saved_query_locations,
---     state.expanded_saved_dirs, state.config.icons. Writes:
---     state.nodes (rebuilt every call).
+--   state: the workspace state table, which doubles as the sidebar_tree
+--     model (see that module for the fields it reads). Writes: state.nodes.
 --
 -- Returns: nothing.
 --
@@ -291,184 +255,33 @@ local function render(state)
 	-- defined at the top of the file. vim.tbl_extend("force", a, b) merges
 	-- b's keys over a's, so user icons win.
 	local icons = vim.tbl_extend("force", fallback_icons, state.config.icons or {})
-	local title = state.selected and state.selected.name or "Orbit Workspace"
-	local title_icon = state.selected and icons.profile or icons.workspace
-	local lines = {
-		"press ? to toggle help",
-		"",
-		"Filter: " .. state.filter,
-		title_icon .. " " .. title,
-		"",
-		"Profiles:",
-	}
-	local highlights = { { group = "OrbitHeader", line = FILTER_LINE } }
-	table.insert(highlights, {
-		group = state.selected and "OrbitIconProfile" or "OrbitIconWorkspace",
-		line = 4,
-		col_start = 0,
-		col_end = #title_icon,
+	local lines, nodes, highlights = sidebar_tree.lines(state, {
+		icons = icons,
+		redis_status = function(profile)
+			return require("orbit.redis_cache").status(profile)
+		end,
 	})
-	-- Nodes are keyed by rendered buffer line so mappings can resolve the cursor without parsing text.
+	-- sidebar_tree numbers its output from 1 = the title line, but the title
+	-- sits below the fixed header lines that set_content preserves, so shift
+	-- every node and highlight down by that many lines.
 	state.nodes = {}
-	for _, profile in ipairs(state.profiles) do
-		-- Only one profile's schema tree can be expanded at a time; that
-		-- profile's name is remembered in state.schema_profile.
-		local expanded = state.schema_profile == profile.name
-		local profile_matches = state.filter == ""
-			or profile.name:lower():find(state.filter:lower(), 1, true)
-			or profile.kind:lower():find(state.filter:lower(), 1, true)
-		local tree_lines, tree_nodes, tree_highlights, has_matches = {}, {}, {}, false
-		if expanded then
-			if profile.kind == "redis" then
-				local status = require("orbit.redis_cache").status(profile)
-				local label = (state.loading or status.loading) and "Redis keys: loading"
-					or status.error and "Redis keys: unavailable"
-					or status.loaded and string.format("Redis keys: %d%s", status.count, status.truncated and " (truncated)" or "")
-					or "Redis keys: not loaded"
-				tree_lines = { label }
-				has_matches = profile_matches or label:lower():find(state.filter:lower(), 1, true) ~= nil
-			else
-				-- Relational Connectors delegate their complete hierarchy to schema_tree.
-				tree_lines, tree_nodes, tree_highlights, has_matches = schema_tree.lines(
-					state.tree,
-					profile,
-					profile_matches and "" or state.filter,
-					{ icons = icons, loading = state.loading }
-				)
-			end
-		end
-		-- Show the profile's own line if it matches the filter directly, OR
-		-- if it's expanded and something inside its (filtered) tree matched --
-		-- otherwise a profile whose name doesn't match the filter but which
-		-- contains a matching table would wrongly disappear.
-		if profile_matches or (expanded and has_matches) then
-			local marker = expanded and icons.expanded or icons.collapsed
-			table.insert(
-				lines,
-				string.format(
-					"  %s %s %s (%s)",
-					marker,
-					icons.profile,
-					profile.name,
-					profile.kind
-				)
-			)
-			state.nodes[#lines] = { kind = "profile", profile = profile }
-			table.insert(highlights, { group = "OrbitProfile", line = #lines })
-			table.insert(highlights, {
-				group = "OrbitIconProfile",
-				line = #lines,
-				col_start = #("  " .. marker .. " "),
-				col_end = #("  " .. marker .. " ") + #icons.profile,
-			})
-		end
-		if expanded and (profile_matches or has_matches) then
-			-- `base` is how many lines exist so far (right after the profile's
-			-- own line was appended). schema_tree.lines() numbers its own lines
-			-- and nodes starting at 1, relative to its own output -- so every
-			-- line number and node key it returns has to be shifted by `base`
-			-- to land at the right position in this file's `lines`/`state.nodes`.
-			local base = #lines
-			for _, line in ipairs(tree_lines) do
-				-- Indent every line coming from schema_tree by one more level,
-				-- since it's nested under "Profiles:" -> this profile.
-				table.insert(lines, "    " .. line)
-			end
-			for line_number, node in pairs(tree_nodes) do
-				state.nodes[base + line_number] = node
-			end
-			for _, highlight in ipairs(tree_highlights) do
-				table.insert(highlights, {
-					group = highlight.group,
-					line = base + highlight.line,
-					col_start = highlight.col_start and highlight.col_start + 4 or nil,
-					col_end = highlight.col_end and highlight.col_end + 4 or nil,
-				})
-			end
-		end
+	for line, node in pairs(nodes) do
+		state.nodes[FIXED_HEADER_LINES + line] = node
 	end
-	if #state.saved_query_locations > 0 then
-		table.insert(lines, "")
-		table.insert(lines, "Saved queries:")
-		-- Recursively render one saved-query node (directory or file) and its
-		-- children, indented by `depth` levels (2 spaces each).
-		local function render_saved(node, depth)
-			-- Skip whole subtrees that don't match the current filter (and
-			-- don't have a matching descendant) so filtering also hides empty
-			-- branches, not just non-matching leaves.
-			if not saved_query_matches(node, state.filter) then
-				return
-			end
-			if node.kind == "saved_directory" then
-				-- Directories auto-expand while filtering so matches inside them
-				-- are visible without the user having to manually open them.
-				local expanded = state.expanded_saved_dirs[saved_directory_key(node)] or state.filter ~= ""
-				table.insert(
-					lines,
-					string.format(
-						"%s%s %s %s",
-						string.rep("  ", depth),
-						expanded and icons.expanded or icons.collapsed,
-						icons.folder,
-						node.name
-					)
-				)
-				state.nodes[#lines] = node
-				table.insert(highlights, {
-					group = "OrbitIconFolder",
-					line = #lines,
-					col_start = #(string.rep("  ", depth) .. (expanded and icons.expanded or icons.collapsed) .. " "),
-					col_end = #(string.rep("  ", depth) .. (expanded and icons.expanded or icons.collapsed) .. " ")
-						+ #icons.folder,
-				})
-				if expanded then
-					if #node.children == 0 then
-						table.insert(lines, string.rep("  ", depth + 1) .. "No saved query files")
-					else
-						for _, child in ipairs(node.children) do
-							render_saved(child, depth + 1)
-						end
-					end
-				end
-			else
-				table.insert(lines, string.format("%s%s %s", string.rep("  ", depth), icons.saved_query, node.name))
-				state.nodes[#lines] = node
-				table.insert(highlights, {
-					group = "OrbitIconQuery",
-					line = #lines,
-					col_start = #string.rep("  ", depth),
-					col_end = #string.rep("  ", depth) + #icons.saved_query,
-				})
-			end
-		end
-		for _, location in ipairs(state.saved_query_locations) do
-			-- Wrap each configured saved-query location as a synthetic
-			-- top-level "saved_directory" node so it renders the same way as
-			-- any nested directory, using the location's own path as both its
-			-- own path and its root_path (see saved_directory_key).
-			render_saved({
-				children = location.children,
-				kind = "saved_directory",
-				name = location.name,
-				path = location.path,
-				root_path = location.path,
-			}, 1)
-		end
-	end
-	-- Drop the fixed lines that set_content preserves to avoid rendering them twice.
-	set_content(state, vim.list_slice(lines, FIXED_HEADER_LINES + 1, #lines))
+	set_content(state, lines)
 	-- Wipe every previous highlight before repainting, since node
 	-- positions shift around on every render.
 	vim.api.nvim_buf_clear_namespace(state.sidebar, -1, 0, -1)
+	vim.api.nvim_buf_add_highlight(state.sidebar, -1, "OrbitHeader", FILTER_LINE - 1, 0, -1)
 	for _, highlight in ipairs(highlights) do
-		-- highlight.line is 1-indexed (matches `lines`/`state.nodes`), but
-		-- nvim_buf_add_highlight wants a 0-indexed line, hence the -1.
+		-- highlight.line is 1-indexed relative to the title; the API wants a
+		-- 0-indexed buffer line, hence FIXED_HEADER_LINES + line - 1.
 		-- Descriptors without columns retain the existing whole-line highlight.
 		vim.api.nvim_buf_add_highlight(
 			state.sidebar,
 			-1,
 			highlight.group,
-			highlight.line - 1,
+			FIXED_HEADER_LINES + highlight.line - 1,
 			highlight.col_start or 0,
 			highlight.col_end or -1
 		)
@@ -478,7 +291,7 @@ end
 local function reveal_saved_query(state, directory, path)
 	state.filter = ""
 	for _, ancestor in ipairs(directory.ancestors) do
-		state.expanded_saved_dirs[saved_directory_key({
+		state.expanded_saved_dirs[sidebar_tree.saved_directory_key({
 			path = ancestor,
 			root_path = directory.location.path,
 		})] = true
@@ -546,8 +359,9 @@ end
 --     if ANOTHER load_schema/load_metadata call happens before this one's
 --     callback fires, the stale callback can detect it's been superseded
 --     and do nothing (see the generation check inside the callback).
---   * Mutates state.selected, state.schema_profile, state.loading, and
---     (via schema_tree.reset/set_tables) the contents of state.tree.
+--   * Mutates state.selected, state.loading, and (via
+--     sidebar_tree.open_schema and schema_tree.reset/set_tables)
+--     state.schema_profile and the contents of state.tree.
 --   * Calls render(state) twice: once synchronously to show a "loading"
 --     placeholder, and again from the async callback once data/errors
 --     arrive.
@@ -558,14 +372,10 @@ local function load_schema(state, profile, force)
 	end
 	state.generation = state.generation + 1
 	local generation = state.generation
-	local changed_profile = state.schema_profile ~= profile.name
 	state.selected = profile
-	state.schema_profile = profile.name
-	if changed_profile then
-		-- Switching to a different profile means the old profile's expanded
-		-- schema/tables/metadata state is meaningless here, so wipe it.
-		schema_tree.reset(state.tree)
-	end
+	-- Switching to a different profile discards the old profile's expanded
+	-- schema/tables/metadata state (sidebar_tree.open_schema does the reset).
+	sidebar_tree.open_schema(state, profile.name)
 	state.loading = true
 	render(state)
 	state.schema_notice = start_notice(
@@ -639,12 +449,9 @@ end
 -- Side effects: clears state.schema_profile and the entire schema_tree
 -- state (state.tree), then re-renders.
 local function collapse_schema_tree(state)
-	if not state.schema_profile then
-		return
+	if sidebar_tree.close_schema(state) then
+		render(state)
 	end
-	state.schema_profile = nil
-	schema_tree.reset(state.tree)
-	render(state)
 end
 
 -- Re-read the profiles file from disk and refresh state to match it (used
@@ -671,8 +478,7 @@ local function reload_profiles(state)
 		state.selected = profiles.find(document, state.selected.name)
 	end
 	if state.schema_profile and not profiles.find(document, state.schema_profile) then
-		state.schema_profile = nil
-		schema_tree.reset(state.tree)
+		sidebar_tree.close_schema(state)
 	end
 	return document
 end
@@ -755,7 +561,7 @@ end
 -- line if nothing is cached yet), then calls load_metadata with
 -- show_progress = true.
 local function expand_metadata(state, profile, row, category)
-	schema_tree.toggle(state.tree, { category = category, kind = "metadata", profile = profile, row = row })
+	sidebar_tree.expand(state, { category = category, kind = "metadata", profile = profile, row = row })
 	render(state)
 	load_metadata(state, profile, row, category, true)
 end
@@ -896,6 +702,33 @@ local function run_object_action(state, profile, connector, row, action)
 	end, connector)
 end
 
+-- Resolve a profile's Connector and the schema object actions it offers
+-- for one table/view row. Shared by the "a" (pick an action) and "s" (run
+-- the sample action) keymaps so both report failures the same way.
+--   state: workspace state table (for the configured result limit).
+--   profile: the profile the row belongs to.
+--   row: the table/view row.
+-- Returns: connector, actions on success; nil after notifying the user of
+-- the error (no Connector for this kind, or object actions unsupported).
+local function object_actions(state, profile, row)
+	local connector, err = adapters.connector(profile)
+	if not connector then
+		vim.notify(err, vim.log.levels.ERROR)
+		return nil
+	end
+	local actions
+	if connector.object_actions then
+		actions, err = connector.object_actions(profile.options, row, state.config.result_limit)
+	else
+		err = "schema object actions are not supported for profile kind: " .. tostring(profile.kind)
+	end
+	if not actions then
+		vim.notify(err, vim.log.levels.ERROR)
+		return nil
+	end
+	return connector, actions
+end
+
 -- Handle the "a" (actions) keymap on a table/view node: ask the
 -- connector what actions are available for this kind of object (sample
 -- data, generate DDL, etc.), then let the user pick one via vim.ui.select
@@ -909,19 +742,8 @@ end
 -- connector doesn't support object actions); otherwise opens a
 -- vim.ui.select prompt, and on selection defers to run_object_action.
 local function select_object_action(state, profile, row)
-	local connector, err = adapters.connector(profile)
+	local connector, actions = object_actions(state, profile, row)
 	if not connector then
-		vim.notify(err, vim.log.levels.ERROR)
-		return
-	end
-	local actions
-	if connector.object_actions then
-		actions, err = connector.object_actions(profile.options, row, state.config.result_limit)
-	else
-		err = "schema object actions are not supported for profile kind: " .. tostring(profile.kind)
-	end
-	if not actions then
-		vim.notify(err, vim.log.levels.ERROR)
 		return
 	end
 	vim.ui.select(actions, {
@@ -1236,6 +1058,56 @@ local function show_help(state)
 	end
 end
 
+-- Node kinds whose expansion must also start loading data. Every other
+-- expandable kind (saved-query folders, catalogs, schemas, groups) only
+-- flips its view state.
+--   profile  -> load its schema (load_schema also marks it expanded)
+--   table    -> open it AND start background loads for every metadata
+--               category it has (columns, keys, indexes, ...) so they are
+--               ready before the user expands each one individually
+--   metadata -> open it and load that one category with progress feedback
+local expanders = {
+	profile = function(state, node)
+		load_schema(state, node.profile)
+	end,
+	table = function(state, node)
+		sidebar_tree.expand(state, node)
+		render(state)
+		local connector = adapters.connector(node.profile)
+		for _, category in
+			ipairs(
+				connector
+						and connector.metadata_categories
+						and connector.metadata_categories(node.profile.options, node.row)
+					or {}
+			)
+		do
+			load_metadata(state, node.profile, node.row, category, false)
+		end
+	end,
+	metadata = function(state, node)
+		expand_metadata(state, node.profile, node.row, node.category)
+	end,
+}
+
+-- Expand one sidebar node, running its kind's expander when it has one.
+--   state: workspace state table.
+--   node: the node to expand, or nil (no-op).
+-- Returns: nothing.
+-- Side effects: no-op for leaves and nodes that are already open; otherwise
+-- updates view state, re-renders, and may start loading.
+local function expand_node(state, node)
+	if not node or sidebar_tree.is_expanded(state, node) then
+		return
+	end
+	local expander = expanders[node.kind]
+	if expander then
+		expander(state, node)
+	elseif sidebar_tree.expand(state, node) then
+		render(state)
+	end
+end
+
 -- Wire up all the buffer-local behavior for the sidebar buffer: the
 -- "live filter box" mechanism, and every normal-mode keymap that makes
 -- the tree interactive (h/l collapse/expand, <CR> activate, double
@@ -1299,87 +1171,26 @@ local function configure_sidebar(state)
 	local function current_node()
 		return state.nodes[vim.api.nvim_win_get_cursor(state.sidebar_window)[1]]
 	end
-	-- Is the node under the cursor currently "open"? Each node kind tracks
-	-- its expanded state differently (profiles via state.schema_profile,
-	-- saved directories via state.expanded_saved_dirs, everything else via
-	-- schema_tree's own bookkeeping) so this normalizes all three into one
-	-- boolean for the generic h/l and double-click handlers below.
+	-- Is the node under the cursor currently "open"? sidebar_tree hides the
+	-- fact that profiles, saved-query folders, and schema nodes each track
+	-- this in a different place.
 	local function current_expanded()
 		local node = current_node()
-		if not node then
-			return false
-		end
-		if node.kind == "profile" then
-			return state.schema_profile == node.profile.name
-		end
-		if node.kind == "saved_directory" then
-			return state.expanded_saved_dirs[saved_directory_key(node)]
-		end
-		return schema_tree.is_expanded(state.tree, node)
+		return node ~= nil and sidebar_tree.is_expanded(state, node)
 	end
 	-- "h" keymap: collapse whatever node the cursor is on, if it's
-	-- currently expanded. No-ops for node kinds that can't be
-	-- collapsed (tables/queries that are already closed, leaf nodes, etc.).
+	-- currently expanded. No-ops for leaves and already-closed nodes.
+	-- Collapsing a profile also discards its schema tree state.
 	local function collapse_current()
 		local node = current_node()
-		if not node then
-			return
-		end
-		if node.kind == "profile" and state.schema_profile == node.profile.name then
-			state.schema_profile = nil
-			schema_tree.reset(state.tree)
-			render(state)
-		elseif node.kind == "saved_directory" and state.expanded_saved_dirs[saved_directory_key(node)] then
-			state.expanded_saved_dirs[saved_directory_key(node)] = nil
-			render(state)
-		elseif schema_tree.is_expanded(state.tree, node) then
-			schema_tree.toggle(state.tree, node)
+		if node and sidebar_tree.collapse(state, node) then
 			render(state)
 		end
 	end
 	-- "l" keymap: expand whatever node the cursor is on, if it isn't
-	-- already expanded. Each node kind has different expand behavior:
-	--   profile          -> start loading its schema (load_schema)
-	--   saved_directory  -> just flip the expanded flag and re-render
-	--   table            -> mark expanded AND kick off background loads
-	--                       for every metadata category it has (columns,
-	--                       keys, indexes, ...) so they start fetching
-	--                       right away instead of waiting for the user to
-	--                       expand each one individually
-	--   metadata         -> defer to expand_metadata (loads that one
-	--                       category with progress feedback)
-	--   schema / group   -> just a plain expand + re-render, no loading
-	--                       needed since schema_tree already has this data
+	-- already expanded (see expand_node).
 	local function expand_current()
-		local node = current_node()
-		if not node then
-			return
-		end
-		if node.kind == "profile" and state.schema_profile ~= node.profile.name then
-			load_schema(state, node.profile)
-		elseif node.kind == "saved_directory" and not state.expanded_saved_dirs[saved_directory_key(node)] then
-			state.expanded_saved_dirs[saved_directory_key(node)] = true
-			render(state)
-		elseif node.kind == "table" and not schema_tree.is_expanded(state.tree, node) then
-			schema_tree.toggle(state.tree, node)
-			render(state)
-			local connector = adapters.connector(node.profile)
-			for _, category in
-				ipairs(
-					connector
-							and connector.metadata_categories
-							and connector.metadata_categories(node.profile.options, node.row)
-						or {}
-				)
-			do
-				load_metadata(state, node.profile, node.row, category, false)
-			end
-		elseif node.kind == "metadata" and not schema_tree.is_expanded(state.tree, node) then
-			expand_metadata(state, node.profile, node.row, node.category)
-		elseif (node.kind == "catalog" or node.kind == "schema" or node.kind == "group") and not schema_tree.is_expanded(state.tree, node) then
-			schema_tree.toggle(state.tree, node)
-			render(state)
-		end
+		expand_node(state, current_node())
 	end
 	-- "<CR>" keymap: "activate" whatever node the cursor is on.
 	--   profile     -> select this profile as the workspace's active
@@ -1508,19 +1319,8 @@ local function configure_sidebar(state)
 	vim.keymap.set("n", "s", function()
 		local node = current_node()
 		if node and node.kind == "table" then
-			local connector, err = adapters.connector(node.profile)
+			local connector, actions = object_actions(state, node.profile, node.row)
 			if not connector then
-				vim.notify(err, vim.log.levels.ERROR)
-				return
-			end
-			local actions
-			if connector.object_actions then
-				actions, err = connector.object_actions(node.profile.options, node.row, state.config.result_limit)
-			else
-				err = "schema object actions are not supported for profile kind: " .. tostring(node.profile.kind)
-			end
-			if not actions then
-				vim.notify(err, vim.log.levels.ERROR)
 				return
 			end
 			for _, action in ipairs(actions) do
@@ -1621,7 +1421,7 @@ function M.open(config)
 	local document = profiles.load(config.profile_path)
 	-- This literal is the full shape of a workspace's state table. Fields
 	-- not otherwise obvious:
-	--   expanded_saved_dirs -- set of saved_directory_key(node) -> true,
+	--   expanded_saved_dirs -- set of sidebar_tree.saved_directory_key(node) -> true,
 	--     tracks which saved-query folders are open (separate from
 	--     schema_tree's own expand tracking, since saved queries aren't
 	--     part of schema_tree at all).
