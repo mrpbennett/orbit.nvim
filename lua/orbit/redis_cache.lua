@@ -112,7 +112,9 @@ function M.load_commands(profile, options, callback)
 	state.command_loading = true
 	state.command_refreshing = options.refresh == true
 	state.command_callbacks = { callback }
-	state.command_process = runner.run(profile, "COMMAND", function(_, err, metadata)
+	-- `options.execute` replaces runner.run (tests pass a fake executor).
+	local execute = options.execute or runner.run
+	state.command_process = execute(profile, "COMMAND", function(_, err, metadata)
 		if profiles[profile.name] ~= state then
 			return
 		end
@@ -167,7 +169,7 @@ function M.load_commands(profile, options, callback)
 		local refresh_callbacks = state.command_refresh_callbacks
 		state.command_refresh_callbacks = {}
 		if #refresh_callbacks > 0 then
-			M.load_commands(profile, { refresh = true }, function(refreshed, refresh_err)
+			M.load_commands(profile, { refresh = true, execute = options.execute }, function(refreshed, refresh_err)
 				for _, waiting in ipairs(refresh_callbacks) do
 					waiting(refreshed, refresh_err)
 				end
@@ -251,7 +253,7 @@ function M.load_keys(profile, options, callback)
 		local refresh_callbacks = state.refresh_callbacks
 		state.refresh_callbacks = {}
 		if #refresh_callbacks > 0 then
-			M.load_keys(profile, { refresh = true }, function(refreshed, refresh_err, refresh_status)
+			M.load_keys(profile, { refresh = true, execute = options.execute }, function(refreshed, refresh_err, refresh_status)
 				for _, waiting in ipairs(refresh_callbacks) do
 					waiting(refreshed, refresh_err, refresh_status)
 				end
@@ -259,12 +261,14 @@ function M.load_keys(profile, options, callback)
 		end
 	end
 
+	-- `options.execute` replaces runner.run (tests pass a fake executor).
+	local execute = options.execute or runner.run
 	local scan
 	scan = function(cursor)
 		local statement = table.concat({
 			"SCAN", tostring(cursor), "MATCH", redis.quote_argument(pattern), "COUNT", tostring(count),
 		}, " ")
-		state.key_process = runner.run(profile, statement, function(_, err, metadata)
+		state.key_process = execute(profile, statement, function(_, err, metadata)
 			if profiles[profile.name] ~= state then
 				return
 			end

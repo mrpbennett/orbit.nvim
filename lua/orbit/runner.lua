@@ -16,8 +16,12 @@
 -- in-flight run, and `M.close`/`M.connected` to manage/query a profile's
 -- persistent session.
 --
+-- Child processes are started through the process port (orbit/process.lua),
+-- never vim.system directly. Pass `deps = { spawn = fn }` to M.run to use a
+-- different adapter, e.g. tests/support/fake_process.lua.
+--
 -- Exports (the module table `M`):
---   M.run(profile, statement, callback, connector) -> process handle or nil
+--   M.run(profile, statement, callback, connector, deps) -> process handle or nil
 --   M.cancel(process)
 --   M.close(profile_name)
 --   M.connected(profile_name) -> boolean
@@ -58,15 +62,16 @@ end
 --   statement - the SQL text to run (must be a non-empty string).
 --   callback  - function(rows, err, metadata) called exactly once with either
 --               parsed rows and optional execution metadata, or an error.
--- Returns: the process handle from vim.system (so the caller can cancel it),
+--   spawn     - the process port's spawn function (see orbit/process.lua).
+-- Returns: the process handle from spawn (so the caller can cancel it),
 --          or nil if the run could not even be started (bad input, no
 --          command, or spawn failure) -- in all of those "nil" cases the
 --          callback is still invoked (asynchronously) with the error.
--- Side effects: spawns an external process via vim.system; all callback
+-- Side effects: spawns an external process through `spawn`; all callback
 -- invocations are wrapped in vim.schedule(...) so they run on Neovim's main
 -- event loop, which is required because vim.* APIs are not safe to call from
 -- arbitrary callback/thread contexts.
-local function run_once(profile, connector, statement, callback)
+local function run_once(profile, connector, statement, callback, spawn)
   -- Always deliver completion on Neovim's loop, including command construction and spawn failures.
 	if type(profile) ~= "table" or type(profile.options) ~= "table" then
 		vim.schedule(function()
@@ -92,14 +97,14 @@ local function run_once(profile, connector, statement, callback)
     return nil
   end
 
-  -- vim.system spawns `command` as a child process and calls the given
+  -- spawn starts `command` as a child process and calls the given
   -- function asynchronously once it exits. `text = true` asks Neovim to give
   -- us stdout/stderr as plain strings instead of raw bytes. This call can
   -- itself throw (e.g. if the executable path is malformed), so it's wrapped
   -- in pcall; `ok` tells us whether the process was actually started, and
   -- `process` is either the process handle or the pcall error message.
 	process_options = vim.tbl_extend("force", process_options or {}, { text = true })
-	local ok, process = pcall(vim.system, command, process_options, function(result)
+	local ok, process = pcall(spawn, command, process_options, function(result)
     vim.schedule(function()
       if result.code ~= 0 then
 		-- Non-zero exit code means the CLI itself reported an error. Prefer
@@ -142,12 +147,16 @@ end
 --               from `profile` via `adapters.connector`. Callers that already
 --               have the connector (e.g. because they inspected it) can pass
 --               it in to avoid resolving it twice.
+--   deps      - optional { spawn = function } replacing the process port's
+--               real adapter (orbit/process.lua) for this run.
 -- Returns: whatever run_once/session.run return -- a handle that can later be
 -- passed to M.cancel, or nil if nothing was started.
 -- Side effects: may spawn a process (one-shot) or enqueue work on a shared
 -- session process (see orbit.session); callback is always invoked
 -- eventually, asynchronously.
-function M.run(profile, statement, callback, connector)
+function M.run(profile, statement, callback, connector, deps)
+	-- Looked up per call so a replaced adapter only affects this run.
+	local spawn = deps and deps.spawn or require("orbit.process").spawn
 	if not connector then
 		local err
 		connector, err = adapters.connector(profile)
@@ -160,7 +169,7 @@ function M.run(profile, statement, callback, connector)
 	end
 	-- Trino and Redis use one-shot processes; other supported Connectors retain a serialized CLI session.
 	if not connector.session_command then
-		return run_once(profile, connector, statement, callback)
+		return run_once(profile, connector, statement, callback, spawn)
   end
 	return session.run(profile, connector, statement, function(output, run_err)
     if run_err then
@@ -169,12 +178,12 @@ function M.run(profile, statement, callback, connector)
     end
 		local rows, parse_err, metadata = parse(connector, output, profile.options, statement)
 		callback(rows, parse_err, metadata)
-  end)
+  end, { spawn = spawn })
 end
 
 -- Cancel an in-flight run started by M.run.
--- Parameter: `process` - the value M.run returned (either a vim.system
--- process handle, or an opaque session "request" table).
+-- Parameter: `process` - the value M.run returned (either a process-port
+-- handle, or an opaque session "request" table).
 -- Side effects: sends SIGTERM (15) to a one-shot process, or asks
 -- orbit.session to cancel/remove a queued or active session request.
 -- Safe to call with nil (does nothing).
@@ -183,7 +192,7 @@ function M.cancel(process)
     return
   end
   if process.kill then
-    -- One-shot vim.system handles expose kill; session requests are opaque queue entries.
+    -- One-shot process handles expose kill; session requests are opaque queue entries.
     process:kill(15)
   else
     session.cancel(process)

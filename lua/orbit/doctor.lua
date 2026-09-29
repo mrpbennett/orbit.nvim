@@ -30,7 +30,8 @@ local function default_dependencies()
 		environ = vim.fn.environ,
 		run = function(command, callback, options)
 			options = vim.tbl_extend("force", { text = true, timeout = 5000 }, options or {})
-			vim.system(command, options, function(result)
+			-- Started through the process port like every other Orbit child.
+			require("orbit.process").spawn(command, options, function(result)
 				vim.schedule(function()
 					callback(result)
 				end)

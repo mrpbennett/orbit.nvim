@@ -196,18 +196,7 @@ return {
     assert(mssql.session_exit_error("ignored stdout", " JDBC failed ", jdbc) == "JDBC failed")
   end,
   ["SQL Server JDBC keeps one process after an ordinary statement error"] = function()
-    local original_system = vim.system
-    local process
-    local process_count = 0
-    vim.system = function(_, options)
-      process_count = process_count + 1
-      process = { stdout = options.stdout, writes = {} }
-      function process:write(input) self.writes[#self.writes + 1] = input end
-
-      function process:kill() end
-
-      return process
-    end
+    local fake = require("tests.support.fake_process").new()
     local profile = {
       name = "jdbc-error-recovery",
 		kind = "sqlserver",
@@ -224,71 +213,61 @@ return {
       return "ORBIT/1 " .. marker .. " " .. #payload .. "\n" .. payload
     end
     local ok, test_err = xpcall(function()
-      runner.run(profile, "invalid SQL", function(_, err) first_err = err end)
-      runner.run(profile, "SELECT 7 AS value", function(rows, err) second_rows, second_err = rows, err end)
+      runner.run(profile, "invalid SQL", function(_, err) first_err = err end, nil, fake.deps)
+      runner.run(profile, "SELECT 7 AS value", function(rows, err) second_rows, second_err = rows, err end, nil, fake.deps)
+      local process = fake.last()
       assert(#process.writes == 1)
       local first_marker = process.writes[1]:match("^ORBIT/1 ([^ ]+)")
       local failure = [[{"ok":false,"fatal":false,"error":"syntax error"}]]
-      process.stdout(nil, response(first_marker, failure))
+      process:stdout(response(first_marker, failure))
       assert(#process.writes == 2)
       local second_marker = process.writes[2]:match("^ORBIT/1 ([^ ]+)")
       local success = [=[{"ok":true,"columns":["value"],"rows":[["7"]]}]=]
-      process.stdout(nil, response(second_marker, success))
+      process:stdout(response(second_marker, success))
       assert(vim.wait(100, function() return first_err and second_rows end))
       assert(first_err == "syntax error" and second_err == nil)
-      assert(second_rows[1].value == "7" and process_count == 1)
+      assert(second_rows[1].value == "7" and #fake.spawned == 1)
     end, debug.traceback)
     session.close(profile.name)
-    vim.system = original_system
     assert(ok, test_err)
   end,
   ["Session replaces the inherited environment for SQL Server sqlcmd"] = function()
-    local original_system = vim.system
-    local captured, clear_env
-    vim.system = function(_, options)
-      captured = options.env
-      clear_env = options.clear_env
-      return { write = function() end, kill = function() end }
-    end
+    local fake = require("tests.support.fake_process").new()
     local profile = {
       name = "mssql-sanitized-environment",
 		kind = "sqlserver",
       options = { host = "sql.example", database = "warehouse", user = "orbit", password = "secret" },
     }
     local ok, test_err = xpcall(function()
-      runner.run(profile, "SELECT 1", function() end)
-      assert(clear_env == true)
+      runner.run(profile, "SELECT 1", function() end, nil, fake.deps)
+      local captured = fake.last().options.env
+      assert(fake.last().options.clear_env == true)
       assert(captured.SQLCMDPASSWORD == "secret")
       for name in pairs(captured) do
         assert(name == "SQLCMDPASSWORD" or not name:upper():match("^SQLCMD"), name)
       end
     end, debug.traceback)
     session.close(profile.name)
-    vim.system = original_system
     assert(ok, test_err)
   end,
 
   ["SQL Server checks password sources before spawning sqlcmd"] = function()
-    local original_system = vim.system
     local original_password = vim.env.ORBIT_SQLSERVER_MISSING
-    local spawned, received = false, nil
+    local fake = require("tests.support.fake_process").new()
+    local received = nil
     vim.env.ORBIT_SQLSERVER_MISSING = nil
-    vim.system = function()
-      spawned = true
-    end
     local profile = {
       name = "mssql-missing-password",
 		kind = "sqlserver",
       options = { host = "sql.example", database = "warehouse", user = "orbit", password_env = "ORBIT_SQLSERVER_MISSING" },
     }
     local ok, test_err = xpcall(function()
-      runner.run(profile, "SELECT 1", function(_, err) received = err end)
+      runner.run(profile, "SELECT 1", function(_, err) received = err end, nil, fake.deps)
       assert(vim.wait(100, function() return received ~= nil end))
 		assert(received:match("does not contain an SQL Server password"), received)
-      assert(not spawned)
+      assert(#fake.spawned == 0)
     end, debug.traceback)
     session.close(profile.name)
-    vim.system = original_system
     vim.env.ORBIT_SQLSERVER_MISSING = original_password
     assert(ok, test_err)
   end,
@@ -403,18 +382,7 @@ return {
     assert(vim.deep_equal(empty, {}) and empty_err == nil and metadata == nil)
   end,
   ["session preserves residual stdout until the next complete frame"] = function()
-    local original_system = vim.system
-    local stdout_callback
-    local writes = {}
-    vim.system = function(_, options)
-      stdout_callback = options.stdout
-      return {
-        write = function(_, input)
-          table.insert(writes, input)
-        end,
-        kill = function() end,
-      }
-    end
+    local fake = require("tests.support.fake_process").new()
 
     local profile = { name = "framing", kind = "fake", options = {} }
     local ok, test_err = xpcall(function()
@@ -428,39 +396,29 @@ return {
         end,
       }
       local first, second
-      session.run(profile, connector, "first", function(output, err) first = { output, err } end)
-      session.run(profile, connector, "second", function(output, err) second = { output, err } end)
+      session.run(profile, connector, "first", function(output, err) first = { output, err } end, fake.deps)
+      session.run(profile, connector, "second", function(output, err) second = { output, err } end, fake.deps)
+      local child = fake.last()
+      local writes = child.writes
       assert(#writes == 1)
       local first_marker = writes[1]:match("|([^|]+)|$")
       assert(#first_marker == 33 and first_marker:match("^__orbit_%x+_%x+$"))
-      stdout_callback(nil, "first-output<" .. first_marker .. ">")
+      child:stdout("first-output<" .. first_marker .. ">")
       assert(#writes == 1 and first == nil)
-      stdout_callback(nil, "\nnext-prefix")
+      child:stdout("\nnext-prefix")
       assert(#writes == 2)
       local second_marker = writes[2]:match("|([^|]+)|$")
-      stdout_callback(nil, "second-output<" .. second_marker .. ">\n")
+      child:stdout("second-output<" .. second_marker .. ">\n")
       assert(vim.wait(100, function() return first and second end))
       assert(first[1] == "first-output" and first[2] == nil)
       assert(second[1] == "next-prefixsecond-output" and second[2] == nil)
     end, debug.traceback)
     session.close(profile.name)
-    vim.system = original_system
     assert(ok, test_err)
   end,
   ["invalid framing isolates stale process callbacks from a replacement"] = function()
-    local original_system = vim.system
-    local process
-    local processes = {}
-    vim.system = function(_, options, exit_callback)
-      process = { writes = {}, stdout = options.stdout, stderr = options.stderr, killed = false }
-      function process:write(input) self.writes[#self.writes + 1] = input end
-
-      function process:kill() self.killed = true end
-
-      process.exit = exit_callback
-      processes[#processes + 1] = process
-      return process
-    end
+    local fake = require("tests.support.fake_process").new()
+    local processes = fake.spawned
     local profile = { name = "discard-response", kind = "fake", options = {} }
     local connector = {
       session_command = function() return { "fake" } end,
@@ -472,41 +430,32 @@ return {
     }
     local first, second
     local ok, test_err = xpcall(function()
-      session.run(profile, connector, "first", function(output, err) first = { output, err } end)
-      session.run(profile, connector, "second", function(output, err) second = { output, err } end)
+      session.run(profile, connector, "first", function(output, err) first = { output, err } end, fake.deps)
+      session.run(profile, connector, "second", function(output, err) second = { output, err } end, fake.deps)
+      local process = fake.last()
       assert(#process.writes == 1)
-      process.stdout(nil, "fatal\n")
+      process:stdout("fatal\n")
       assert(vim.wait(100, function() return first and second end))
       assert(first[1] == nil and first[2] == "connector returned invalid session framing")
       assert(second[1] == nil and second[2] == first[2])
       assert(#process.writes == 1 and process.killed and not session.connected(profile.name))
       local third
-      session.run(profile, connector, "third", function(output, err) third = { output, err } end)
+      session.run(profile, connector, "third", function(output, err) third = { output, err } end, fake.deps)
       assert(#processes == 2 and #processes[2].writes == 1 and session.connected(profile.name))
-      processes[1].stdout(nil, "fatal\n")
-      processes[1].stderr(nil, "stale error")
+      processes[1]:stdout("fatal\n")
+      processes[1]:stderr("stale error")
       assert(session.connected(profile.name) and third == nil)
-      processes[1].exit({ code = 1, stderr = "old process closed" })
+      processes[1]:exit(1, nil, "old process closed")
       assert(session.connected(profile.name) and third == nil)
-      processes[2].stdout(nil, "ok\n")
+      processes[2]:stdout("ok\n")
       assert(vim.wait(100, function() return third ~= nil end))
       assert(third[1] == "ok" and third[2] == nil)
     end, debug.traceback)
     session.close(profile.name)
-    vim.system = original_system
     assert(ok, test_err)
   end,
   ["Session passes profile options to framing and accepts explicit fatal framing errors"] = function()
-    local original_system = vim.system
-    local process
-    vim.system = function(_, options)
-      process = { stdout = options.stdout, killed = false }
-      function process:write() end
-
-      function process:kill() self.killed = true end
-
-      return process
-    end
+    local fake = require("tests.support.fake_process").new()
     local profile = { name = "framing-options", kind = "fake", options = { transport = "structured" } }
     local received, request_options, output_options
     local connector = {
@@ -521,14 +470,14 @@ return {
       end,
     }
     local ok, test_err = xpcall(function()
-      session.run(profile, connector, "SELECT 1", function(_, err) received = err end)
-      process.stdout(nil, "bad frame")
+      session.run(profile, connector, "SELECT 1", function(_, err) received = err end, fake.deps)
+      local process = fake.last()
+      process:stdout("bad frame")
       assert(vim.wait(100, function() return received ~= nil end))
       assert(request_options == profile.options and output_options == profile.options)
       assert(received == "malformed structured frame" and process.killed)
     end, debug.traceback)
     session.close(profile.name)
-    vim.system = original_system
     assert(ok, test_err)
   end,
 
@@ -651,17 +600,8 @@ return {
     session.close(profile.name)
   end,
   ["Session closes every retained child at shutdown"] = function()
-    local original_system = vim.system
-    local processes = {}
-    vim.system = function()
-      local process = { killed = false }
-      function process:write() end
-
-      function process:kill() self.killed = true end
-
-      processes[#processes + 1] = process
-      return process
-    end
+    local fake = require("tests.support.fake_process").new()
+    local processes = fake.spawned
     local connector = {
       session_command = function() return { "fake" } end,
       session_request = function() return "request" end,
@@ -672,28 +612,18 @@ return {
       for _, name in ipairs({ "shutdown-one", "shutdown-two" }) do
         session.run({ name = name, kind = "fake", options = {} }, connector, "SELECT 1", function(_, err)
           errors[name] = err
-        end)
+        end, fake.deps)
       end
       session.close_all()
       assert(vim.wait(100, function() return errors["shutdown-one"] and errors["shutdown-two"] end))
       assert(#processes == 2 and processes[1].killed and processes[2].killed)
       assert(not session.connected("shutdown-one") and not session.connected("shutdown-two"))
     end, debug.traceback)
-    vim.system = original_system
     assert(ok, test_err)
   end,
   ["cancelling active retained work fails its queue and later reconnects"] = function()
-    local original_system = vim.system
-    local processes = {}
-    vim.system = function(_, options, exit_callback)
-      local process = { killed = false, stdout = options.stdout, exit = exit_callback, writes = {} }
-      function process:write(input) self.writes[#self.writes + 1] = input end
-
-      function process:kill() self.killed = true end
-
-      processes[#processes + 1] = process
-      return process
-    end
+    local fake = require("tests.support.fake_process").new()
+    local processes = fake.spawned
     local connector = {
       session_command = function() return { "fake" } end,
       session_request = function(statement, marker) return statement .. "|" .. marker end,
@@ -702,8 +632,8 @@ return {
     local profile = { name = "cancel-generation", kind = "fake", options = {} }
     local first_err, second_err, third_output
     local ok, test_err = xpcall(function()
-      local first = session.run(profile, connector, "first", function(_, err) first_err = err end)
-      session.run(profile, connector, "second", function(_, err) second_err = err end)
+      local first = session.run(profile, connector, "first", function(_, err) first_err = err end, fake.deps)
+      session.run(profile, connector, "second", function(_, err) second_err = err end, fake.deps)
       session.cancel(first)
       assert(processes[1].killed)
       assert(vim.wait(100, function() return first_err and second_err end))
@@ -711,16 +641,15 @@ return {
       session.run(profile, connector, "third", function(output, err)
         assert(err == nil)
         third_output = output
-      end)
+      end, fake.deps)
       assert(#processes == 2)
-      processes[1].stdout(nil, "ok\n")
-      processes[1].exit({ code = 143, stderr = "terminated" })
-      processes[2].stdout(nil, "ok\n")
+      processes[1]:stdout("ok\n")
+      processes[1]:exit(143, nil, "terminated")
+      processes[2]:stdout("ok\n")
       assert(vim.wait(100, function() return third_output ~= nil end))
       assert(third_output == "ok")
     end, debug.traceback)
     session.close(profile.name)
-    vim.system = original_system
     assert(ok, test_err)
   end,
   ["Orbit registers retained Session cleanup for Neovim shutdown"] = function()

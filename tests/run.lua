@@ -27,6 +27,7 @@ local modules = {
 	"orbit.query",
 	"orbit.redis_cache",
   "orbit.results",
+  "orbit.process",
   "orbit.runner",
   "orbit.session",
   "orbit.sql.tokenizer",

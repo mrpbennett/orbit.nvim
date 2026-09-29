@@ -26,8 +26,12 @@
   M.run/M.cancel/M.close/M.connected for any connector that defines
   `session_command`.
 
+  The CLI process is started through the process port (orbit/process.lua);
+  M.run accepts `deps = { spawn = fn }` to use another adapter. The spawn in
+  effect when a session's process starts is the one that process uses.
+
   Exports (module table M):
-    M.run(profile, connector, statement, callback) -> request handle
+    M.run(profile, connector, statement, callback, deps) -> request handle
     M.cancel(request)
     M.close(profile_name)
     M.close_all()
@@ -36,7 +40,7 @@
 local M = {}
 -- profile name -> session state table. Each session state has:
 --   profile, connector - what was passed to session_for.
---   process            - the vim.system process handle, or nil if not yet
+--   process            - the process-port handle, or nil if not yet
 --                        started (or if it died and needs restarting).
 --   queue              - FIFO list of pending request tables.
 --   active             - the request currently being processed (written
@@ -48,6 +52,8 @@ local M = {}
 --                        session_for).
 --   sequence           - monotonically increasing counter used to build
 --                        unique markers.
+--   spawn              - the process port's spawn function the next process
+--                        start will use (from the latest M.run's deps).
 --   stdout             - unconsumed bytes from the process's continuous
 --                        stdout stream. Connector framing removes complete
 --                        prefixes while preserving bytes for the next request.
@@ -110,7 +116,7 @@ end
 -- Parameters: session - the session state table to advance.
 -- Returns: nothing; this function's effect is entirely through mutating
 -- `session` and eventually calling request callbacks.
--- Side effects: may spawn a new child process via vim.system (with stdin
+-- Side effects: may spawn a new child process via session.spawn (with stdin
 -- piping enabled and stdout/stderr callbacks); writes to the process's
 -- stdin; recurses into itself (directly, or via the stdout callback below)
 -- to keep draining the queue one request at a time.
@@ -141,7 +147,7 @@ local function start_next(session)
 		session.process_generation = (session.process_generation or 0) + 1
 		local process_generation = session.process_generation
 		local options = {
-			-- stdin = true tells vim.system to open a pipe we can write() to
+			-- stdin = true asks the process port to open a pipe we can write() to
 			-- later, since we need to send each statement interactively rather
 			-- than passing it as a command-line argument.
 			stdin = true,
@@ -217,9 +223,9 @@ local function start_next(session)
 		end
 		-- The final callback here fires when the CLI process exits entirely
 		-- (not per-statement) -- i.e. the session ended, whether cleanly or
-		-- due to a crash/kill. pcall guards against vim.system itself
+		-- due to a crash/kill. pcall guards against spawn itself
 		-- throwing (e.g. invalid command).
-		local ok, process = pcall(vim.system, command, options, function(result)
+		local ok, process = pcall(session.spawn, command, options, function(result)
 			-- Guard against a stale/replaced session: if `M.close` or
 			-- `session_for` already swapped in a different session object under
 			-- this profile name, this exit callback belongs to an old process
@@ -304,11 +310,14 @@ end
 --   statement - SQL text to run.
 --   callback  - function(output, err) invoked exactly once when this
 --               statement's result is ready (or it fails/is cancelled).
+--   deps      - optional { spawn = function } replacing the process port's
+--               real adapter (orbit/process.lua).
 -- Returns: the request table (used as an opaque handle by M.cancel).
 -- Side effects: mutates the session's queue; may start a new CLI process
 -- (see start_next).
-function M.run(profile, connector, statement, callback)
+function M.run(profile, connector, statement, callback, deps)
 	local session = session_for(profile, connector)
+	session.spawn = deps and deps.spawn or require("orbit.process").spawn
 	session.sequence = session.sequence + 1
 	local request = {
 		callback = callback,

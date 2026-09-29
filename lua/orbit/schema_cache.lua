@@ -210,10 +210,13 @@ end
 --   node      - the schema_statement request descriptor.
 --   callback  - function(rows, err) invoked (async, on Neovim's event loop)
 --               once the query completes or an error occurs earlier.
--- Side effects: performs actual process/CLI I/O through runner.run (spawns
--- or reuses a database CLI process - see lua/orbit/runner.lua and
--- lua/orbit/session.lua for how that I/O happens).
-local function run_schema_statement(profile, connector, node, callback)
+--   execute   - optional function(profile, statement, callback, connector)
+--               that runs the statement; defaults to runner.run. Callers
+--               (and tests) pass it through `options.execute`.
+-- Side effects: performs actual process/CLI I/O through `execute` (by
+-- default spawns or reuses a database CLI process - see
+-- lua/orbit/runner.lua and lua/orbit/session.lua).
+local function run_schema_statement(profile, connector, node, callback, execute)
   if not connector then
     local connector_err
     connector, connector_err = adapters.connector(profile)
@@ -231,7 +234,10 @@ local function run_schema_statement(profile, connector, node, callback)
     end)
     return
   end
-  runner.run(profile, statement, callback, connector)
+  -- runner.run is looked up here, not captured at load time, so a replaced
+  -- runner still applies to callers that pass no `execute`.
+  execute = execute or runner.run
+  execute(profile, statement, callback, connector)
 end
 
 -- Resolves the connector for `profile` and checks that it actually
@@ -296,7 +302,10 @@ end
 --   profile  - the connection profile to query.
 --   options  - optional table; `options.refresh = true` forces a reload
 --              even if a cached table list already exists (e.g. user hit a
---              manual refresh keybinding).
+--              manual refresh keybinding). `options.execute` replaces
+--              runner.run for the statement this call starts (all three
+--              load_* functions accept it). A refresh queued behind an
+--              in-flight load reuses that load's `execute`.
 --   callback - optional function(rows, err) called once data is available
 --              (always asynchronously, even on a cache hit).
 -- Side effects: may run a real schema query (process/CLI I/O); on a
@@ -312,7 +321,7 @@ function M.load_tables(profile, options, callback)
   end, function(rows)
     state.tables = rows
   end, function(done)
-    run_schema_statement(profile, nil, { type = "tables" }, done)
+    run_schema_statement(profile, nil, { type = "tables" }, done, options.execute)
   end, function()
     -- A successful table refresh invalidates dependent object metadata, not failed data.
     state.columns = {}
@@ -351,7 +360,7 @@ function M.load_columns(profile, row, options, callback)
       name = row.name,
       schema = row.schema,
       catalog = row.catalog,
-    }, done)
+    }, done, options.execute)
   end)
 end
 
@@ -392,7 +401,7 @@ function M.load_metadata(profile, row, category, options, callback)
       name = row.name,
       schema = row.schema,
       catalog = row.catalog,
-    }, done)
+    }, done, options.execute)
   end)
 end
 
