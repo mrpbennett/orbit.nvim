@@ -30,6 +30,8 @@ Not MVP: project discovery, multiple projects or locations in one profile, BigQu
 
 Orbit's normalized connector boundary is implicit and capability-based. The required practical hooks for BigQuery are `validate_options`, `prepare`, `qualified_name`, `completion_word`, `schema_statement`, `metadata_categories`, and `object_actions`; `parse` can override the generic JSON parser (`lua/orbit/adapters.lua:28-38`, `lua/orbit/runner.lua:30-37`, `lua/orbit/connectors/trino.lua:13-50`). BigQuery should omit session and editable-result hooks.
 
+> Update (2026-09-29): `lua/orbit/adapters.lua` was replaced by the Connector registry `lua/orbit/connectors/init.lua` and the written contract `lua/orbit/connectors/contract.lua`, so the `adapters.lua` line pointers in this note are historical. Adding a connector now means one Connector file plus one entry in the registry's `kinds` list. The Connector's own `validate_options` owns its required fields and `schema_patterns` shape, and `executable(options)` feeds Doctor. `profiles.lua` and `doctor.lua` need no changes.
+
 Adding a connector requires:
 
 - Registering `require("orbit.connectors.bigquery")` in the connector table (`lua/orbit/adapters.lua:33-38`).

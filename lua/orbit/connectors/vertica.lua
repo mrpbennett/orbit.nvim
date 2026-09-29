@@ -1,5 +1,6 @@
 -- Vertica connector backed by the vsql command-line client.
 local M = {}
+local option_rules = require("orbit.connectors.utils.options")
 -- A process-local sentinel makes collision with a real cell value negligible;
 -- a fixed public sentinel would silently convert that literal value to NULL.
 local null_marker = "__ORBIT_NULL_" .. tostring(vim.uv.hrtime()) .. tostring({}):gsub("[^%w]", "") .. "__"
@@ -32,7 +33,7 @@ local function schema_filter(schemas)
 end
 
 local function command(options)
-  local result = { options.executable or "vsql" }
+  local result = { M.executable(options) }
   append(result, options.arguments or {})
   append(result, {
     "--dbname", options.database,
@@ -50,7 +51,23 @@ local function command(options)
   return result
 end
 
+-- The CLI this profile runs: the profile's `executable` override, else
+-- the vsql client found on PATH. Doctor reports and version-checks it.
+function M.executable(options)
+	return options.executable or "vsql"
+end
+
 function M.validate_options(profile_name, options)
+	-- Required connection fields come first so a missing one is reported
+	-- before any other mistake in the same profile.
+	local valid, err = option_rules.require_strings(profile_name, options, { "host", "user", "database" })
+	if not valid then
+		return nil, err
+	end
+	valid, err = option_rules.schema_patterns(profile_name, options)
+	if not valid then
+		return nil, err
+	end
   local allowed = {
     arguments = true,
     confirm_mutations = true,

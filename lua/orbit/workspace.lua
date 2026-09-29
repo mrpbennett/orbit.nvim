@@ -6,7 +6,7 @@
   split and a results split. Think of it as the glue layer that sits on
   top of the lower-level pieces:
     * orbit.profiles     -- loads/validates connection profiles from disk
-    * orbit.adapters     -- gives you a "connector" for a profile's database
+    * orbit.connectors     -- gives you a "connector" for a profile's database
       kind (postgres/sqlite/trino/...), used to run schema-object actions
     * orbit.sidebar_tree  -- pure model + view-builder for the sidebar body
       (title, profiles, saved queries) and the rules for which nodes are
@@ -65,7 +65,7 @@ local sidebar_tree = require("orbit.sidebar_tree")
 local cache = require("orbit.schema_cache")
 local feedback = require("orbit.feedback")
 local results = require("orbit.results")
-local adapters = require("orbit.adapters")
+local connectors = require("orbit.connectors")
 local execution = require("orbit.execution")
 local saved_queries = require("orbit.saved_queries")
 
@@ -664,7 +664,7 @@ end
 --   state: workspace state table.
 --   profile: the profile the row belongs to.
 --   connector: the adapter connector for that profile's database kind
---     (from orbit.adapters), used to actually run the statement.
+--     (from orbit.connectors), used to actually run the statement.
 --   row: the table/view row the action applies to.
 --   action: one action descriptor, with `.kind`, `.label`, `.statement`
 --     (and possibly `.id`).
@@ -728,7 +728,7 @@ end
 -- Returns: connector, actions on success; nil after notifying the user of
 -- the error (no Connector for this kind, or object actions unsupported).
 local function object_actions(state, profile, row)
-	local connector, err = adapters.connector(profile)
+	local connector, err = connectors.resolve(profile)
 	if not connector then
 		vim.notify(err, vim.log.levels.ERROR)
 		return nil
@@ -794,7 +794,7 @@ end
 -- and shows a confirmation notification.
 local function copy_object_name(profile, row)
 	-- Connector-specific qualification produces an identifier that can be pasted back into SQL.
-	local connector, err = adapters.connector(profile)
+	local connector, err = connectors.resolve(profile)
 	if not connector then
 		vim.notify(err, vim.log.levels.ERROR)
 		return
@@ -1090,7 +1090,7 @@ local expanders = {
 	table = function(state, node)
 		sidebar_tree.expand(state, node)
 		render(state)
-		local connector = adapters.connector(node.profile)
+		local connector = connectors.resolve(node.profile)
 		for _, category in
 			ipairs(
 				connector

@@ -1,5 +1,6 @@
 -- MySQL 8.x connector backed by Oracle MySQL or MariaDB command-line clients.
 local M = { sql_dialect = "mysql" }
+local option_rules = require("orbit.connectors.utils.options")
 
 local mutation_sql = require("orbit.connectors.utils.mutation_sql")
 local metadata = require("orbit.connectors.metadata")
@@ -52,7 +53,7 @@ end
 
 local function command(options)
 	local family = client_family(options)
-	local result = { options.executable or (family == "mariadb" and "mariadb" or "mysql") }
+	local result = { M.executable(options) }
 	-- User-managed credential options come first; Orbit-owned connection and
 	-- machine-output flags come later so an option file cannot corrupt framing.
 	append(result, options.arguments or {})
@@ -83,7 +84,24 @@ local function command(options)
 	return result
 end
 
+-- The CLI this profile runs: the profile's `executable` override, else the
+-- client family's own binary (`mariadb` or `mysql`) found on PATH. Doctor
+-- reports and version-checks it.
+function M.executable(options)
+	return options.executable or (client_family(options) == "mariadb" and "mariadb" or "mysql")
+end
+
 function M.validate_options(profile_name, options)
+	-- Required connection fields come first so a missing one is reported
+	-- before any other mistake in the same profile.
+	local valid, err = option_rules.require_strings(profile_name, options, { "database" })
+	if not valid then
+		return nil, err
+	end
+	valid, err = option_rules.schema_patterns(profile_name, options)
+	if not valid then
+		return nil, err
+	end
 	local allowed = {
 		arguments = true,
 		client_family = true,

@@ -26,7 +26,8 @@ local function fake_world(overrides)
 		end,
 	}
 	world.deps = {
-		connectors = { connector = function() return world.connector end },
+		-- The real contract fills defaulted members (e.g. the Mutating statement rule).
+		connectors = { resolve = function() return require("orbit.connectors.contract").with_defaults(world.connector) end },
 		runner = {
 			connected = function() return false end,
 			run = function(profile, statement, callback)

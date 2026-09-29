@@ -4,7 +4,7 @@
 -- sitting in" (figured out by orbit.sql.scope, using tokens produced by
 -- orbit.sql.tokenizer) and "what schema information do we actually have"
 -- (fetched from orbit.schema_cache, which caches table/column metadata
--- pulled through a database connector — see orbit.adapters). Given those
+-- pulled through a database connector — see orbit.connectors). Given those
 -- two things, it produces a flat list of completion candidates: table
 -- names, column names, completion namespaces, and alias names.
 --
@@ -35,7 +35,7 @@
 --     modules.
 local cache = require("orbit.schema_cache")
 local profiles = require("orbit.profiles")
-local adapters = require("orbit.adapters")
+local connectors = require("orbit.connectors")
 local tokenizer = require("orbit.sql.tokenizer")
 local scope = require("orbit.sql.scope")
 
@@ -139,7 +139,7 @@ end
 --   profile             - the connection profile (has .name, .options, etc;
 --                          see orbit.profiles).
 --   connector           - the dialect-specific connector for this profile
---                          (postgres/sqlite/trino — see orbit.adapters). Its
+--                          (postgres/sqlite/trino — see orbit.connectors). Its
 --                          completion_word(options, row, prefix) builds the
 --                          text to insert for a schema row, formatted the
 --                          way that SQL dialect expects (quoting rules,
@@ -397,7 +397,7 @@ end
 -- before the cursor, or {} if there's no connector for this profile or
 -- nothing sensible to suggest at this position (e.g. clause is "unknown").
 function M.items(profile, lines, row, col)
-	local connector = adapters.connector(profile)
+	local connector = connectors.resolve(profile)
 	if not connector then
 		return {}
 	end

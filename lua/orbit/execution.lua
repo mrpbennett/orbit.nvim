@@ -68,8 +68,7 @@ end
 -- whatever the caller passed in `deps`. The caller's table is never mutated.
 local function resolve_deps(deps)
 	local resolved = {
-		connectors = require("orbit.adapters"),
-		statements = require("orbit.statements"),
+		connectors = require("orbit.connectors"),
 		diagnostics = require("orbit.diagnostics"),
 		feedback = require("orbit.feedback"),
 		metadata = require("orbit.schema_cache"),
@@ -107,15 +106,6 @@ local function resolve_messages(request, connected)
 	return messages
 end
 
-
--- Is this statement a Mutating statement? The Connector may supply its own
--- rule; otherwise the default lexical rule in orbit.statements applies.
-local function mutating(connector, request, deps)
-	if connector.requires_confirmation then
-		return connector.requires_confirmation(request.statement, request.profile)
-	end
-	return deps.statements.requires_confirmation(request.statement, connector.sql_dialect)
-end
 
 -- Decides the Editable target for a result that browses one schema object
 -- (`request.table`), then calls `done()`. It fills `result_options` in place:
@@ -187,7 +177,7 @@ end
 --                         finished (function(row_count, elapsed_seconds)).
 --   sink (table): the result sink; see the header comment.
 --   deps (table|nil): optional dependency overrides (runner, metadata,
---     connectors, statements, feedback, diagnostics, confirm, notify, now,
+--     connectors, feedback, diagnostics, confirm, notify, now,
 --     ticker). Missing entries use the real modules.
 --
 -- Returns: true when the statement was started; false when it was refused
@@ -198,7 +188,7 @@ end
 function M.run(request, sink, deps)
 	deps = resolve_deps(deps)
 	local profile = request.profile
-	local connector, connector_err = deps.connectors.connector(profile)
+	local connector, connector_err = deps.connectors.resolve(profile)
 	if not connector then
 		deps.notify(connector_err, vim.log.levels.ERROR)
 		return false
@@ -211,7 +201,7 @@ function M.run(request, sink, deps)
 		deps.notify(messages.busy, vim.log.levels.WARN)
 		return false
 	end
-	if request.confirm_mutations and profile.options.confirm_mutations ~= false and mutating(connector, request, deps) then
+	if request.confirm_mutations and profile.options.confirm_mutations ~= false and connector.requires_confirmation(request.statement, profile) then
 		if not deps.confirm("Execute mutating statement?") then
 			return false
 		end

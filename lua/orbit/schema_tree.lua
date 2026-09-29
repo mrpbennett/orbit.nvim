@@ -38,7 +38,7 @@
 -- set_metadata_loading, set_metadata, lines.
 
 local schema = require("orbit.schema")
-local adapters = require("orbit.adapters")
+local connectors = require("orbit.connectors")
 
 local M = {}
 
@@ -267,7 +267,7 @@ end
 --                distinguish "showing real results" from "nothing
 --                matched"/"still loading".
 function M.lines(tree, profile, filter, options)
-	local connector = adapters.connector(profile)
+	local connector = connectors.resolve(profile)
 	local icons = options.icons
 	local lines = {}
 	local nodes = {}

@@ -1,5 +1,6 @@
 -- SQL Server transport backed by Microsoft's Go sqlcmd.
 local M = {}
+local option_rules = require("orbit.connectors.utils.options")
 
 local tokenizer = require("orbit.sql.tokenizer")
 
@@ -28,6 +29,12 @@ function M.validate_options(profile_name, options)
 	if options.transport ~= nil and options.transport ~= "sqlcmd" then
 		return nil, string.format("profile %q has unsupported SQL Server transport %q", profile_name, tostring(options.transport))
 	end
+	-- Required connection fields come first so a missing one is reported
+	-- before any other mistake in the same profile.
+	local valid, err = option_rules.require_strings(profile_name, options, { "host", "user" })
+	if not valid then
+		return nil, err
+	end
 	local allowed = {
 		confirm_mutations = true,
 		database = true,
@@ -51,11 +58,6 @@ function M.validate_options(profile_name, options)
 	end
 	if options.confirm_mutations ~= nil and type(options.confirm_mutations) ~= "boolean" then
 		return nil, string.format("profile %q options.confirm_mutations must be a boolean", profile_name)
-	end
-	for _, name in ipairs({ "host", "user" }) do
-		if type(options[name]) ~= "string" or options[name] == "" then
-			return nil, string.format("profile %q requires options.%s", profile_name, name)
-		end
 	end
 	if type(options.database) == "table" then
 		if not vim.islist(options.database) or #options.database == 0 then
@@ -89,17 +91,7 @@ function M.validate_options(profile_name, options)
 	if options.trust_server_certificate ~= nil and type(options.trust_server_certificate) ~= "boolean" then
 		return nil, string.format("profile %q options.trust_server_certificate must be a boolean", profile_name)
 	end
-	if options.schema_patterns ~= nil then
-		if type(options.schema_patterns) ~= "table" or not vim.islist(options.schema_patterns) or #options.schema_patterns == 0 then
-			return nil, string.format("profile %q options.schema_patterns must be a non-empty array", profile_name)
-		end
-		for _, pattern in ipairs(options.schema_patterns) do
-			if type(pattern) ~= "string" or pattern == "" then
-				return nil, string.format("profile %q options.schema_patterns must contain non-empty strings", profile_name)
-			end
-		end
-	end
-	return true
+	return option_rules.schema_patterns(profile_name, options)
 end
 
 local function password(options)

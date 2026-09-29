@@ -2,9 +2,9 @@
 -- PostgreSQL connector
 -- ============================================================================
 -- This module is orbit.nvim's PostgreSQL "connector": one of several backend
--- adapters (see the sibling files in lua/orbit/connectors/, e.g. sqlite.lua
--- and trino.lua) that the rest of the plugin talks to through a common,
--- implicit interface. Orbit's core (the query runner, the workspace/schema
+-- Connectors (see the sibling files in lua/orbit/connectors/, e.g. sqlite.lua
+-- and trino.lua) that the rest of the plugin talks to through a common
+-- interface, written down in lua/orbit/connectors/contract.lua. Orbit's core (the query runner, the workspace/schema
 -- browser sidebar, and the results grid) doesn't know anything about
 -- Postgres-specific SQL or command-line flags; it just calls functions like
 -- `prepare`, `session_command`, `schema_statement`, `parse`, etc. on whichever
@@ -41,6 +41,7 @@
 -- ============================================================================
 
 local M = {}
+local option_rules = require("orbit.connectors.utils.options")
 local csv = require("orbit.connectors.utils.csv")
 local metadata = require("orbit.connectors.metadata")
 
@@ -101,6 +102,12 @@ local function schema_filter(schemas)
 	return clause and ("AND " .. clause) or nil
 end
 
+-- The CLI this profile runs: the profile's `executable` override, else
+-- the psql client found on PATH. Doctor reports and version-checks it.
+function M.executable(options)
+	return options.executable or "psql"
+end
+
 -- Validates the `options` table of a connection profile that uses this
 -- Postgres connector, before any connection is attempted. This catches typos
 -- and type mistakes in the user's config early, with a clear error message,
@@ -114,6 +121,16 @@ end
 --   file for functions that can fail).
 -- Side effects: none (pure validation, no I/O).
 function M.validate_options(profile_name, options)
+	-- Required connection fields come first so a missing one is reported
+	-- before any other mistake in the same profile.
+	local valid, err = option_rules.require_strings(profile_name, options, { "database" })
+	if not valid then
+		return nil, err
+	end
+	valid, err = option_rules.schema_patterns(profile_name, options)
+	if not valid then
+		return nil, err
+	end
 	local allowed = {
 		arguments = true,
 		confirm_mutations = true,
@@ -164,7 +181,7 @@ end
 -- Side effects: none itself (it just builds a table); the caller is
 --   responsible for actually spawning the process.
 function M.prepare(options, statement)
-	local command = { options.executable or "psql" }
+	local command = { M.executable(options) }
 	append(command, options.arguments or {})
 	append(command, { "--dbname", options.database })
 	if options.host then
@@ -219,7 +236,7 @@ end
 -- Returns: a Lua array of strings, the command to spawn.
 -- Side effects: none itself; only builds the argument list.
 function M.session_command(options)
-	local command = { options.executable or "psql" }
+	local command = { M.executable(options) }
 	append(command, options.arguments or {})
 	append(command, { "--dbname", options.database })
 	if options.host then

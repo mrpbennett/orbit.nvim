@@ -15,7 +15,7 @@
 --                                 tracks inserted/modified/deleted rows and
 --                                 undo history, used only when results are
 --                                 opened in *editable* mode.
---   * orbit/adapters.lua        - given a connection profile, produces a
+--   * orbit/connectors/init.lua        - given a connection profile, produces a
 --                                 database-specific connector (e.g. it can
 --                                 turn pending edits into an UPDATE/INSERT/
 --                                 DELETE statement).
@@ -46,7 +46,7 @@
 
 local grid_model = require("orbit.grid")
 local editable_result = require("orbit.editable_result")
-local adapters = require("orbit.adapters")
+local connectors = require("orbit.connectors")
 local runner = require("orbit.runner")
 
 local M = {}
@@ -761,12 +761,12 @@ function M.open(rows, options)
         -- save -- either way, do nothing.
         return
       end
-			-- Ask orbit/adapters.lua for a database-specific "connector" for
+			-- Ask orbit/connectors/init.lua for a database-specific "connector" for
 			-- this profile, then ask that connector to turn the model's pending
 			-- changes into a single SQL statement it knows how to build
 			-- (INSERT/UPDATE/DELETE, dialect-specific). Not every connector
 			-- supports mutations, hence the connector.mutation_statement check.
-			local connector, connector_err = adapters.connector(options.profile)
+			local connector, connector_err = connectors.resolve(options.profile)
 			local statement, statement_err
 			if connector and connector.mutation_statement then
 				statement, statement_err = connector.mutation_statement(options.profile.options, options.editable, editable_result.changes(model))

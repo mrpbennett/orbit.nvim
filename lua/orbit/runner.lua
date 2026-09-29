@@ -2,7 +2,7 @@
 --
 -- This module is the entry point for actually running a SQL statement against
 -- a database. It does not know how to talk to any particular database itself
--- (that logic lives in the connector returned by `orbit.adapters`, e.g. the
+-- (that logic lives in the connector returned by `orbit.connectors`, e.g. the
 -- postgres/sqlite/trino connectors) -- instead it decides *how* to invoke the
 -- connector:
 --   * "one-shot" connectors (like Trino) spawn a fresh CLI process per
@@ -26,28 +26,24 @@
 --   M.close(profile_name)
 --   M.connected(profile_name) -> boolean
 
-local adapters = require("orbit.adapters")
+local connectors = require("orbit.connectors")
+local contract = require("orbit.connectors.contract")
 local session = require("orbit.session")
 
 local M = {}
 
--- Turn raw CLI output text into a list of row tables.
--- `connector` may define its own `parse` (some CLIs need bespoke parsing);
--- otherwise we fall back to the generic parser in `orbit.adapters`.
+-- Turn raw CLI output text into a list of row tables. `connector.parse` is
+-- always present: the Connector's own parser, or the default JSON parser the
+-- contract supplies (orbit/connectors/contract.lua).
 -- Returns normalized rows, an error string, and optional execution metadata.
 -- The third value extends the Connector contract without changing existing
 -- two-value row/error parsers.
 local function parse(connector, output, options, statement)
-	local rows, err, metadata
-	if connector.parse then
-		rows, err, metadata = connector.parse(output, options, statement)
-	else
-		rows, err, metadata = adapters.parse(output)
-	end
+	local rows, err, metadata = connector.parse(output, options, statement)
 	if not rows then
 		return nil, err, metadata
 	end
-	local normalized, normalize_err = adapters.normalize(rows)
+	local normalized, normalize_err = connectors.normalize(rows)
 	return normalized, normalize_err, metadata
 end
 
@@ -143,8 +139,9 @@ end
 --   statement - SQL text to execute.
 --   callback  - function(rows, err, metadata) invoked once with results,
 --               optional execution metadata, or an error.
---   connector - optional pre-resolved adapter; if omitted, it is looked up
---               from `profile` via `adapters.connector`. Callers that already
+--   connector - optional pre-resolved Connector; if omitted, it is looked up
+--               from `profile` via `connectors.resolve`. A Connector passed in
+--               directly gets the contract's defaults filled in. Callers that already
 --               have the connector (e.g. because they inspected it) can pass
 --               it in to avoid resolving it twice.
 --   deps      - optional { spawn = function } replacing the process port's
@@ -159,7 +156,7 @@ function M.run(profile, statement, callback, connector, deps)
 	local spawn = deps and deps.spawn or require("orbit.process").spawn
 	if not connector then
 		local err
-		connector, err = adapters.connector(profile)
+		connector, err = connectors.resolve(profile)
 		if not connector then
 			vim.schedule(function()
 				callback(nil, err)
@@ -167,6 +164,7 @@ function M.run(profile, statement, callback, connector, deps)
 			return nil
 		end
 	end
+	connector = contract.with_defaults(connector)
 	-- Trino and Redis use one-shot processes; other supported Connectors retain a serialized CLI session.
 	if not connector.session_command then
 		return run_once(profile, connector, statement, callback, spawn)

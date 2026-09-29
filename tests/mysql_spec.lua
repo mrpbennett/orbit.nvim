@@ -1,11 +1,11 @@
-local adapters = require("orbit.adapters")
+local connectors = require("orbit.connectors")
 
 local function assert_equal(actual, expected)
 	assert(vim.deep_equal(actual, expected), vim.inspect(actual) .. " ~= " .. vim.inspect(expected))
 end
 
 local function mysql()
-	return assert(adapters.connector({ kind = "mysql" }))
+	return assert(connectors.resolve({ kind = "mysql" }))
 end
 
 local function result(statement, rows)

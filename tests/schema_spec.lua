@@ -39,7 +39,7 @@ return {
 		-- Fake executor: answers the first statement with a table and the
 		-- second with a column, recording each statement for inspection.
 		local function execute(received, statement, callback, connector)
-			assert(received == profile and connector == require("orbit.connectors.sqlserver"))
+			assert(received == profile and connector == require("orbit.connectors").resolve(profile))
 			statements[#statements + 1] = statement
 			if #statements == 1 then
 				callback({ { schema = "sales", name = "orders", type = "table" } })
@@ -270,7 +270,7 @@ return {
     -- Fake executor: answers immediately and counts how often it is reached.
     local function execute(profile, _, callback, connector)
       runs = runs + 1
-			assert(connector == require("orbit.adapters").connector(profile))
+			assert(connector == require("orbit.connectors").resolve(profile))
       callback({ { name = "events", type = "table" } })
     end
 

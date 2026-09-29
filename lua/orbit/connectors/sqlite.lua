@@ -2,7 +2,7 @@
 --
 -- Like the other modules under lua/orbit/connectors/, this is a "connector":
 -- a table of functions that plugs one specific database backend into the
--- rest of Orbit (see lua/orbit/adapters.lua for the registry, and
+-- rest of Orbit (see lua/orbit/connectors/init.lua for the registry, and
 -- lua/orbit/runner.lua / lua/orbit/session.lua for how these functions get
 -- called). Orbit never links against SQLite's C library or an FFI binding -
 -- it shells out to the external `sqlite3` command-line binary and parses the
@@ -42,6 +42,7 @@
 -- variables/credentials the way postgres.lua sets PGPASSWORD, since a
 -- SQLite "connection" is just a local file path).
 local M = {}
+local option_rules = require("orbit.connectors.utils.options")
 local schema_pattern = require("orbit.connectors.utils.schema_pattern")
 local metadata = require("orbit.connectors.metadata")
 
@@ -69,12 +70,28 @@ local function identifier(value)
 	return '"' .. tostring(value):gsub('"', '""') .. '"'
 end
 
+-- The CLI this profile runs: the profile's `executable` override, else
+-- the sqlite3 client found on PATH. Doctor reports and version-checks it.
+function M.executable(options)
+	return options.executable or "sqlite3"
+end
+
 -- Checks a connection profile's `options` table only contains keys this
 -- SQLite connector understands. Runs once when a profile is loaded/edited,
 -- before any query is attempted, to catch typos/misconfiguration early.
 -- Parameters: profile_name (for error messages), options (user config table).
 -- Returns: `true` on success, or `nil, "error message"` on failure.
 function M.validate_options(profile_name, options)
+	-- Required connection fields come first so a missing one is reported
+	-- before any other mistake in the same profile.
+	local valid, err = option_rules.require_strings(profile_name, options, { "path" })
+	if not valid then
+		return nil, err
+	end
+	valid, err = option_rules.schema_patterns(profile_name, options)
+	if not valid then
+		return nil, err
+	end
 	local allowed = {
 		arguments = true,
 		confirm_mutations = true,
@@ -98,10 +115,10 @@ end
 -- file `path`), statement (the raw SQL text to run).
 -- Returns: an argv array, e.g. { "sqlite3", "-json", "/path/to.db", "SELECT ..." }.
 -- `-json` makes the CLI print query results as a JSON array of row objects,
--- which lua/orbit/adapters.lua's generic JSON parser then decodes (this
+-- which lua/orbit/connectors/utils/json.lua, the default parser, then decodes (this
 -- module defines no M.parse of its own).
 function M.prepare(options, statement)
-	local command = { options.executable or "sqlite3" }
+	local command = { M.executable(options) }
 	append(command, options.arguments or {})
 	append(command, { "-json", options.path, statement })
 	return command
@@ -137,7 +154,7 @@ end
 -- file `path`).
 -- Returns: an argv array for the persistent process.
 function M.session_command(options)
-	local command = { options.executable or "sqlite3" }
+	local command = { M.executable(options) }
 	append(command, options.arguments or {})
 	-- Abort the CLI on SQL errors so an uncommitted transaction rolls back on disconnect.
 	append(command, { "-bail", "-json", options.path })

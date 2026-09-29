@@ -4,9 +4,9 @@
 -- connection configs the user sets up once and then picks from when running
 -- queries. A profile is a small table like:
 --   { name = "local-pg", kind = "postgres", options = { database = "app", ... } }
--- (kind is one of "postgres", "sqlite", "trino"; options holds whatever
--- connection details that database adapter needs, validated below via
--- require("orbit.adapters").validate_options).
+-- (kind is one of require("orbit.connectors").kinds(); options holds
+-- whatever connection details that Connector needs, validated below via
+-- require("orbit.connectors").validate).
 --
 -- All profiles for a user live together in a single JSON file on disk (by
 -- default at M.default_path(), but overridable via M.config.profile_path in
@@ -35,7 +35,7 @@
 -- M.load re-reads and re-parses the file from disk.
 local uv = vim.uv
 local bit = bit
-local adapters = require("orbit.adapters")
+local connectors = require("orbit.connectors")
 
 local M = {}
 
@@ -109,20 +109,19 @@ local function require_string(value, field, profile_name)
   return true
 end
 
--- Validates a single profile table's own shape and required fields (but not
--- adapter-specific option validation -- see validate_document, which also
--- calls adapters.validate_options).
+-- Validates a single profile table: its shape and name here, then its kind
+-- and options through the Connector registry (orbit/connectors/init.lua),
+-- which owns every kind-specific rule including required fields.
 --
 -- Parameters:
 --   profile (any): one entry from the document's `profiles` array. Expected
---     shape: { name = string, kind = "trino"|"sqlite"|"postgres", options =
---     table }.
+--     shape: { name = string, kind = string, options = table }.
 --
 -- Returns:
 --   On success: true.
 --   On failure: nil, plus a string describing the first problem found (not
---     an object, missing/empty name, unsupported kind, missing options
---     table, or a required option field missing for that kind).
+--     an object, missing/empty name, or whatever the registry rejects:
+--     unsupported kind, missing options, or an invalid option field).
 --
 -- No side effects (pure validation).
 local function validate_profile(profile)
@@ -134,40 +133,7 @@ local function validate_profile(profile)
   if not valid then
     return nil, err
   end
-	-- Only registered database kinds are supported; anything else (typo,
-	-- unsupported future kind, missing field entirely) is rejected up front.
-	if profile.kind ~= "trino" and profile.kind ~= "sqlite" and profile.kind ~= "postgres" and profile.kind ~= "vertica" and profile.kind ~= "mysql" and profile.kind ~= "sqlserver" and profile.kind ~= "redis" then
-    return nil, string.format("profile %q has unsupported kind %q", profile.name, tostring(profile.kind))
-  end
-  if type(profile.options) ~= "table" then
-    return nil, string.format("profile %q requires options", profile.name)
-  end
-
-	-- Each connector kind has its own minimum set of required connection
-	-- fields: Trino needs a server/user/catalog to know where and how to
-	-- connect; Postgres needs at least a database name (host/user/etc are
-	-- presumably optional/defaulted); anything else (sqlite) just needs a
-	-- file `path`. MySQL also requires a default database, while Vertica
-	-- requires the complete host/user/database coordinates.
-	local required = profile.kind == "trino" and { "server", "user", "catalog" }
-		or profile.kind == "postgres" and { "database" }
-		or profile.kind == "mysql" and { "database" }
-		-- SQL Server requirements depend on the selected transport and are validated
-		-- inside its Connector rather than flattened into this generic gate.
-		or profile.kind == "sqlserver" and profile.options.transport == "jdbc" and {}
-		or profile.kind == "sqlserver" and (profile.options.transport == nil or profile.options.transport == "sqlcmd") and { "host", "user" }
-		or profile.kind == "sqlserver" and {}
-		or profile.kind == "vertica" and { "host", "user", "database" }
-		or profile.kind == "redis" and { "host" }
-		or { "path" }
-  for _, field in ipairs(required) do
-    valid, err = require_string(profile.options[field], "options." .. field, profile.name)
-    if not valid then
-      return nil, err
-    end
-  end
-
-  return true
+  return connectors.validate(profile)
 end
 
 -- Validates an entire profiles document -- the whole decoded JSON structure
@@ -186,9 +152,8 @@ end
 --     individual profile fails validate_profile, a duplicate profile name, or
 --     an adapter rejects a profile's options).
 --
--- Side effects: none directly, but it does call
--- require("orbit.adapters").validate_options(profile) for every profile,
--- which may perform its own kind-specific checks.
+-- Side effects: none (validation only; each profile's kind-specific checks
+-- run through require("orbit.connectors").validate).
 local function validate_document(document)
   if type(document) ~= "table" then
     return nil, "profile file contains invalid JSON"
@@ -216,13 +181,6 @@ local function validate_document(document)
     end
     if names[profile.name] then
       return nil, string.format("duplicate profile name: %q", profile.name)
-    end
-    -- Beyond the generic shape checks in validate_profile above, let the
-    -- relevant database adapter (postgres/sqlite/trino) apply any
-    -- connector-specific validation of profile.options it wants.
-    local options_valid, options_err = adapters.validate_options(profile)
-    if not options_valid then
-      return nil, options_err
     end
     names[profile.name] = true
   end

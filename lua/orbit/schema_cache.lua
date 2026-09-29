@@ -33,7 +33,7 @@
 -- This module has no persistence: everything lives only in this in-memory
 -- Lua table for the lifetime of the Neovim process, and is discarded/rebuilt
 -- whenever a profile's connection settings change.
-local adapters = require("orbit.adapters")
+local connectors = require("orbit.connectors")
 local runner = require("orbit.runner")
 local schema = require("orbit.schema")
 local metadata = require("orbit.connectors.metadata")
@@ -206,7 +206,7 @@ end
 -- Parameters:
 --   profile   - the connection profile to run against.
 --   connector - the already-resolved connector module, or nil to look one
---               up from `profile.kind` via lua/orbit/adapters.lua.
+--               up from `profile.kind` via lua/orbit/connectors/init.lua.
 --   node      - the schema_statement request descriptor.
 --   callback  - function(rows, err) invoked (async, on Neovim's event loop)
 --               once the query completes or an error occurs earlier.
@@ -219,7 +219,7 @@ end
 local function run_schema_statement(profile, connector, node, callback, execute)
   if not connector then
     local connector_err
-    connector, connector_err = adapters.connector(profile)
+    connector, connector_err = connectors.resolve(profile)
     if not connector then
       vim.schedule(function()
         callback(nil, connector_err)
@@ -256,7 +256,7 @@ end
 -- (nil) and instead calls `callback({})` itself (asynchronously) to report
 -- "no metadata of this kind" without treating it as an error.
 local function connector_for_metadata(profile, row, category, callback)
-  local connector, connector_err = adapters.connector(profile)
+  local connector, connector_err = connectors.resolve(profile)
   if not connector then
     vim.schedule(function()
       callback(nil, connector_err)

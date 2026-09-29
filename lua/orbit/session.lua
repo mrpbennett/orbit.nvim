@@ -136,10 +136,7 @@ local function start_next(session)
 			return
 		end
 		local inherited = vim.fn.environ()
-		local environment, environment_err = {}, nil
-		if session.connector.environment then
-			environment, environment_err = session.connector.environment(session.profile.options, inherited)
-		end
+		local environment, environment_err = session.connector.environment(session.profile.options, inherited)
 		if not environment then
 			fail(session, environment_err or "connector returned an invalid environment")
 			return
@@ -193,9 +190,7 @@ local function start_next(session)
 					session.stdout = session.stdout:sub(consumed + 1)
 					session.active = nil
 					local request_err = request.stderr ~= "" and vim.trim(request.stderr) or nil
-					if session.connector.session_error then
-						request_err = session.connector.session_error(request_err)
-					end
+					request_err = session.connector.session_error(request_err)
 					finish(request, output, request_err)
 					-- This request is done; immediately try to start whatever's
 					-- next in the queue on the same still-open process.
@@ -237,9 +232,7 @@ local function start_next(session)
 				if stderr == "" and session.active then
 					stderr = session.active.stderr
 				end
-				if session.connector.session_exit_error then
-					stderr = session.connector.session_exit_error(session.stdout, stderr, session.profile.options) or stderr
-				end
+				stderr = session.connector.session_exit_error(session.stdout, stderr, session.profile.options) or stderr
 				fail(
 					session,
 					result.code == 0 and "connection closed"
@@ -304,9 +297,9 @@ end
 -- starting/reusing that session's CLI process as needed.
 -- Parameters:
 --   profile   - connection profile table (must have .name, .kind, .options).
---   connector - adapter table; must provide session_command,
---               session_request, session_output (and may provide
---               environment).
+--   connector - Connector table; must provide session_command,
+--               session_request, session_output. Missing defaulted hooks
+--               (environment, session_error, ...) are filled in here.
 --   statement - SQL text to run.
 --   callback  - function(output, err) invoked exactly once when this
 --               statement's result is ready (or it fails/is cancelled).
@@ -316,6 +309,9 @@ end
 -- Side effects: mutates the session's queue; may start a new CLI process
 -- (see start_next).
 function M.run(profile, connector, statement, callback, deps)
+	-- Fill in the contract's defaults (environment, session_error, ...) so the
+	-- code above never has to check whether a hook exists.
+	connector = require("orbit.connectors.contract").with_defaults(connector)
 	local session = session_for(profile, connector)
 	session.spawn = deps and deps.spawn or require("orbit.process").spawn
 	session.sequence = session.sequence + 1

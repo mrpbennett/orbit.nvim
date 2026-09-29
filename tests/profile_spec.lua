@@ -1,4 +1,4 @@
-local adapters = require("orbit.adapters")
+local connectors = require("orbit.connectors")
 local profiles = require("orbit.profiles")
 local query = require("orbit.query")
 local runner = require("orbit.runner")
@@ -15,7 +15,7 @@ local function assert_equal(actual, expected)
 end
 
 local function connector(kind)
-  return assert(adapters.connector({ kind = kind }))
+  return assert(connectors.resolve({ kind = kind }))
 end
 
 return {
@@ -195,19 +195,6 @@ return {
       local loaded, err = profiles.load(path)
       assert(loaded == nil and err:match(case[2]), tostring(err))
     end
-  end,
-
-  ["adapters resolve supported connector kinds and reject unknown kinds"] = function()
-    assert(adapters.connector({ kind = "sqlite" }) == connector("sqlite"))
-    assert(adapters.connector({ kind = "postgres" }) == connector("postgres"))
-    assert(adapters.connector({ kind = "trino" }) == connector("trino"))
-    assert(adapters.connector({ kind = "vertica" }) == connector("vertica"))
-    assert(adapters.connector({ kind = "mysql" }) == connector("mysql"))
-    assert(adapters.connector({ kind = "sqlserver" }) == connector("sqlserver"))
-		assert(adapters.connector({ kind = "redis" }) == connector("redis"))
-    local unknown, err = adapters.connector({ kind = "unknown" })
-    assert(unknown == nil)
-    assert(err == "unsupported profile kind: unknown")
   end,
 
   ["runner reports an unsupported profile kind"] = function()
@@ -539,24 +526,6 @@ return {
       { id = "1", name = "Alice", note = "hello, world", missing = vim.NIL, empty = "" },
       { id = "2", name = "Bob",   note = "two\nlines",   missing = vim.NIL, empty = "" },
     })
-  end,
-
-  ["adapters.parse accepts JSON arrays and JSON lines"] = function()
-    local array = assert(adapters.parse('[{"id":1}]'))
-    local lines = assert(adapters.parse('{"id":1}\n{"id":2}\n'))
-
-    assert_equal(array, { { id = 1 } })
-    assert_equal(lines, { { id = 1 }, { id = 2 } })
-  end,
-
-  ["adapters.parse rejects lossy or non-row JSON"] = function()
-    for _, output in ipairs({ '[1]', '[[1]]', '{"":1}', '{"id":1,"id":2}', '{"nested":{"id":1,"id":2}}' }) do
-      local rows, err = adapters.parse(output)
-      assert(rows == nil and err, output)
-    end
-    local rows, err = adapters.parse('{"id":1}\n2\n')
-    assert(rows == nil and err)
-    assert_equal(assert(adapters.parse('[{"payload":{"":"value"}}]')), { { payload = { [""] = "value" } } })
   end,
 
   ["Vertica connector builds secure vsql commands and parses HTML output"] = function()

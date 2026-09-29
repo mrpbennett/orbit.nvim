@@ -22,7 +22,7 @@
 -- buffer-local vim variables (vim.b[buffer].orbit_profile), and "is something
 -- running in this buffer" lives in Statement execution, keyed by buffer.
 local profiles = require("orbit.profiles")
-local adapters = require("orbit.adapters")
+local connectors = require("orbit.connectors")
 local execution = require("orbit.execution")
 local results = require("orbit.results")
 local runner = require("orbit.runner")
@@ -53,7 +53,7 @@ local function set_buffer_kind(buffer, profile)
 end
 
 local function set_buffer_dialect(buffer, profile)
-	local connector = adapters.connector(profile)
+	local connector = connectors.resolve(profile)
 	local dialect = connector and connector.sql_dialect or nil
 	if vim.b[buffer].orbit_sql_dialect == dialect then
 		return
@@ -210,7 +210,7 @@ function M.execute(buffer, config, selection, context)
 		end)
 		return
 	end
-	local connector = assert(adapters.connector(profile))
+	local connector = assert(connectors.resolve(profile))
 
 	-- Ask the statements module to figure out the actual SQL text to run:
 	-- either the given visual selection, or whatever statement the cursor is

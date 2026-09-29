@@ -1,16 +1,12 @@
 -- Local diagnostics for connector profiles and their executables.
 local M = {}
 
-local connector_defaults = {
-	mysql = { executable = "mysql", version_args = { "--version" } },
-	postgres = { executable = "psql", version_args = { "--version" } },
-	redis = { executable = "redis-cli", version_args = { "--version" } },
-	sqlite = { executable = "sqlite3", version_args = { "--version" } },
-	trino = { executable = "trino", version_args = { "--version" } },
-	vertica = { executable = "vsql", version_args = { "--version" } },
-}
-
-local kinds = { "sqlserver", "mysql", "postgres", "redis", "sqlite", "trino", "vertica" }
+-- Every per-kind fact Doctor needs comes from the Connector itself (see
+-- orbit/connectors/contract.lua): `executable(options)` and `version_args`
+-- for a CLI version probe, `version_environment` when that probe must not
+-- inherit the user's environment, or `diagnose` for a Connector that runs its
+-- own checks (SQL Server, whose transport decides what to check).
+local connectors = require("orbit.connectors")
 
 local function default_dependencies()
 	return {
@@ -62,18 +58,16 @@ local function redact(value, profile, deps)
 	return value
 end
 
-local function selected_executable(kind, profile, deps)
-	local override = profile and profile.options and profile.options.executable
-	if kind == "mysql" and not override and profile and profile.options.client_family == "mariadb" then
-		return "mariadb", "PATH"
-	end
-	return override or connector_defaults[kind].executable, override and "override" or "PATH"
+-- The CLI a profile would run, and where the name came from: the profile's
+-- own `executable` override, or the Connector's default found on PATH.
+local function selected_executable(connector, options)
+	return connector.executable(options), options.executable and "override" or "PATH"
 end
 
--- Doctor formats the safe facts returned by the SQL Server Connector. Transport
--- selection, prerequisite checks, environment handling, and invocation stay
--- behind the Connector seam.
-local function append_sqlserver_facts(entry, label, facts, profile, deps)
+-- Doctor formats the safe facts returned by a Connector's `diagnose` (today
+-- only SQL Server). Transport selection, prerequisite checks, environment
+-- handling, and invocation stay behind the Connector seam.
+local function append_diagnosis_facts(entry, label, facts, profile, deps)
 	local executable = facts.executable
 	entry[#entry + 1] = string.format(
 		"%s %s: %s (%s)",
@@ -119,6 +113,7 @@ end
 -- executable's version mode is invoked; environment values are never printed.
 function M.run(kind, config, callback, overrides)
 	callback = callback or function() end
+	local kinds = connectors.kinds()
 	if kind and not vim.tbl_contains(kinds, kind) then
 		callback(nil, "unsupported connector kind: " .. tostring(kind))
 		return
@@ -169,65 +164,66 @@ function M.run(kind, config, callback, overrides)
 	for index, check in ipairs(checks) do
 		local profile = check.profile or nil
 		local label = check.kind .. (profile and (" profile " .. string.format("%q", profile.name)) or "")
-		if check.kind == "sqlserver" then
-			require("orbit.connectors.sqlserver").diagnose(profile and profile.options or nil, deps, function(facts)
+		local connector = assert(connectors.resolve({ kind = check.kind }))
+		local options = profile and profile.options or {}
+		if connector.diagnose then
+			connector.diagnose(profile and profile.options or nil, deps, function(facts)
 				local entry = {}
-				append_sqlserver_facts(entry, label, facts, profile, deps)
+				append_diagnosis_facts(entry, label, facts, profile, deps)
 				results[index] = entry
 				pending = pending - 1
 				complete()
 			end)
 		else
-		local executable, source = selected_executable(check.kind, profile, deps)
-		local resolved = deps.executable(executable) and deps.exepath(executable) or ""
-		if resolved == "" and deps.executable(executable) then
-			resolved = executable
-		end
-		local entry = { string.format("%s %s: %s (%s)", resolved ~= "" and "[OK]" or "[FAIL]", label, resolved ~= "" and resolved or executable, source) }
-		results[index] = entry
-
-		if check.kind == "redis" and profile and profile.options.password_env then
-			local value = deps.getenv(profile.options.password_env)
-			entry[#entry + 1] = string.format(
-				"%s %s environment %s",
-				value ~= nil and value ~= "" and "[OK]" or "[FAIL]",
-				label,
-				profile.options.password_env
-			)
-		end
-
-		if resolved == "" then
-			entry[#entry + 1] = "[FAIL] " .. label .. " version: executable not found"
-			pending = pending - 1
-			complete()
-		else
-			local command = { resolved }
-			vim.list_extend(command, connector_defaults[check.kind].version_args)
-			local run_options
-			if check.kind == "redis" then
-				run_options = {
-					clear_env = true,
-					env = require("orbit.connectors.redis").sanitize_environment(profile and profile.options or {}, deps.environ()),
-				}
+			local executable, source = selected_executable(connector, options)
+			local resolved = deps.executable(executable) and deps.exepath(executable) or ""
+			if resolved == "" and deps.executable(executable) then
+				resolved = executable
 			end
-			deps.run(command, function(result)
-				local version = redact(first_line(result.stdout or ""), profile, deps)
-				if result.code == 0 and version ~= "" then
-					entry[#entry + 1] = string.format("[OK] %s version: %s", label, version)
-				else
-					local stderr = redact(first_line(result.stderr), profile, deps)
-					entry[#entry + 1] = "[FAIL] " .. label .. " version: " .. (stderr ~= "" and stderr or "version command failed")
-				end
+			local entry = { string.format("%s %s: %s (%s)", resolved ~= "" and "[OK]" or "[FAIL]", label, resolved ~= "" and resolved or executable, source) }
+			results[index] = entry
+
+			-- A profile that reads its password from the environment is only
+			-- usable when that variable is set. Only its presence is reported.
+			if options.password_env then
+				local value = deps.getenv(options.password_env)
+				entry[#entry + 1] = string.format(
+					"%s %s environment %s",
+					value ~= nil and value ~= "" and "[OK]" or "[FAIL]",
+					label,
+					options.password_env
+				)
+			end
+
+			if resolved == "" then
+				entry[#entry + 1] = "[FAIL] " .. label .. " version: executable not found"
 				pending = pending - 1
 				complete()
-			end, run_options)
-		end
+			else
+				local command = { resolved }
+				vim.list_extend(command, connector.version_args)
+				local run_options
+				if connector.version_environment then
+					run_options = { clear_env = true, env = connector.version_environment(options, deps.environ()) }
+				end
+				deps.run(command, function(result)
+					local version = redact(first_line(result.stdout or ""), profile, deps)
+					if result.code == 0 and version ~= "" then
+						entry[#entry + 1] = string.format("[OK] %s version: %s", label, version)
+					else
+						local stderr = redact(first_line(result.stderr), profile, deps)
+						entry[#entry + 1] = "[FAIL] " .. label .. " version: " .. (stderr ~= "" and stderr or "version command failed")
+					end
+					pending = pending - 1
+					complete()
+				end, run_options)
+			end
 		end
 	end
 end
 
 function M.kinds()
-	return vim.deepcopy(kinds)
+	return connectors.kinds()
 end
 
 return M

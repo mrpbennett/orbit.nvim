@@ -10,7 +10,7 @@
 -- the plugin free of any HTTP/JDBC client code, at the cost of depending on
 -- an external binary being on the user's PATH.
 --
--- Contract this module implements (see lua/orbit/adapters.lua for the lookup
+-- Contract this module implements (see lua/orbit/connectors/init.lua for the lookup
 -- table and lua/orbit/runner.lua for how these hooks get called):
 --   * validate_options(profile_name, options) -> true | nil, err
 --       Sanity-checks the user's profile configuration before it is ever used.
@@ -49,6 +49,7 @@
 -- results back into the database (no primary-key based UPDATE/INSERT/DELETE
 -- generation), so those hooks are simply omitted.
 local M = {}
+local option_rules = require("orbit.connectors.utils.options")
 local csv = require("orbit.connectors.utils.csv")
 local metadata = require("orbit.connectors.metadata")
 
@@ -83,6 +84,12 @@ local function identifier(value)
   return '"' .. tostring(value):gsub('"', '""') .. '"'
 end
 
+-- The CLI this profile runs: the profile's `executable` override, else
+-- the Trino CLI found on PATH. Doctor reports and version-checks it.
+function M.executable(options)
+	return options.executable or "trino"
+end
+
 -- Checks that a connection profile's `options` table (the per-profile config
 -- the user wrote in their Orbit setup) only contains keys this connector
 -- understands, and that the values have sane types/shapes. This runs once
@@ -96,6 +103,12 @@ end
 -- Returns: `true` on success, or `nil, "error message"` on failure. No side
 -- effects (pure validation).
 function M.validate_options(profile_name, options)
+	-- Required connection fields come first so a missing one is reported
+	-- before any other mistake in the same profile.
+	local valid, err = option_rules.require_strings(profile_name, options, { "server", "user", "catalog" })
+	if not valid then
+		return nil, err
+	end
   local allowed = {
     arguments = true,
     catalog = true,
@@ -152,7 +165,7 @@ end
 -- No side effects - this only builds a table describing a command; runner.lua
 -- is responsible for actually spawning it.
 function M.prepare(options, statement)
-  local command = { options.executable or "trino" }
+  local command = { M.executable(options) }
   append(command, options.arguments or {})
   append(command, {
     "--server", options.server,
@@ -181,7 +194,7 @@ function M.parse(output)
   end
   local first = trimmed:sub(1, 1)
   if first == "{" or first == "[" then
-    return require("orbit.adapters").parse(trimmed)
+    return require("orbit.connectors.utils.json").parse(trimmed)
   end
   return csv.parse(output)
 end

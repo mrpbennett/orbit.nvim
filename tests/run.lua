@@ -7,7 +7,11 @@ package.path = table.concat({
 
 local modules = {
   "orbit",
-  "orbit.adapters",
+  "orbit.connectors",
+  "orbit.connectors.contract",
+  "orbit.connectors.utils.json",
+  "orbit.connectors.utils.options",
+  "orbit.connectors.utils.rows",
 	"orbit.completion",
 	"orbit.connectors.postgres",
 	"orbit.connectors.redis",
@@ -62,6 +66,7 @@ local specs = {
   require("tests.results_spec"),
 	require("tests.runner_spec"),
 	require("tests.execution_spec"),
+	require("tests.connectors_spec"),
 	require("tests.query_spec"),
   require("tests.status_spec"),
   require("tests.schema_spec"),

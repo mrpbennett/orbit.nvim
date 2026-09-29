@@ -1,6 +1,6 @@
 local runner = require("orbit.runner")
 local session = require("orbit.session")
-local adapters = require("orbit.adapters")
+local connectors = require("orbit.connectors")
 
 return {
   ["SQL Server builds the exact Go sqlcmd argv and a sanitized child environment"] = function()
@@ -485,24 +485,24 @@ return {
     local marker = "__orbit_marker__"
     local cases = {
       {
-        connector = assert(adapters.connector({ kind = "sqlite" })),
+        connector = assert(connectors.resolve({ kind = "sqlite" })),
         output = '[{"value":1}]\n[{"__orbit_marker":"' .. marker .. '"}]\n',
         payload = '[{"value":1}]\n',
       },
       {
-        connector = assert(adapters.connector({ kind = "postgres" })),
+        connector = assert(connectors.resolve({ kind = "postgres" })),
         output = "value\n1\n__orbit_marker\n" .. marker .. "\n",
         payload = "value\n1\n",
       },
       {
-        connector = assert(adapters.connector({ kind = "mysql" })),
+        connector = assert(connectors.resolve({ kind = "mysql" })),
         output = '<?xml version="1.0"?>\n<resultset><row><field name="value">1</field></row></resultset>\n'
             .. '<?xml version="1.0"?>\n<resultset><row><field name="__orbit_frame">' ..
             marker .. ':END</field></row></resultset>\n',
         payload = '<?xml version="1.0"?>\n<resultset><row><field name="value">1</field></row></resultset>\n',
       },
       {
-        connector = assert(adapters.connector({ kind = "vertica" })),
+        connector = assert(connectors.resolve({ kind = "vertica" })),
         output = "<table><tr><th>value</th></tr><tr><td>1</td></tr></table>\n"
             .. "<table><tr><th>__orbit_marker</th></tr><tr><td>" .. marker .. "</td></tr></table>\n",
         payload = "<table><tr><th>value</th></tr><tr><td>1</td></tr></table>\n",

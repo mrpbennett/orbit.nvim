@@ -1,5 +1,6 @@
 -- Structured SQL Server transport backed by an Orbit-owned Java helper and jTDS.
 local M = {}
+local option_rules = require("orbit.connectors.utils.options")
 
 local protocol = "ORBIT/1"
 local maximum_response_bytes = 128 * 1024 * 1024
@@ -29,21 +30,6 @@ local function is_integer(value, minimum, maximum)
 		and value % 1 == 0
 		and value >= minimum
 		and value <= maximum
-end
-
-local function validate_schema_patterns(profile_name, patterns)
-	if patterns == nil then
-		return true
-	end
-	if type(patterns) ~= "table" or not vim.islist(patterns) or #patterns == 0 then
-		return nil, string.format("profile %q options.schema_patterns must be a non-empty array", profile_name)
-	end
-	for _, pattern in ipairs(patterns) do
-		if not non_empty_string(pattern) then
-			return nil, string.format("profile %q options.schema_patterns must contain non-empty strings", profile_name)
-		end
-	end
-	return true
 end
 
 function M.selected(options)
@@ -130,7 +116,7 @@ function M.validate_options(profile_name, options)
 			return nil, string.format("profile %q options.%s must be a boolean", profile_name, name)
 		end
 	end
-	local valid, err = validate_schema_patterns(profile_name, options.schema_patterns)
+	local valid, err = option_rules.schema_patterns(profile_name, options)
 	if not valid then
 		return nil, err
 	end

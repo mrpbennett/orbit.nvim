@@ -2,6 +2,7 @@
 -- keeps credentials out of argv by supplying REDISCLI_AUTH in a clean child
 -- environment.
 local M = {}
+local option_rules = require("orbit.connectors.utils.options")
 
 local function append(values, additions)
 	for _, value in ipairs(additions) do
@@ -21,7 +22,19 @@ local function positive_integer(value)
 	return type(value) == "number" and value % 1 == 0 and value > 0
 end
 
+-- The CLI this profile runs: the profile's `executable` override, else
+-- redis-cli found on PATH. Doctor reports and version-checks it.
+function M.executable(options)
+	return options.executable or "redis-cli"
+end
+
 function M.validate_options(profile_name, options)
+	-- Required connection fields come first so a missing one is reported
+	-- before any other mistake in the same profile.
+	local valid, err = option_rules.require_strings(profile_name, options, { "host" })
+	if not valid then
+		return nil, err
+	end
 	local allowed = {
 		cacert = true,
 		cacertdir = true,
@@ -184,6 +197,10 @@ local function environment(options)
 	return environment
 end
 
+-- Doctor runs `redis-cli --version` with this environment (and nothing
+-- inherited), so no ambient Redis credential reaches even a version probe.
+M.version_environment = M.sanitize_environment
+
 function M.quote_argument(value)
 	if value ~= "" and not value:find("[%s%z\1-\31\127\"'\\]") then
 		return value
@@ -280,7 +297,7 @@ function M.prepare(options, statement)
 		return nil, environment_err
 	end
 	local command = {
-		options.executable or "redis-cli",
+		M.executable(options),
 		"-h", options.host,
 		"-p", tostring(options.port or 6379),
 	}

@@ -1,5 +1,5 @@
 local schema_tree = require("orbit.schema_tree")
-local adapters = require("orbit.adapters")
+local connectors = require("orbit.connectors")
 
 local icons = {
   collapsed = ">",
@@ -26,7 +26,7 @@ end
 
 return {
 	["schema_tree renders Connector-declared metadata presentation generically"] = function()
-		local connector = assert(adapters.connector(profile))
+		local connector = assert(connectors.resolve(profile))
 		local original_categories = connector.metadata_categories
 		connector.metadata_categories = function()
 			return { {
