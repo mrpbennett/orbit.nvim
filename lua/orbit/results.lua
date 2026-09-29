@@ -77,6 +77,24 @@ function M.cleanup(tabpage)
   tab_results[tabpage] = nil
 end
 
+-- The standalone result sink for Statement execution (see
+-- lua/orbit/execution.lua): results for statements run outside a Workspace
+-- open in an ordinary result window. There is no owner that can go away, so
+-- the sink is always alive.
+-- Returns: a sink table { alive = function, deliver = function }.
+function M.sink()
+  return {
+    alive = function()
+      return true
+    end,
+    deliver = function(rows, options)
+      -- Looked up through M so tests that replace results.open still apply.
+      M.open(rows, options)
+      return true
+    end,
+  }
+end
+
 -- Figures out which grid cell (row/column, in grid-data terms, not buffer
 -- line/column terms) the cursor is currently sitting on inside a results
 -- window.

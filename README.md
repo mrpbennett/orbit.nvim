@@ -669,7 +669,7 @@ From a workspace query buffer, `/` focuses the workspace filter. Elsewhere, `/` 
 | `:OrbitSelectProfile`  | Alias for `:OrbitProfile`.                                                   |
 | `:OrbitExecute`        | Execute the single unambiguous statement in the current buffer.              |
 | `:'<,'>OrbitExecute`   | Execute the selected line range.                                             |
-| `:OrbitCancel`         | Cancel the statement running in the current buffer.                          |
+| `:OrbitCancel`         | Cancel the statement running in the current buffer, else the Workspace's running schema action. |
 | `:OrbitDisconnect`     | Close the connection for the current buffer's profile.                       |
 | `:OrbitDoctor [kind]`  | Diagnose profiles, executable selection, and versions without connecting.    |
 | `:OrbitStructure`      | Toggle the current query buffer's Structure panel.                           |
@@ -694,9 +694,10 @@ Orbit installs the following defaults:
 | Normal, Structure panel | `<leader>E` | Execute the highlighted Structure element.               |
 | Normal, SQL buffer      | `<leader>P` | Select a connection profile.                             |
 | Normal, SQL buffer      | `<leader>X` | Cancel the running statement.                            |
+| Normal, Workspace sidebar | `<leader>X` | Cancel the running schema action.                      |
 | Normal, SQL buffer      | Disabled    | Toggle the Structure panel (`structure = false`).        |
 
-Configure action mappings through `keymaps`. `execute` also applies in the Structure panel; `cancel`, `select_profile`, and the disabled-by-default `structure` action are buffer-local in SQL buffers, while `workspace` is global. Set an action to `false` to disable it.
+Configure action mappings through `keymaps`. `execute` also applies in the Structure panel; `cancel`, `select_profile`, and the disabled-by-default `structure` action are buffer-local in SQL buffers, `cancel` also applies in the Workspace sidebar, while `workspace` is global. Set an action to `false` to disable it.
 
 ```lua
 require("orbit").setup({
@@ -877,7 +878,7 @@ Set `completion = false` in Orbit's `setup()` to disable the blink source's `ena
 
 Orbit runs statements asynchronously through the selected profile's Connector client. For SQL Server, SQLite, PostgreSQL, MySQL, and Vertica, schema work and statements share one retained process and execute one at a time. SQL Server keeps either one interactive Go `sqlcmd` process or one Java helper and JDBC connection per connection profile, so transactions, temporary tables, and other session state can persist until disconnect, cancellation, connection failure, malformed helper protocol, profile change, or exit. An ordinary JDBC SQL error is request-scoped and preserves the retained connection. Trino and Redis statements each run their own CLI invocation.
 
-One running statement is allowed per query buffer. `:OrbitCancel` terminates an active retained process, fails work queued on that process, and starts a fresh session only when the next Statement is requested. Cancelling work that has not started removes only that queued request. Orbit reports cancellation as cancellation rather than opening diagnostics; server-side completion timing is not asserted after the CLI is terminated.
+One running statement is allowed per query buffer, and one schema action per Workspace; a second request is refused until the first result is shown. `:OrbitCancel` terminates an active retained process, fails work queued on that process, and starts a fresh session only when the next Statement is requested. Cancelling work that has not started removes only that queued request. Orbit reports cancellation as cancellation rather than opening diagnostics; server-side completion timing is not asserted after the CLI is terminated.
 
 Potentially mutating statements require confirmation by default. A single `SELECT`, `SHOW`, `DESCRIBE`, `EXPLAIN`, `USE`, or `VALUES` statement runs without confirmation; everything else requires it. Comments and semicolons inside literals are ignored when deciding, so `SELECT 1; -- note` counts as one read-only statement. This is a convenience guardrail, not a security boundary.
 

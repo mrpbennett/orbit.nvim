@@ -13,7 +13,8 @@
       expanded; it composes orbit.schema_tree for the Schema browser part
     * orbit.schema_cache  -- caches schema/metadata lookups so re-expanding
       a node doesn't always re-hit the database
-    * orbit.runner        -- executes SQL and returns rows
+    * orbit.execution     -- Statement execution: runs schema browser
+      actions and delivers their rows through M.result_sink
     * orbit.results       -- opens/manages the results grid split
     * orbit.feedback      -- shows "loading..."/"done" style status messages
 
@@ -48,8 +49,10 @@
                                               workspace's query window
     M.close(tabpage)                      -- close a workspace tab
     M.cleanup()                           -- release natively closed workspaces
-    M.capture(tabpage)                    -- capture opaque lifetime ownership
-    M.is_live(state)                      -- test captured lifetime ownership
+    M.result_sink(tabpage)                -- Statement execution sink for a
+                                              Workspace's result window
+    M.cancel(tabpage)                     -- cancel the Workspace's running
+                                              schema browser action
     M.is_workspace(tabpage)               -- true if a tab is an Orbit workspace
     M.focus_filter()                      -- jump cursor into the filter input
     M.select_profile(config, buffer, on_select) -- open the workspace and
@@ -63,7 +66,7 @@ local cache = require("orbit.schema_cache")
 local feedback = require("orbit.feedback")
 local results = require("orbit.results")
 local adapters = require("orbit.adapters")
-local runner = require("orbit.runner")
+local execution = require("orbit.execution")
 local saved_queries = require("orbit.saved_queries")
 
 local M = {}
@@ -77,6 +80,13 @@ local function is_live(state)
 	return state ~= nil
 		and workspaces[state.tabpage] == state
 		and vim.api.nvim_tabpage_is_valid(state.tabpage)
+end
+
+-- The Statement execution lock key for a Workspace's schema browser actions.
+-- Query buffers use their buffer number; a Workspace uses this string, so the
+-- two can never collide.
+local function execution_key(state)
+	return "workspace:" .. state.tabpage
 end
 
 local function start_notice(state, message, discarded_message)
@@ -676,30 +686,37 @@ local function run_object_action(state, profile, connector, row, action)
 		open_generated_query(state, profile, action.statement, row)
 		return
 	end
-	local notice = start_notice(
-		state,
-		"Loading " .. action.label:lower() .. " for " .. object_name(state.tree, row) .. "...",
-		"Schema action discarded: Workspace closed"
-	)
-	runner.run(profile, action.statement, function(rows, err)
-		if not is_live(state) then
-			return
-		end
-		if err then
-			finish_notice(state, notice, "Schema action failed: " .. action.label, vim.log.levels.ERROR)
-			vim.notify(err, vim.log.levels.ERROR)
-			return
-		end
-		finish_notice(state, notice, string.format("Loaded %s: %d rows", action.label:lower(), #rows))
-		M.open_results(rows, {
+	local label = action.label:lower()
+	-- Schema browser actions are Statement executions too: they share the
+	-- lock (one per Workspace), cancel, and late-result discarding.
+	execution.run({
+		key = execution_key(state),
+		profile = profile,
+		statement = action.statement,
+		-- Actions are Connector-generated metadata reads (PRAGMA, SHOW, ...),
+		-- which the lexical Mutating statement rule would wrongly flag.
+		confirm_mutations = false,
+		-- Failures are notified only; a diagnostics split would break the
+		-- Workspace's fixed layout.
+		diagnostics = false,
+		result_options = {
 			limit = state.config.result_limit,
 			max_cell_width = state.config.max_cell_width,
 			profile_name = profile.name,
 			source_name = action.label .. " / " .. object_name(state.tree, row),
 			source_window = state.query_window,
 			tabpage = state.tabpage,
-		})
-	end, connector)
+		},
+		messages = {
+			busy = "An Orbit schema action is already running in this Workspace",
+			start = "Loading " .. label .. " for " .. object_name(state.tree, row) .. "...",
+			failed = "Schema action failed: " .. action.label,
+			cancelled = "Schema action cancelled: " .. action.label,
+			finished = function(count)
+				return string.format("Loaded %s: %d rows", label, count)
+			end,
+		},
+	}, M.result_sink(state.tabpage))
 end
 
 -- Resolve a profile's Connector and the schema object actions it offers
@@ -1365,6 +1382,12 @@ local function configure_sidebar(state)
 	vim.keymap.set("n", "q", function()
 		M.close(state.tabpage)
 	end, { buffer = state.sidebar, silent = true, nowait = true, desc = "Close Orbit workspace" })
+	-- The configured cancel keymap (the same one query buffers use, default
+	-- <leader>X) also cancels a running schema browser action from here.
+	local cancel = type(state.config.keymaps) == "table" and state.config.keymaps.cancel
+	if type(cancel) == "string" then
+		vim.keymap.set("n", cancel, "<Cmd>OrbitCancel<CR>", { buffer = state.sidebar, silent = true, desc = "Orbit cancel" })
+	end
 end
 
 -- Find the one workspace tabpage that's still valid, if any, and switch
@@ -1674,13 +1697,34 @@ function M.cleanup()
 	for _, state in ipairs(stale) do teardown(state) end
 end
 
--- Capture opaque ownership for asynchronous work started inside a Workspace.
-function M.capture(tabpage)
-	return registered_workspace(tabpage or vim.api.nvim_get_current_tabpage())
+-- The Statement execution result sink (see lua/orbit/execution.lua) for the
+-- Workspace on `tabpage`. The sink stays tied to *this* Workspace lifetime:
+-- once it closes, even a replacement Workspace on a reused tabpage handle is
+-- not alive for it, so late results are discarded instead of misplaced.
+--   tabpage: the tabpage the statement was started from.
+-- Returns: a sink table { alive, deliver }, or nil when `tabpage` is not an
+-- Orbit Workspace (callers then fall back to results.sink()).
+function M.result_sink(tabpage)
+	local state = registered_workspace(tabpage)
+	if not state then
+		return nil
+	end
+	return {
+		alive = function()
+			return is_live(state)
+		end,
+		deliver = function(rows, options)
+			return M.open_results(rows, options, state)
+		end,
+	}
 end
 
-function M.is_live(state)
-	return is_live(state)
+-- Cancel the schema browser action running in the Workspace on `tabpage`
+-- (defaults to the current tabpage).
+-- Returns: true when an action was running and was asked to stop.
+function M.cancel(tabpage)
+	local state = registered_workspace(tabpage or vim.api.nvim_get_current_tabpage())
+	return state ~= nil and execution.cancel(execution_key(state))
 end
 
 -- Public helper: is the given (or current) tabpage an Orbit workspace?

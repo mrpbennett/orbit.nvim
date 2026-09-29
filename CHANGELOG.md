@@ -17,10 +17,12 @@ All notable changes to Orbit.nvim are documented in this file.
 ### Fixed
 
 - Running a whole query buffer no longer reports "statement is ambiguous" when a `;` appears inside a string literal, quoted identifier, comment, or dollar-quoted body on PostgreSQL, MySQL, SQLite, Trino, and Vertica profiles. Execution, the Structure panel, and the Mutating statement check now share one tokenizer-based statement boundary rule, so a single compound `CREATE FUNCTION`/`PROCEDURE`/`TRIGGER` body also runs without a selection.
+- Running a second statement while a table-browse result was still loading its primary keys no longer discards the first result as "superseded"; the second request is refused until the first result is shown.
 - The default mutation confirmation now ignores comments anywhere in the statement and semicolons inside literals, so a single read-only `SELECT` followed by a trailing comment no longer prompts. Multiple statements, comment-only text, and unrecognized first keywords still require confirmation.
 
 ### Changed
 
+- Workspace schema actions (sample rows, columns, definition, ...) now run through the same Statement execution as query buffers: one action runs per Workspace at a time, `:OrbitCancel` and the sidebar's `cancel` mapping cancel it, and failures open diagnostics.
 - Redis strings containing serialized JSON objects or arrays now render as pretty inner JSON while ordinary and scalar JSON strings remain strings.
 - `:OrbitDoctor sqlserver` now delegates transport-specific prerequisite checks to the SQL Server Connector while retaining its existing safe, redacted report format. The selected `sqlcmd` or JDBC transport determines which executable, credential, driver, and version checks run; diagnostics still never connect to SQL Server.
 

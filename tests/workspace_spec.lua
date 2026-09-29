@@ -1699,4 +1699,73 @@ return {
     vim.api.nvim_set_current_tabpage(original_tabpage)
     assert(ok, err)
   end,
+
+  ["OrbitCancel in the sidebar cancels the running schema action"] = function()
+    require("orbit").setup()
+    local original_tabpage = vim.api.nvim_get_current_tabpage()
+    local original_run = runner.run
+    local original_cancel = runner.cancel
+    local original_select = vim.ui.select
+    local path = vim.fn.tempname()
+    assert(profiles.write(path, {
+      version = 1,
+      profiles = { { name = "cancel-action", kind = "sqlite", options = { path = "/tmp/orbit-cancel.db" } } },
+    }))
+    local action_callback
+    local action_process = {}
+    local cancelled
+    runner.run = function(_, statement, callback)
+      if statement:match("WHERE name =") then
+        action_callback = callback
+        return action_process
+      end
+      callback({ { schema = "main", name = "sessions", type = "table" } })
+    end
+    runner.cancel = function(process) cancelled = process end
+    vim.ui.select = function(items, _, callback)
+      for _, action in ipairs(items) do
+        if action.id == "definition" then
+          callback(action)
+          return
+        end
+      end
+    end
+    local state
+    local ok, err = xpcall(function()
+      state = workspace.open(vim.tbl_extend("force", require("orbit").config, { profile_path = path, result_limit = 25 }))
+      assert(vim.fn.maparg("<leader>X", "n", false, true).rhs == "<Cmd>OrbitCancel<CR>")
+      vim.api.nvim_set_current_win(state.sidebar_window)
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "cancel-action")), 0 })
+      vim.api.nvim_feedkeys("l", "mx", false)
+      assert(vim.wait(100, function()
+        return line_number(state.sidebar, "main") ~= nil
+      end))
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "main")), 0 })
+      vim.api.nvim_feedkeys("l", "mx", false)
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "tables 1")), 0 })
+      vim.api.nvim_feedkeys("l", "mx", false)
+      vim.api.nvim_win_set_cursor(state.sidebar_window, { assert(line_number(state.sidebar, "sessions")), 0 })
+      vim.api.nvim_feedkeys("a", "mx", false)
+      assert(action_callback)
+      vim.cmd("OrbitCancel")
+      assert(cancelled == action_process)
+      action_callback(nil, "query cancelled")
+      for _, window in ipairs(vim.api.nvim_tabpage_list_wins(state.tabpage)) do
+        assert(vim.bo[vim.api.nvim_win_get_buf(window)].filetype ~= "orbit-results")
+      end
+      -- The Workspace lock is released, so the next action starts.
+      action_callback = nil
+      vim.api.nvim_feedkeys("a", "mx", false)
+      assert(action_callback)
+      action_callback({})
+    end, debug.traceback)
+    runner.run = original_run
+    runner.cancel = original_cancel
+    vim.ui.select = original_select
+    if state and vim.api.nvim_tabpage_is_valid(state.tabpage) then
+      workspace.close(state.tabpage)
+    end
+    vim.api.nvim_set_current_tabpage(original_tabpage)
+    assert(ok, err)
+  end,
 }

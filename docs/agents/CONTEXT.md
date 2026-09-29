@@ -67,6 +67,10 @@ _Avoid_: query, command
 A statement that can change data or database structure and requires confirmation by default before Orbit.nvim executes it.
 _Avoid_: write query, destructive query
 
+**Statement execution**:
+One run of a statement through a connection profile's Connector, from Mutating statement confirmation to its outcome (rows, an error, or cancellation) shown in a result window. Statements run from a query buffer and schema browser actions are both statement executions. An outcome whose Workspace has closed is discarded.
+_Avoid_: query run, job
+
 **Editable target**:
 The table name, schema, and primary key columns identifying which real database row a result grid edit writes back to, as decided by a connector from a result row's origin and its primary keys.
 _Avoid_: target (bare)

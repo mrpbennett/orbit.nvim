@@ -12,42 +12,23 @@
 --     bound to the current buffer (M.profile_for_buffer / M.bind_profile),
 --   * extracting the SQL text to run from the buffer, either the whole buffer
 --     or a visual selection (delegated to require("orbit.statements").target),
---   * optionally asking for confirmation before running statements that look
---     like they mutate data (the Connector's own requires_confirmation, else
---     require("orbit.statements").requires_confirmation),
---   * kicking off the actual database call via require("orbit.runner").run,
---     which runs asynchronously and calls back with rows or an error,
---   * tracking "is a query currently running in this buffer" state (the
---     `running` table) so a second execute in the same buffer doesn't stomp on
---     an in-flight one, and so M.cancel/M.status have something to inspect,
---   * once results come back, handing them off to either the results grid
---     (require("orbit.results")) or the workspace UI
---     (require("orbit.workspace")) for display.
+--   * choosing where the result goes: the Workspace result window when the
+--     buffer lives in a Workspace, otherwise a standalone result window,
+--   * handing all of that to Statement execution (require("orbit.execution")),
+--     which confirms, locks, runs, cancels, and delivers the result.
 --
 -- This module exports a single table `M` with the functions below. It does not
 -- export any data structures of its own; per-buffer profile bindings live as
--- buffer-local vim variables (vim.b[buffer].orbit_profile), and per-buffer
--- "is something running" state lives in the private `running` table here.
+-- buffer-local vim variables (vim.b[buffer].orbit_profile), and "is something
+-- running in this buffer" lives in Statement execution, keyed by buffer.
 local profiles = require("orbit.profiles")
 local adapters = require("orbit.adapters")
-local diagnostics = require("orbit.diagnostics")
-local feedback = require("orbit.feedback")
+local execution = require("orbit.execution")
 local results = require("orbit.results")
 local runner = require("orbit.runner")
-local schema_cache = require("orbit.schema_cache")
 local statements = require("orbit.statements")
 
 local M = {}
--- Keyed by buffer number. When a query is executing in a buffer, running[buffer]
--- holds a small state table (see M.execute) describing that in-flight run; the
--- entry is removed once the run finishes, fails, or is cancelled.
-local running = {}
--- Keyed by buffer number. A monotonically increasing counter per buffer, bumped
--- every time M.execute is called for that buffer. This lets a slow, in-flight
--- schema lookup (schema_cache.load_columns, below) detect that a *newer* query
--- has since started in the same buffer and bail out instead of rendering stale
--- results on top of the new ones.
-local result_generation = {}
 
 local function set_buffer_kind(buffer, profile)
 	local filetype = profile.kind == "redis" and "redis" or "sql"
@@ -80,29 +61,6 @@ local function set_buffer_dialect(buffer, profile)
 	vim.b[buffer].orbit_sql_dialect = dialect
 	-- Profile edits can change lexical rules without changing the SQL text.
 	require("orbit.structure").changed(buffer)
-end
-
--- Stops and releases the redraw timer associated with an in-flight query's
--- state table (see M.execute), if one exists.
---
--- Parameters:
---   state (table): the per-run state table created in M.execute. Expected to
---   have an optional `timer` field, which is a libuv timer handle
---   (vim.uv.new_timer()) used to periodically redraw the statusline while the
---   query is running.
---
--- Returns: nothing.
---
--- Side effects: stops the timer (state.timer:stop()) and closes/frees its
--- underlying handle (state.timer:close()), then clears state.timer to nil so
--- this function is safe to call more than once on the same state (e.g. once
--- the query finishes, and again if cancel is called afterward).
-local function stop_timer(state)
-	if state.timer then
-		state.timer:stop()
-		state.timer:close()
-		state.timer = nil
-	end
 end
 
 -- Looks up which connection profile (see lua/orbit/profiles.lua) is currently
@@ -197,9 +155,11 @@ function M.bind_profile(buffer, profile)
 end
 
 -- The main entry point for running a SQL statement: this is what
--- OrbitExecute (wired up in lua/orbit/init.lua) ultimately calls. It figures
--- out what to run, whether to ask for confirmation, kicks off the async
--- database call, and wires up how the eventual results get displayed.
+-- OrbitExecute (wired up in lua/orbit/init.lua) ultimately calls. This
+-- function only answers the query-buffer questions -- which profile, which
+-- statement, where the result goes -- and then hands the run to Statement
+-- execution (lua/orbit/execution.lua), which owns confirmation, the lock,
+-- cancellation, feedback, and the Editable target decision.
 --
 -- Parameters:
 --   buffer (number): the buffer containing the SQL to run.
@@ -213,17 +173,11 @@ end
 --   context (table|nil): optional source/trigger windows and tabpage when an
 --     Orbit panel initiated execution for a separate query buffer.
 --
--- Returns: nothing. This function is fire-and-forget from the caller's
--- perspective -- the actual work (talking to the database) happens
--- asynchronously via runner.run's callback.
+-- Returns: nothing. The database work happens asynchronously.
 --
--- Side effects (many): reads buffer lines and the current window/tabpage via
--- vim.api.*; may prompt the user with vim.fn.confirm(...) before running a
--- mutating statement; starts a libuv timer to redraw the statusline while the
--- query runs; calls out to the runner module to actually execute SQL against
--- the database (network/subprocess I/O); on completion, opens a results grid
--- or updates the workspace UI; shows vim.notify messages and diagnostics on
--- error.
+-- Side effects: reads buffer lines and the current window/tabpage; may open
+-- the profile picker (and retry once a profile is chosen); starts a
+-- Statement execution, which may prompt, notify, and open a result window.
 function M.execute(buffer, config, selection, context)
 	context = context or {}
 	if
@@ -236,12 +190,6 @@ function M.execute(buffer, config, selection, context)
 		vim.notify("Query buffer changed or closed; select the Structure element again", vim.log.levels.WARN)
 		return
 	end
-	-- Bump this buffer's "generation" counter before doing anything else. Any
-	-- async callback from a previous, still-in-flight execute in this same
-	-- buffer will capture the *old* generation number and can compare against
-	-- this new one later to notice it's now stale (see the schema_cache.load_columns
-	-- callback further down) and avoid overwriting newer results.
-	result_generation[buffer] = (result_generation[buffer] or 0) + 1
 	local profile, profile_err = M.profile_for_buffer(buffer, config)
 	if not profile then
 		-- No profile bound yet (or it's missing/invalid): tell the user, then
@@ -264,10 +212,9 @@ function M.execute(buffer, config, selection, context)
 	end
 	local connector = assert(adapters.connector(profile))
 
-	-- Ask the statements module (not shown in this file) to figure out the
-	-- actual SQL text to run: either the given visual selection, or whatever
-	-- statement the cursor is currently inside/near, based on the buffer's
-	-- current lines.
+	-- Ask the statements module to figure out the actual SQL text to run:
+	-- either the given visual selection, or whatever statement the cursor is
+	-- currently inside/near, based on the buffer's current lines.
 	local statement, statement_err = statements.target({
 		lines = vim.api.nvim_buf_get_lines(buffer, 0, -1, false),
 		selection = selection,
@@ -281,260 +228,60 @@ function M.execute(buffer, config, selection, context)
 		return
 	end
 
-	-- Confirmation is gated on three independent things all being true: the
-	-- global config allows it, this specific profile hasn't opted out via
-	-- options.confirm_mutations = false, and the Connector's (or the default)
-	-- lexical check thinks this statement looks mutating. vim.fn.confirm shows a native "modal"
-	-- prompt with the given buttons; choice 1 is "&Execute", anything else
-	-- (including cancelling with <Esc>, which returns 0) aborts the run.
-	local function mutating()
-		if connector.requires_confirmation then
-			return connector.requires_confirmation(statement, profile)
-		end
-		return statements.requires_confirmation(statement, connector.sql_dialect)
-	end
-	if config.confirm_mutations and profile.options.confirm_mutations ~= false and mutating() then
-		local choice = vim.fn.confirm("Execute mutating statement?", "&Execute\n&Cancel", 2)
-		if choice ~= 1 then
-			return
-		end
+	-- Remember which tabpage/window the query was started from: results arrive
+	-- asynchronously, by which time the user may have moved elsewhere.
+	local tabpage = context.tabpage and vim.api.nvim_tabpage_is_valid(context.tabpage) and context.tabpage
+		or vim.api.nvim_get_current_tabpage()
+	local window = context.source_window and vim.api.nvim_win_is_valid(context.source_window) and context.source_window
+		or vim.api.nvim_get_current_win()
+	local file_name = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(buffer), ":t")
+
+	-- vim.b[buffer].orbit_table is set by the Workspace's "browse table" flow
+	-- when this buffer's statement was generated to browse one schema object.
+	-- While the statement still matches the generated one (whitespace
+	-- trimmed), the result is a table browse and may be editable.
+	local browsed = vim.b[buffer].orbit_table
+	if not (browsed and vim.trim(statement) == vim.trim(vim.b[buffer].orbit_table_statement or "")) then
+		browsed = nil
 	end
 
-	-- Only one statement may run per buffer at a time; if one is already
-	-- tracked in `running`, refuse to start a second and just warn the user.
-	if running[buffer] then
-		vim.notify("An Orbit statement is already running in this buffer", vim.log.levels.WARN)
-		return
-	end
-
-	-- Show a transient "Running on <profile>..." / "Querying on <profile>..."
-	-- message via the feedback module (distinguishing an already-open
-	-- connection from one that still needs to connect). `notice` is a handle
-	-- that feedback.finish (below) later uses to replace this message with a
-	-- final result.
-	local notice =
-		feedback.start((runner.connected(profile.name) and "Running on " or "Querying on ") .. profile.name .. "...")
-	-- This `state` table is the single source of truth for "a query is
-	-- running in this buffer" while it's in flight. It's stored in `running`
-	-- keyed by buffer, and captured by closures below (the runner.run
-	-- callback and the timer callback) so they can check whether they're
-	-- still the "current" run for this buffer.
-	local state = {
-		cancelled = false,
-		profile_name = profile.name,
-		-- vim.uv.hrtime() is a high-resolution monotonic clock (nanoseconds),
-		-- used purely for measuring elapsed time, not wall-clock time.
-		started_at = vim.uv.hrtime(),
-		-- Remember which tabpage/window the query was started from, since by
-		-- the time results arrive (async) the user may have switched windows;
-		-- results should still show up relative to where the query began.
-		tabpage = context.tabpage and vim.api.nvim_tabpage_is_valid(context.tabpage) and context.tabpage
-			or vim.api.nvim_get_current_tabpage(),
-		window = context.source_window and vim.api.nvim_win_is_valid(context.source_window) and context.source_window
-			or vim.api.nvim_get_current_win(),
-		notice = notice,
-		result_generation = result_generation[buffer],
-	}
-	state.workspace = require("orbit.workspace").capture(state.tabpage)
-	running[buffer] = state
-	-- Start a repeating libuv timer (fires once immediately at 0ms, then every
-	-- 1000ms) purely to force the statusline to redraw periodically, so that a
-	-- winbar/statusline showing "Orbit: profile [Ns]" (see M.status) keeps
-	-- ticking while the query runs. vim.schedule_wrap defers the callback onto
-	-- Neovim's main event loop, since libuv timer callbacks otherwise run
-	-- outside the context where it's safe to call vim.cmd/vim.api functions.
-	state.timer = vim.uv.new_timer()
-	state.timer:start(
-		0,
-		1000,
-		vim.schedule_wrap(function()
-			vim.cmd.redrawstatus()
-		end)
-	)
-	vim.cmd.redrawstatus()
-	-- Kick off the actual query asynchronously. runner.run is expected to talk
-	-- to the database connector for this profile (postgres/sqlite/trino) and
-	-- eventually invoke the callback below with (rows, nil, metadata) on
-	-- success or (nil, error_message) on failure. Metadata is optional, so
-	-- existing Connectors retain their two-value behavior. `state.process` stores whatever
-	-- handle runner.run returns so M.cancel can later ask the runner to abort
-	-- it.
-	state.process = runner.run(profile, statement, function(rows, run_err, metadata)
-		-- A previous completion must not clear or render over a newer run in this buffer.
-		if running[buffer] ~= state then
-			return
-		end
-		running[buffer] = nil
-		stop_timer(state)
-		vim.cmd.redrawstatus()
-		if state.cancelled then
-			-- M.cancel sets state.cancelled = true and asks the runner to abort,
-			-- but the runner's callback still fires afterward; treat that as a
-			-- "cancelled" outcome rather than a normal success/failure.
-			feedback.finish(state.notice, "Query cancelled: " .. profile.name, vim.log.levels.WARN)
-			return
-		end
-		if run_err then
-			local workspace = require("orbit.workspace")
-			if state.workspace and not workspace.is_live(state.workspace) then
-				feedback.finish(state.notice, run_err, vim.log.levels.ERROR)
-				return
-			end
-			feedback.finish(state.notice, "Query failed: " .. profile.name, vim.log.levels.ERROR)
-			vim.notify(run_err, vim.log.levels.ERROR)
-			-- diagnostics.open likely renders the raw database error in a
-			-- dedicated diagnostics window/panel so long error text isn't lost.
-			diagnostics.open(run_err)
-			return
-		end
-		local workspace = require("orbit.workspace")
-		if state.workspace and not workspace.is_live(state.workspace) then
-			feedback.finish(state.notice, "Statement result discarded: Workspace closed", vim.log.levels.DEBUG)
-			return
-		end
-		-- Options passed through to whichever UI ends up rendering the result
-		-- rows (either the standalone results grid or the workspace's results
-		-- panel).
-		local result_options = {
+	-- Results started inside a Workspace return to its result window, even if
+	-- focus has moved; otherwise they open a standalone result window.
+	local sink = require("orbit.workspace").result_sink(tabpage) or results.sink()
+	execution.run({
+		key = buffer,
+		profile = profile,
+		statement = statement,
+		confirm_mutations = config.confirm_mutations,
+		table = browsed,
+		result_options = {
 			confirm_mutations = config.confirm_mutations,
 			height = config.result_height,
 			limit = config.result_limit,
 			max_cell_width = config.max_cell_width,
 			focus = config.focus_results,
 			profile_name = profile.name,
-			source_name = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(buffer), ":t") ~= ""
-					and vim.fn.fnamemodify(vim.api.nvim_buf_get_name(buffer), ":t")
-				or "[No Name]",
-			source_window = state.window,
-			tabpage = state.tabpage,
-			-- Nanoseconds -> seconds: hrtime() returns nanoseconds, and there are
-			-- 1_000_000_000 of them per second.
-			elapsed = math.floor((vim.uv.hrtime() - state.started_at) / 1000000000),
-		}
-		metadata = metadata or {}
-		result_options.columns = metadata.columns
-		result_options.document = metadata.document
-		-- vim.b[buffer].orbit_table is set elsewhere (e.g. by the workspace's
-		-- "browse table" flow) when this buffer's statement was generated to
-		-- browse a specific table/view rather than typed freely by the user.
-		-- If the statement we just ran still matches the one that was
-		-- generated for that table browse (compared with whitespace trimmed),
-		-- this is a "table browse" query, and we can enrich the results with
-		-- extra table-aware metadata (editability, primary keys, column
-		-- names) instead of just showing raw rows.
-		local table = vim.b[buffer].orbit_table
-		if table and vim.trim(statement) == vim.trim(vim.b[buffer].orbit_table_statement or "") then
-			result_options.source_name = table.name
-			-- Give the results grid a way to re-run this same query later (e.g.
-			-- a manual "refresh" action) without needing to know how it was
-			-- originally built.
-			result_options.reload = function(callback)
-				runner.run(profile, statement, callback)
-			end
-			-- Look up this table's primary key columns (from the schema cache,
-			-- which may itself hit the database) to figure out whether rows in
-			-- the grid can be edited in place.
-			schema_cache.load_metadata(profile, table, "primary_keys", {}, function(primary_keys, metadata_err)
-				if state.workspace and not workspace.is_live(state.workspace) then
-					feedback.finish(state.notice, "Statement result discarded: Workspace closed", vim.log.levels.DEBUG)
-					return
-				end
-				if metadata_err then
-					vim.notify(metadata_err, vim.log.levels.WARN)
-				else
-					local names = vim.tbl_map(function(primary_key)
-						return primary_key.name
-					end, primary_keys)
-					local connector, connector_err = require("orbit.adapters").connector(profile)
-					local editable, editable_err
-					if connector and connector.editable_table then
-						-- Ask the profile's connector (postgres/sqlite/trino adapter)
-						-- whether it actually supports editing this table given its
-						-- primary key columns; not every connector/table combination
-						-- does.
-						editable, editable_err = connector.editable_table(profile.options, table, names)
-					else
-						editable_err = connector_err
-							or "Result is read-only: editing is not supported by this connection profile."
-					end
-					if editable then
-						result_options.editable = editable
-						result_options.profile = profile
-					elseif editable_err then
-						result_options.read_only_reason = editable_err
-					end
-				end
-				-- Also fetch column metadata (names) for this table, again from
-				-- the schema cache.
-				schema_cache.load_columns(profile, table, {}, function(columns)
-					-- By the time this async callback fires, a newer M.execute call
-					-- for this same buffer may have already started (bumping
-					-- result_generation[buffer]). If so, this callback is for a
-					-- stale run and must not render its (now outdated) results.
-					if result_generation[buffer] ~= state.result_generation then
-						feedback.finish(state.notice, "Statement result superseded", vim.log.levels.DEBUG)
-						return
-					end
-					if columns and not result_options.columns then
-						result_options.columns = vim.tbl_map(function(column)
-							return column.name
-						end, columns)
-					end
-					if state.workspace then
-						if not workspace.open_results(rows, result_options, state.workspace) then
-							feedback.finish(state.notice, "Statement result discarded: Workspace closed", vim.log.levels.DEBUG)
-							return
-						end
-					else
-						results.open(rows, result_options)
-					end
-					feedback.finish(
-						state.notice,
-						string.format("Query finished: %d rows in %ds", #rows, math.floor((vim.uv.hrtime() - state.started_at) / 1000000000))
-					)
-				end)
-			end)
-			return
-		end
-		if state.workspace then
-			-- Workspace-owned grids preserve its fixed result region and close behavior.
-			if not workspace.open_results(rows, result_options, state.workspace) then
-				feedback.finish(state.notice, "Statement result discarded: Workspace closed", vim.log.levels.DEBUG)
-				return
-			end
-		else
-			results.open(rows, result_options)
-		end
-		feedback.finish(
-			state.notice,
-			string.format("Query finished: %d rows in %ds", #rows, math.floor((vim.uv.hrtime() - state.started_at) / 1000000000))
-		)
-	end)
+			source_name = browsed and browsed.name or (file_name ~= "" and file_name or "[No Name]"),
+			source_window = window,
+			tabpage = tabpage,
+		},
+	}, sink)
 end
 
 -- Cancels whatever query is currently running in a buffer, if any. This is
--- what OrbitCancel calls.
+-- what OrbitCancel calls from a query buffer.
 --
 -- Parameters:
 --   buffer (number): the buffer whose in-flight query should be cancelled.
 --
 -- Returns: nothing.
 --
--- Side effects: marks the buffer's `running` state as cancelled (so the
--- runner.run callback in M.execute treats the eventual completion as a
--- cancellation rather than success/failure), updates the feedback notice to
--- say "Cancelling query...", and asks the runner module to actually abort the
--- underlying process/connection (runner.cancel). Note the `running[buffer]`
--- entry itself is only cleared later, inside the runner's completion
--- callback, once the cancellation has actually taken effect.
+-- Side effects: asks Statement execution to cancel the buffer's run, or tells
+-- the user nothing is running.
 function M.cancel(buffer)
-	if not running[buffer] then
+	if not execution.cancel(buffer) then
 		vim.notify("No Orbit statement is running in this buffer", vim.log.levels.INFO)
-		return
 	end
-	running[buffer].cancelled = true
-	feedback.finish(running[buffer].notice, "Cancelling query...")
-	runner.cancel(running[buffer].process)
 end
 
 -- Closes the underlying database connection for the profile bound to a
@@ -582,14 +329,13 @@ end
 --     connection for this profile, "bound" means the buffer references the
 --     profile but there's currently no live connection.
 function M.status(buffer, config)
-	local state = running[buffer]
+	local state = execution.status(buffer)
 	local profile_name = state and state.profile_name or vim.b[buffer].orbit_profile
 	if not profile_name then
 		return "Orbit: no profile"
 	end
 	if state then
-		local elapsed = math.floor((vim.uv.hrtime() - state.started_at) / 1000000000)
-		return string.format("Orbit: %s [%ds]", profile_name, elapsed)
+		return string.format("Orbit: %s [%ds]", profile_name, state.elapsed)
 	end
 	return string.format("Orbit: %s [%s]", profile_name, runner.connected(profile_name) and "connected" or "bound")
 end

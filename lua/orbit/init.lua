@@ -278,7 +278,12 @@ local function create_commands()
 		query.execute(vim.api.nvim_get_current_buf(), M.config, visual_selection(command))
 	end, { range = true, desc = "Execute the selected Orbit statement" })
 	vim.api.nvim_create_user_command("OrbitCancel", function()
-		query.cancel(vim.api.nvim_get_current_buf())
+		-- A statement running in the current query buffer wins; otherwise a
+		-- schema browser action running in the current Workspace is cancelled.
+		local buffer = vim.api.nvim_get_current_buf()
+		if require("orbit.execution").status(buffer) or not workspace.cancel() then
+			query.cancel(buffer)
+		end
 	end, { desc = "Cancel the current Orbit statement" })
 	vim.api.nvim_create_user_command("OrbitDisconnect", function()
 		query.disconnect(vim.api.nvim_get_current_buf())
