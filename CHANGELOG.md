@@ -14,6 +14,8 @@ All notable changes to Orbit.nvim are documented in this file.
 - Added cached Redis command and key completion through Blink. Orbit builds a bounded, profile- and logical-database-scoped key index using cursor-based `SCAN`, never automatic `KEYS`, and offers keys only in command metadata-defined key positions.
 - Added Workspace sidebar mappings `<C-x>` and `<C-v>` to open the selected saved query in a horizontal or vertical split while keeping the existing query pane.
 
+- Added the `schema_view.sort_columns` setup option, off by default, to list a table's columns alphabetically in the Workspace schema browser instead of in declared order.
+
 ### Fixed
 
 - Running a whole query buffer no longer reports "statement is ambiguous" when a `;` appears inside a string literal, quoted identifier, comment, or dollar-quoted body on PostgreSQL, MySQL, SQLite, Trino, and Vertica profiles. Execution, the Structure panel, and the Mutating statement check now share one tokenizer-based statement boundary rule, so a single compound `CREATE FUNCTION`/`PROCEDURE`/`TRIGGER` body also runs without a selection.

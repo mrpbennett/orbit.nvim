@@ -937,6 +937,9 @@ require("orbit").setup({
   profile_path = vim.fn.expand("~/.local/share/orbit.nvim/profiles.json"),
   result_limit = 200,
   result_height = 15,
+  schema_view = {
+    sort_columns = false,
+  },
   structure_view = {
     group_by_type = true,
     show_ddl = true,
@@ -992,6 +995,7 @@ require("orbit").setup({
 | `result_height`           | `15`                                      | Height of a standalone result grid.                                                                                                                                  |
 | `saved_query_dirs`        | `{}`                                      | Ordered named directories of recursively discovered `.sql` and `.redis` files shown in the Workspace sidebar.                                                        |
 | `max_cell_width`          | `48`                                      | Maximum displayed width of a result cell.                                                                                                                            |
+| `schema_view`             | `{ sort_columns = false }`                | Schema browser display controls: `sort_columns` lists each table's columns alphabetically instead of in declared order.                                             |
 | `structure_view`          | All fields `true`                         | Structure display controls: `group_by_type`, `show_ddl`, `show_dml`, `show_other`, `show_select`, and `sort_alphabetically`.                                         |
 | `structure_width`         | `40`                                      | Width of the right-side Structure panel.                                                                                                                             |
 | `workspace_sidebar_width` | `32`                                      | Width of the workspace sidebar.                                                                                                                                      |
@@ -1009,6 +1013,8 @@ vim.api.nvim_set_hl(0, "OrbitIconColumn", { fg = "#a6e3a1" })
 ```
 
 Available groups are `OrbitIconWorkspace`, `OrbitIconProfile`, `OrbitIconSchema`, `OrbitIconTable`, `OrbitIconView`, `OrbitIconColumn`, `OrbitIconFolder`, `OrbitIconKey`, `OrbitIconIndex`, `OrbitIconQuery`, `OrbitIconResult`, `OrbitIconClause`, `OrbitIconCTE`, `OrbitIconDDL`, `OrbitIconDML`, `OrbitIconSelect`, and `OrbitIconOther`.
+
+Within `schema_view`, `sort_columns = true` lists the columns under each table or view alphabetically, ignoring case; columns whose names differ only by case keep their declared relative order. The default `false` shows columns in the order they were declared. Primary keys, foreign keys, indexes, completion, and editable results are unaffected.
 
 Within `structure_view`, `show_ddl`, `show_dml`, `show_select`, and `show_other` each control a complete statement subtree. `group_by_type` places enabled, non-empty categories in DDL, DML, SELECT, Other order. `sort_alphabetically` sorts statements within those groups, or across all statements when grouping is disabled; disabling it preserves source order within each group or across the ungrouped list.
 

@@ -70,6 +70,10 @@
 --                              `.sql` files shown in the workspace sidebar.
 --                              Normalized/validated by `setup()` - see
 --                              `normalize_saved_query_dirs` below.
+--   schema_view             - table of schema browser display controls.
+--                              `sort_columns` (boolean, default false) lists
+--                              a table's columns alphabetically instead of
+--                              in the order they were declared.
 --   winbar                  - boolean; whether SQL buffers should show
 --                              orbit's status winbar (connection/profile
 --                              info) at the top of the window.
@@ -139,6 +143,10 @@ M.config = {
 	result_height = 15,
 	result_limit = 200,
 	saved_query_dirs = {},
+	schema_view = {
+		-- false keeps columns in their declared order; true sorts them by name.
+		sort_columns = false,
+	},
 	structure_view = {
 		group_by_type = true,
 		show_ddl = true,

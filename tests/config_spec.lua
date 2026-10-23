@@ -1,6 +1,10 @@
 local orbit = require("orbit")
 
 return {
+  ["Schema view column sorting defaults to declared order"] = function()
+    assert(orbit.config.schema_view.sort_columns == false)
+  end,
+
   ["Structure view options default to enabled"] = function()
     assert(orbit.config.structure_view.group_by_type == true)
     assert(orbit.config.structure_view.show_ddl == true)

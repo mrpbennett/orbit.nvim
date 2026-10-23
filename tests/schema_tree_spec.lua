@@ -309,4 +309,67 @@ return {
     local _, _, _, has_matches = schema_tree.lines(tree, profile, "nonexistent", { icons = icons })
     assert(not has_matches)
   end,
+
+  ["schema_tree.lines lists columns in declared order unless sort_columns is set"] = function()
+    local function render(options)
+      local tree = schema_tree.new()
+      local row = { schema = "main", name = "sessions", type = "table" }
+      schema_tree.set_tables(tree, { row })
+      expand_tables(tree)
+      schema_tree.toggle(tree, { kind = "table", profile = profile, row = row })
+      local connector = assert(connectors.resolve(profile))
+      for _, category in ipairs(connector.metadata_categories(profile.options, row)) do
+        schema_tree.toggle(tree, { kind = "metadata", profile = profile, row = row, category = category })
+      end
+      schema_tree.set_metadata(tree, row, "columns", {
+        { name = "id", type = "INTEGER" },
+        { name = "Name", type = "TEXT" },
+        { name = "created_at", type = "TEXT" },
+        { name = "NAME", type = "TEXT" },
+      })
+      schema_tree.set_metadata(tree, row, "primary_keys", {
+        { name = "id", pk = 1 },
+        { name = "created_at", pk = 2 },
+      })
+      options.icons = icons
+      return table.concat((schema_tree.lines(tree, profile, "", options)), "\n")
+    end
+
+    local function order_of(text, names)
+      local positions = {}
+      for _, name in ipairs(names) do
+        positions[#positions + 1] = assert(text:find(": " .. name .. "  ", 1, true), name)
+      end
+      return positions
+    end
+
+    local declared = render({})
+    local positions = order_of(declared, { "id", "Name", "created_at", "NAME" })
+    assert(positions[1] < positions[2] and positions[2] < positions[3] and positions[3] < positions[4])
+
+    local sorted = render({ sort_columns = true })
+    -- Case-insensitive: created_at, id, then Name before NAME (declared order breaks the tie).
+    positions = order_of(sorted, { "created_at", "id", "Name", "NAME" })
+    assert(positions[1] < positions[2] and positions[2] < positions[3] and positions[3] < positions[4])
+
+    -- Primary keys keep their key-position order even when columns are sorted.
+    local first = assert(sorted:find("primary key #1 (id)", 1, true))
+    local second = assert(sorted:find("primary key #2 (created_at)", 1, true))
+    assert(first < second)
+  end,
+
+  ["schema_tree.lines sorting leaves the stored metadata in declared order"] = function()
+    local tree = schema_tree.new()
+    local row = { schema = "main", name = "sessions", type = "table" }
+    schema_tree.set_tables(tree, { row })
+    expand_tables(tree)
+    local connector = assert(connectors.resolve(profile))
+    local columns = connector.metadata_categories(profile.options, row)[1]
+    schema_tree.toggle(tree, { kind = "metadata", profile = profile, row = row, category = columns })
+    schema_tree.toggle(tree, { kind = "table", profile = profile, row = row })
+    local entries = { { name = "b", type = "T" }, { name = "a", type = "T" } }
+    schema_tree.set_metadata(tree, row, "columns", entries)
+    schema_tree.lines(tree, profile, "", { icons = icons, sort_columns = true })
+    assert(entries[1].name == "b" and entries[2].name == "a")
+  end,
 }

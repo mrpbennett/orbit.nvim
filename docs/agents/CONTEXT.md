@@ -25,8 +25,11 @@ The owner-protected JSON file in `~/.local/share/orbit.nvim/` that is the source
 _Avoid_: configuration file, credentials file
 
 **Schema browser**:
-A navigable view of the hierarchy and metadata exposed by a connection profile, including tables, views, and columns with their types.
+A navigable view of the hierarchy and metadata exposed by a connection profile, including tables, views, and columns with their types, shown in Declared column order unless sorted alphabetically.
 _Avoid_: database tree, sidebar
+
+**Declared column order**:
+The order in which a schema object's columns were defined. The Schema browser shows columns in this order by default and can list them alphabetically instead.
 
 **Schema acquisition**:
 The retrieval and refresh of the tables, views, and table metadata exposed by a connection profile for use by Orbit.nvim views, completion, and editable results.

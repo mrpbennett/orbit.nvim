@@ -1740,3 +1740,22 @@ Plan: `~/.claude/plans/sprightly-seeking-blanket.md`. Replaces the two single-li
 - `assets/orbit-ad.gif`: 880 px wide, 12 fps, about 7.4 MB, under GitHub's 10 MB image limit. Made for the README.
 - Source files are in `assets/promo-src/`. `index.html` exposes a deterministic `render(t)`, and `capture.mjs` drives Chromium through playwright-core and pipes the frames to ffmpeg.
 - Checked sampled frames from the MP4 and the GIF by eye: text is legible, nothing is clipped, and the caption spacing is fixed.
+
+## Schema Browser Column Sorting 2026-10-23
+
+- [x] Add `schema_view.sort_columns` (default `false`) to the setup defaults and config docs.
+- [x] Pass the setting from `workspace.lua` through `sidebar_tree.lua` into `schema_tree.lines`.
+- [x] Sort only the `columns` category at display time, case-insensitive with a stable tie-break, leaving cached and stored metadata in declared order.
+- [x] Cover default order, sorted order, ties, primary keys unchanged, and stored metadata untouched in `tests/schema_tree_spec.lua` and `tests/config_spec.lua`.
+- [x] Document the option in the README and CHANGELOG, and add **Declared column order** to `docs/agents/CONTEXT.md`.
+
+### Decisions
+
+- Columns only: primary keys keep key order, and foreign keys and indexes are already ordered by name in SQL.
+- Display-layer sort, so completion and editable results keep the declared order. No connector changes.
+- Config only, opt-in, no runtime toggle keymap. No ADR: the change is easy to reverse.
+
+### Review
+
+- `nvim --headless -u NONE -l tests/run.lua` passes the new tests. Three failures remain (two SQL Server JDBC tests, the Trino schema identity timing test); they fail identically on a clean `main`.
+- `git diff --check` is clean. `stylua` was not run.

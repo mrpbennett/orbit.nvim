@@ -203,6 +203,40 @@ local function metadata_label(category, row)
 	return presentation.format and presentation.format(row) or vim.inspect(row)
 end
 
+-- Return the entries to display for one metadata category, optionally sorted
+-- by column name.
+-- Only the "columns" category is sorted: primary key order matters for
+-- composite keys, and foreign keys and indexes are already ordered by name.
+-- The sort is case-insensitive, and columns whose names match ignoring case
+-- keep their original relative order. table.sort is not stable by itself, so
+-- each entry's original position is used as the tie-breaker.
+-- A sorted copy is returned; `entries` is left untouched because
+-- tree.metadata is the Connector's declared order, which other code still
+-- relies on.
+-- Parameters: category - the Connector's category descriptor; entries - the
+-- fetched metadata entries; sort_columns - whether sorting is enabled.
+-- Returns: `entries` itself, or a new sorted list.
+local function display_entries(category, entries, sort_columns)
+	if not sort_columns or category.id ~= "columns" then
+		return entries
+	end
+	local ordered = {}
+	for position, entry in ipairs(entries) do
+		ordered[position] = { entry = entry, key = tostring(entry.name or ""):lower(), position = position }
+	end
+	table.sort(ordered, function(left, right)
+		if left.key == right.key then
+			return left.position < right.position
+		end
+		return left.key < right.key
+	end)
+	local result = {}
+	for position, item in ipairs(ordered) do
+		result[position] = item.entry
+	end
+	return result
+end
+
 -- Pick which icon (from the plugin's configured `icons` table, see
 -- M.config.icons in orbit/init.lua) to show next to a metadata entry line,
 -- based on its category.
@@ -252,6 +286,9 @@ end
 --               table/view/column glyphs.
 --     loading - true if the table/view list itself is still being fetched
 --               (shows a "loading schema..." line instead of any groups).
+--     sort_columns - true to list each table's "columns" entries
+--               alphabetically; otherwise they keep the order the Connector
+--               returned (the order they were declared in).
 -- Returns four values:
 --   lines      - list of strings, one per buffer line.
 --   nodes      - array parallel to `lines`: nodes[i] is the node table
@@ -444,7 +481,7 @@ function M.lines(tree, profile, filter, options)
 								)
 								if metadata_expanded then
 									if entries then
-										for _, entry in ipairs(entries) do
+										for _, entry in ipairs(display_entries(category, entries, options.sort_columns)) do
 											table.insert(
 												lines,
 												string.format(

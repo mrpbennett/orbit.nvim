@@ -96,6 +96,8 @@ end
 --   model   - see the module comment.
 --   options - {
 --     icons        = fully resolved icon table (user icons merged over defaults),
+--     sort_columns = optional boolean; forwarded to schema_tree so a table's
+--                    columns are listed alphabetically.
 --     redis_status = optional function(profile) -> status table, used for the
 --                    expanded Redis profile's key index line; omitted means
 --                    "not loaded".
@@ -141,7 +143,7 @@ function M.lines(model, options)
 					model.tree,
 					profile,
 					profile_matches and "" or filter,
-					{ icons = icons, loading = model.loading }
+					{ icons = icons, loading = model.loading, sort_columns = options.sort_columns }
 				)
 			end
 		end

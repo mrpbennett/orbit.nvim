@@ -267,6 +267,9 @@ local function render(state)
 	local icons = vim.tbl_extend("force", fallback_icons, state.config.icons or {})
 	local lines, nodes, highlights = sidebar_tree.lines(state, {
 		icons = icons,
+		-- Only an explicit `true` turns column sorting on, so a missing or
+		-- malformed `schema_view` falls back to declared column order.
+		sort_columns = (state.config.schema_view or {}).sort_columns == true,
 		redis_status = function(profile)
 			return require("orbit.redis_cache").status(profile)
 		end,
